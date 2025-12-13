@@ -12,9 +12,8 @@ FRONTEND_DIR="$INSTALL_DIR/frontend"
 REPEATER_DIR="$INSTALL_DIR/pymc_repeater"
 SERVICE_USER="repeater"
 
-# Service names
+# Service name (backend serves both API and static frontend)
 BACKEND_SERVICE="pymc-repeater"
-FRONTEND_SERVICE="pymc-frontend"
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -353,14 +352,13 @@ print_completion() {
     echo -e "${BOLD}Disk Usage:${NC}"
     local install_size=$(du -sh "$INSTALL_DIR" 2>/dev/null | cut -f1 || echo "N/A")
     local config_size=$(du -sh "$CONFIG_DIR" 2>/dev/null | cut -f1 || echo "N/A")
-    local total_size=$(du -sh "$INSTALL_DIR" "$CONFIG_DIR" 2>/dev/null | tail -1 | cut -f1 || echo "N/A")
     echo -e "  ${DIM}Installation:${NC}  $install_size"
     echo -e "  ${DIM}Configuration:${NC} $config_size"
     echo ""
     
     echo -e "${BOLD}Access your dashboard:${NC}"
-    echo -e "  ${ARROW} Web UI:  ${CYAN}http://$ip_address:3000${NC}"
-    echo -e "  ${ARROW} API:     ${CYAN}http://$ip_address:8000${NC}"
+    echo -e "  ${ARROW} Dashboard: ${CYAN}http://$ip_address:8000/${NC}"
+    echo -e "  ${DIM}(API endpoints also available at /api/*)${NC}"
     echo ""
 }
 
@@ -449,10 +447,6 @@ backend_running() {
     systemctl is-active "$BACKEND_SERVICE" >/dev/null 2>&1
 }
 
-frontend_running() {
-    systemctl is-active "$FRONTEND_SERVICE" >/dev/null 2>&1
-}
-
 get_version() {
     if [ -f "$REPEATER_DIR/pyproject.toml" ]; then
         grep "^version" "$REPEATER_DIR/pyproject.toml" | cut -d'"' -f2 2>/dev/null || echo "unknown"
@@ -466,13 +460,11 @@ get_status_display() {
         echo "Not Installed"
     else
         local version=$(get_version)
-        local backend_status="Stopped"
-        local frontend_status="Stopped"
+        local status="Stopped"
         
-        backend_running && backend_status="Running"
-        frontend_running && frontend_status="Running"
+        backend_running && status="Running"
         
-        echo "v$version | Backend: $backend_status | Frontend: $frontend_status"
+        echo "v$version | Service: $status"
     fi
 }
 
@@ -663,11 +655,11 @@ do_install() {
     print_success "Created pymc-repeater.service"
     
     # =========================================================================
-    # Step 9: Install Next.js frontend
+    # Step 9: Install static frontend
     # =========================================================================
-    print_step 9 $total_steps "Installing Next.js frontend"
+    print_step 9 $total_steps "Installing static frontend"
     
-    install_frontend_files_with_progress || {
+    install_static_frontend || {
         print_error "Frontend installation failed"
         return 1
     }
@@ -682,33 +674,21 @@ do_install() {
     chmod 750 "$CONFIG_DIR" "$LOG_DIR"
     print_success "Permissions configured"
     
-    print_info "Enabling services..."
+    print_info "Enabling service..."
     systemctl daemon-reload
-    systemctl enable "$BACKEND_SERVICE" "$FRONTEND_SERVICE" >/dev/null 2>&1
-    print_success "Services enabled"
+    systemctl enable "$BACKEND_SERVICE" >/dev/null 2>&1
+    print_success "Service enabled"
     
     print_info "Starting backend service..."
     if systemctl start "$BACKEND_SERVICE"; then
         sleep 2
         if backend_running; then
-            print_success "Backend service running"
+            print_success "Backend service running (serves API + frontend)"
         else
             print_warning "Backend service started but may not be healthy"
         fi
     else
         print_warning "Backend service failed to start (configure radio settings first)"
-    fi
-    
-    print_info "Starting frontend service..."
-    if systemctl start "$FRONTEND_SERVICE"; then
-        sleep 2
-        if frontend_running; then
-            print_success "Frontend service running"
-        else
-            print_warning "Frontend service started but may not be healthy"
-        fi
-    else
-        print_error "Frontend service failed to start"
     fi
     
     # Clear error trap
@@ -770,41 +750,37 @@ do_upgrade() {
     echo "=== pyMC Console Upgrade ==="
     echo ""
     
-    echo "[1/8] Stopping services..."
-    systemctl stop "$FRONTEND_SERVICE" 2>/dev/null || true
+    echo "[1/6] Stopping service..."
     systemctl stop "$BACKEND_SERVICE" 2>/dev/null || true
     
-    echo "[2/8] Backing up configuration..."
+    echo "[2/6] Backing up configuration..."
     local backup_file="$CONFIG_DIR/config.yaml.backup.$(date +%Y%m%d_%H%M%S)"
     cp "$CONFIG_DIR/config.yaml" "$backup_file"
     echo "    Backup saved to: $backup_file"
     
-    echo "[3/8] Updating pyMC_Repeater..."
+    echo "[3/6] Updating pyMC_Repeater..."
     cd "$REPEATER_DIR"
     git fetch origin
     git pull origin $(git rev-parse --abbrev-ref HEAD)
     
-    echo "[4/8] Updating Python packages..."
+    echo "[4/6] Updating Python packages..."
     source "$INSTALL_DIR/venv/bin/activate"
     pip install --upgrade "pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@$(git rev-parse --abbrev-ref HEAD)"
     pip install -e .
     
-    echo "[5/8] Merging configuration..."
+    echo "[5/6] Merging configuration & updating frontend..."
     merge_config "$CONFIG_DIR/config.yaml" "$REPEATER_DIR/config.yaml.example"
-    
-    echo "[6/8] Updating frontend..."
-    cp -r "$SCRIPT_DIR/frontend/"* "$FRONTEND_DIR/" 2>/dev/null || true
-    rebuild_frontend
-    
-    echo "[7/8] Updating systemd services..."
+    # Update static frontend files
+    if [ -d "$SCRIPT_DIR/frontend/out" ]; then
+        cp -r "$SCRIPT_DIR/frontend/out/"* "$FRONTEND_DIR/" 2>/dev/null || true
+        echo "    ✓ Static frontend updated"
+    fi
     create_backend_service
-    create_frontend_service
     systemctl daemon-reload
     
-    echo "[8/8] Starting services..."
+    echo "[6/6] Starting service..."
     systemctl start "$BACKEND_SERVICE"
     sleep 2
-    systemctl start "$FRONTEND_SERVICE"
     
     local new_version=$(get_version)
     echo ""
@@ -1425,18 +1401,14 @@ do_start() {
         return 1
     fi
     
-    echo "Starting services..."
+    echo "Starting service..."
     systemctl start "$BACKEND_SERVICE" 2>/dev/null || true
     sleep 2
-    systemctl start "$FRONTEND_SERVICE" 2>/dev/null || true
-    sleep 1
     
-    local backend_status="✗"
-    local frontend_status="✗"
-    backend_running && backend_status="✓"
-    frontend_running && frontend_status="✓"
+    local status="✗"
+    backend_running && status="✓"
     
-    show_info "Services Started" "\nBackend: $backend_status\nFrontend: $frontend_status"
+    show_info "Service Started" "\npyMC Repeater: $status\n\nDashboard: http://$(hostname -I | awk '{print $1}'):8000/"
 }
 
 do_stop() {
@@ -1445,11 +1417,10 @@ do_stop() {
         return 1
     fi
     
-    echo "Stopping services..."
-    systemctl stop "$FRONTEND_SERVICE" 2>/dev/null || true
+    echo "Stopping service..."
     systemctl stop "$BACKEND_SERVICE" 2>/dev/null || true
     
-    show_info "Services Stopped" "\n✓ All pyMC Console services have been stopped."
+    show_info "Service Stopped" "\n✓ pyMC Repeater service has been stopped."
 }
 
 do_restart() {
@@ -1458,18 +1429,14 @@ do_restart() {
         return 1
     fi
     
-    echo "Restarting services..."
+    echo "Restarting service..."
     systemctl restart "$BACKEND_SERVICE" 2>/dev/null || true
     sleep 2
-    systemctl restart "$FRONTEND_SERVICE" 2>/dev/null || true
-    sleep 1
     
-    local backend_status="✗"
-    local frontend_status="✗"
-    backend_running && backend_status="✓"
-    frontend_running && frontend_status="✓"
+    local status="✗"
+    backend_running && status="✓"
     
-    show_info "Services Restarted" "\nBackend: $backend_status\nFrontend: $frontend_status"
+    show_info "Service Restarted" "\npyMC Repeater: $status\n\nDashboard: http://$(hostname -I | awk '{print $1}'):8000/"
 }
 
 # ============================================================================
@@ -1495,10 +1462,8 @@ do_uninstall() {
     echo "=== pyMC Console Uninstall ==="
     echo ""
     
-    echo "[1/6] Stopping services..."
-    systemctl stop "$FRONTEND_SERVICE" 2>/dev/null || true
+    echo "[1/6] Stopping service..."
     systemctl stop "$BACKEND_SERVICE" 2>/dev/null || true
-    systemctl disable "$FRONTEND_SERVICE" 2>/dev/null || true
     systemctl disable "$BACKEND_SERVICE" 2>/dev/null || true
     
     echo "[2/6] Backing up configuration..."
@@ -1660,174 +1625,36 @@ WantedBy=multi-user.target
 EOF
 }
 
-create_frontend_service() {
-    local ip_address=$(hostname -I | awk '{print $1}')
-    local node_path=$(command -v node || echo "/usr/bin/node")
+# Install pre-built static frontend files
+# No Node.js required - backend serves these directly
+install_static_frontend() {
+    local static_dir="$SCRIPT_DIR/frontend/out"
     
-    cat > /etc/systemd/system/pymc-frontend.service << EOF
-[Unit]
-Description=pyMC Console Next.js Frontend
-After=network-online.target pymc-repeater.service
-Wants=network-online.target pymc-repeater.service
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_USER
-WorkingDirectory=$FRONTEND_DIR
-ExecStart=$node_path .next/standalone/server.js
-Restart=on-failure
-RestartSec=5
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=NODE_ENV=production
-Environment=PORT=3000
-Environment=HOSTNAME=0.0.0.0
-Environment=NEXT_PUBLIC_API_URL=http://${ip_address}:8000
-
-[Install]
-WantedBy=multi-user.target
-EOF
-}
-
-install_frontend_files() {
-    # Install Node.js if needed
-    if ! command -v node &> /dev/null; then
-        echo "Installing Node.js 20 LTS..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        apt-get install -y nodejs
+    # Check if pre-built static files exist
+    if [ ! -d "$static_dir" ]; then
+        print_error "Static frontend files not found at $static_dir"
+        print_info "Build the frontend first: cd frontend && npm run build"
+        return 1
     fi
     
-    local npm_path=$(command -v npm || echo "/usr/bin/npm")
-    local ip_address=$(hostname -I | awk '{print $1}')
+    # Copy static files to frontend directory
+    cp -r "$static_dir/"* "$FRONTEND_DIR/"
+    print_success "Static frontend files copied ($(du -sh "$FRONTEND_DIR" | cut -f1))"
     
-    # Copy frontend files
-    cp -r "$SCRIPT_DIR/frontend/"* "$FRONTEND_DIR/"
-    
-    # Create env config
-    cat > "$FRONTEND_DIR/.env.local" << EOF
-NEXT_PUBLIC_API_URL=http://${ip_address}:8000
-EOF
-    
-    # Enable CORS in backend config
+    # Enable static file serving and CORS in backend config
     if [ -f "$CONFIG_DIR/config.yaml" ]; then
         yq -i '.web.cors_enabled = true' "$CONFIG_DIR/config.yaml" 2>/dev/null || true
+        yq -i ".web.static_dir = \"$FRONTEND_DIR\"" "$CONFIG_DIR/config.yaml" 2>/dev/null || true
+        print_success "Backend configured to serve static frontend"
     fi
     
-    # Install and build
-    cd "$FRONTEND_DIR"
-    $npm_path install --legacy-peer-deps
-    rm -rf "$FRONTEND_DIR/.next" 2>/dev/null || true
-    NEXT_PUBLIC_API_URL="http://${ip_address}:8000" $npm_path run build
-    
-    # Copy assets for standalone mode
-    mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
-    cp -r "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/" 2>/dev/null || true
-    cp -r "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/" 2>/dev/null || true
-    
-    # Create service
-    create_frontend_service
-    
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$FRONTEND_DIR"
-}
-
-# Frontend installation with progress indicators
-install_frontend_files_with_progress() {
-    local npm_path
-    local ip_address=$(hostname -I | awk '{print $1}')
-    
-    # Install Node.js if needed
-    if ! command -v node &> /dev/null; then
-        print_info "Node.js not found, installing..."
-        run_with_spinner "Adding NodeSource repository" "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -" || {
-            print_error "Failed to add NodeSource repository"
-            return 1
-        }
-        run_with_spinner "Installing Node.js" "apt-get install -y nodejs" || {
-            print_error "Failed to install Node.js"
-            return 1
-        }
-        print_success "Node.js $(node --version) installed"
-    else
-        print_success "Node.js $(node --version) already installed"
-    fi
-    
-    npm_path=$(command -v npm || echo "/usr/bin/npm")
-    
-    # Copy frontend files
-    if [ -d "$SCRIPT_DIR/frontend" ]; then
-        cp -r "$SCRIPT_DIR/frontend/"* "$FRONTEND_DIR/"
-        print_success "Frontend files copied"
-    else
-        print_error "Frontend directory not found at $SCRIPT_DIR/frontend"
-        return 1
-    fi
-    
-    # Create env config
-    cat > "$FRONTEND_DIR/.env.local" << EOF
-NEXT_PUBLIC_API_URL=http://${ip_address}:8000
-EOF
-    print_success "Environment configured (API: http://${ip_address}:8000)"
-    
-    # Enable CORS in backend config
-    if [ -f "$CONFIG_DIR/config.yaml" ]; then
-        yq -i '.web.cors_enabled = true' "$CONFIG_DIR/config.yaml" 2>/dev/null || true
-        print_success "CORS enabled in backend config"
-    fi
-    
-    # Install npm dependencies
-    cd "$FRONTEND_DIR"
-    
-    run_npm_with_progress "Installing npm dependencies" "$npm_path install --legacy-peer-deps" || {
-        print_error "Failed to install npm dependencies"
-        return 1
-    }
-    
-    # Build frontend
-    rm -rf "$FRONTEND_DIR/.next" 2>/dev/null || true
-    
-    run_npm_with_progress "Building production bundle" "NEXT_PUBLIC_API_URL='http://${ip_address}:8000' $npm_path run build" || {
-        print_error "Failed to build frontend"
-        return 1
-    }
-    
-    # Copy assets for standalone mode
-    mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
-    cp -r "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/" 2>/dev/null || true
-    cp -r "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/" 2>/dev/null || true
-    print_success "Standalone assets prepared"
-    
-    # Create service
-    create_frontend_service
-    print_success "Created pymc-frontend.service"
-    
+    # Set permissions
     chown -R "$SERVICE_USER:$SERVICE_USER" "$FRONTEND_DIR"
     print_success "Frontend permissions set"
     
+    print_info "Frontend will be served by backend at http://<ip>:8000/"
+    
     return 0
-}
-
-rebuild_frontend() {
-    local npm_path=$(command -v npm || echo "/usr/bin/npm")
-    local ip_address=$(hostname -I | awk '{print $1}')
-    
-    # Get existing API URL or use default
-    local api_url="http://${ip_address}:8000"
-    if [ -f "$FRONTEND_DIR/.env.local" ]; then
-        local existing_url=$(grep NEXT_PUBLIC_API_URL "$FRONTEND_DIR/.env.local" | cut -d'=' -f2)
-        [ -n "$existing_url" ] && api_url="$existing_url"
-    fi
-    
-    cd "$FRONTEND_DIR"
-    $npm_path install --legacy-peer-deps
-    rm -rf "$FRONTEND_DIR/.next" 2>/dev/null || true
-    NEXT_PUBLIC_API_URL="$api_url" $npm_path run build
-    
-    # Copy assets for standalone mode
-    mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
-    cp -r "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/" 2>/dev/null || true
-    cp -r "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/" 2>/dev/null || true
-    
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$FRONTEND_DIR"
 }
 
 merge_config() {
@@ -1891,7 +1718,7 @@ show_main_menu() {
             clear
             echo "=== Live Logs (Press Ctrl+C to return) ==="
             echo ""
-            journalctl -u "$BACKEND_SERVICE" -u "$FRONTEND_SERVICE" -f
+            journalctl -u "$BACKEND_SERVICE" -f
             ;;
         "uninstall") do_uninstall ;;
         "exit"|"") exit 0 ;;
@@ -1907,14 +1734,14 @@ show_help() {
     echo ""
     echo "Usage: $0 [command]"
     echo ""
-    echo "Commands:"
+echo "Commands:"
     echo "  install     Install pyMC Console (fresh install)"
     echo "  upgrade     Upgrade existing installation"
     echo "  settings    Configure radio settings"
     echo "  gpio        GPIO configuration (advanced)"
-    echo "  start       Start frontend and backend services"
-    echo "  stop        Stop frontend and backend services"
-    echo "  restart     Restart frontend and backend services"
+    echo "  start       Start pyMC Repeater service"
+    echo "  stop        Stop pyMC Repeater service"
+    echo "  restart     Restart pyMC Repeater service"
     echo "  uninstall   Completely remove pyMC Console"
     echo ""
     echo "Run without arguments for interactive menu."

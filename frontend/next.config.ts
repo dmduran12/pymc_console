@@ -1,12 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Produce a self-contained server output under .next/standalone
-  output: 'standalone',
-  // Silence Next 16 warning when using a webpack() config by providing an empty turbopack config.
-  // We explicitly force the webpack builder via --webpack in package.json.
-  // This keeps our no-chunking webpack settings effective for production builds.
+  // Static export - generates pure HTML/CSS/JS in 'out' directory
+  // No Node.js runtime needed - backend serves these files directly
+  output: 'export',
+  
+  // For static export, we need trailing slashes for proper routing
+  trailingSlash: true,
+  
+  // Base path can be configured if serving from subdirectory
+  // basePath: '/dashboard',
+  
+  // Silence Next 16 warning when using a webpack() config
   turbopack: {},
+  
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Disable code splitting/chunking - bundle everything into fewer files
@@ -19,6 +26,11 @@ const nextConfig: NextConfig = {
       config.optimization.runtimeChunk = false;
     }
     return config;
+  },
+  
+  // Image optimization not available in static export
+  images: {
+    unoptimized: true,
   },
 };
 
