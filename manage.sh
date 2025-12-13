@@ -778,7 +778,19 @@ configure_radio_terminal() {
         local current_cr=$(yq '.radio.coding_rate' "$config_file" 2>/dev/null || echo "8")
         read -p "  Coding Rate (5-8) [$current_cr]: " cr
         cr=${cr:-$current_cr}
-    elif [[ "$preset_choice" =~ ^[0-9]+$ ]] && [ "$preset_choice" -ge 1 ] && [ "$preset_choice" -le "$preset_count" ]; then
+        
+        # Apply custom settings
+        local freq_hz=$(awk "BEGIN {printf \"%.0f\", $freq_mhz * 1000000}")
+        local bw_hz=$(awk "BEGIN {printf \"%.0f\", $bw_khz * 1000}")
+        
+        yq -i ".radio.frequency = $freq_hz" "$config_file"
+        yq -i ".radio.spreading_factor = $sf" "$config_file"
+        yq -i ".radio.bandwidth = $bw_hz" "$config_file"
+        yq -i ".radio.coding_rate = $cr" "$config_file"
+        
+        echo ""
+        print_success "Radio: ${freq_mhz}MHz SF$sf BW${bw_khz}kHz CR$cr"
+    elif
         # Use preset
         local idx=$((preset_choice - 1))
         freq_mhz="${preset_freqs[$idx]}"
@@ -786,22 +798,21 @@ configure_radio_terminal() {
         bw_khz="${preset_bws[$idx]}"
         cr="${preset_crs[$idx]}"
         print_success "Using preset: ${preset_titles[$idx]}"
+        
+        # Apply settings
+        local freq_hz=$(awk "BEGIN {printf \"%.0f\", $freq_mhz * 1000000}")
+        local bw_hz=$(awk "BEGIN {printf \"%.0f\", $bw_khz * 1000}")
+        
+        yq -i ".radio.frequency = $freq_hz" "$config_file"
+        yq -i ".radio.spreading_factor = $sf" "$config_file"
+        yq -i ".radio.bandwidth = $bw_hz" "$config_file"
+        yq -i ".radio.coding_rate = $cr" "$config_file"
+        
+        echo ""
+        print_success "Radio: ${freq_mhz}MHz SF$sf BW${bw_khz}kHz CR$cr"
     else
-        print_warning "Invalid selection, keeping current settings"
-        return 0
+        print_warning "Invalid selection, keeping current radio settings"
     fi
-    
-    # Apply settings
-    local freq_hz=$(awk "BEGIN {printf \"%.0f\", $freq_mhz * 1000000}")
-    local bw_hz=$(awk "BEGIN {printf \"%.0f\", $bw_khz * 1000}")
-    
-    yq -i ".radio.frequency = $freq_hz" "$config_file"
-    yq -i ".radio.spreading_factor = $sf" "$config_file"
-    yq -i ".radio.bandwidth = $bw_hz" "$config_file"
-    yq -i ".radio.coding_rate = $cr" "$config_file"
-    
-    echo ""
-    print_success "Radio: ${freq_mhz}MHz SF$sf BW${bw_khz}kHz CR$cr"
     
     # TX Power
     echo ""
