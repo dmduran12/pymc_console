@@ -134,28 +134,19 @@ run_with_output() {
 # Print installation banner
 print_banner() {
     clear
-    echo -e "${CYAN}"
-    echo "  ╔═══════════════════════════════════════════════════════════╗"
-    echo "  ║                                                           ║"
-    echo "  ║              ${BOLD}pyMC Console Installer${NC}${CYAN}                      ║"
-    echo "  ║                                                           ║"
-    echo "  ║      Next.js Dashboard + LoRa Mesh Network Repeater       ║"
-    echo "  ║                                                           ║"
-    echo "  ╚═══════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+    echo ""
+    echo -e "${BOLD}${CYAN}pyMC Console Installer${NC}"
+    echo -e "${DIM}Next.js Dashboard + LoRa Mesh Network Repeater${NC}"
+    echo ""
 }
 
 # Print completion summary
 print_completion() {
     local ip_address="$1"
     echo ""
-    echo -e "${GREEN}  ╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}  ║                                                           ║${NC}"
-    echo -e "${GREEN}  ║              ${BOLD}Installation Complete! ${CHECK}${NC}${GREEN}                     ║${NC}"
-    echo -e "${GREEN}  ║                                                           ║${NC}"
-    echo -e "${GREEN}  ╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${GREEN}${BOLD}Installation Complete!${NC} ${CHECK}"
     echo ""
-    echo -e "  ${BOLD}Access your dashboard:${NC}"
+    echo -e "${BOLD}Access your dashboard:${NC}"
     echo -e "  ${ARROW} Web UI:  ${CYAN}http://$ip_address:3000${NC}"
     echo -e "  ${ARROW} API:     ${CYAN}http://$ip_address:8000${NC}"
     echo ""
