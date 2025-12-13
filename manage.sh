@@ -855,7 +855,7 @@ configure_radio_terminal() {
             local cr=$(echo "$line" | jq -r '.coding_rate')
             
             if [ -n "$title" ] && [ "$title" != "null" ]; then
-                ((preset_count++))
+                ((preset_count++)) || true
                 preset_titles+=("$title")
                 preset_freqs+=("$freq")
                 preset_sfs+=("$sf")
@@ -995,7 +995,7 @@ configure_hardware_terminal() {
     while IFS= read -r key; do
         local name=$(jq -r ".hardware.\"$key\".name" "$hw_config" 2>/dev/null)
         if [ -n "$name" ] && [ "$name" != "null" ]; then
-            ((hw_count++))
+            ((hw_count++)) || true
             hw_keys+=("$key")
             hw_names+=("$name")
             echo -e "  ${CYAN}$hw_count)${NC} $name"
@@ -1217,7 +1217,7 @@ select_radio_preset() {
         local sf=$(echo "$line" | jq -r '.spreading_factor')
         local bw=$(echo "$line" | jq -r '.bandwidth')
         menu_items+=("$index" "$title (${freq}MHz SF$sf BW$bw)")
-        ((index++))
+        ((index++)) || true
     done < <(echo "$presets_json" | jq -c '.[]' 2>/dev/null)
     
     if [ ${#menu_items[@]} -eq 0 ]; then
