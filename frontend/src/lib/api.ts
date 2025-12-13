@@ -60,17 +60,39 @@ export async function getRecentPackets(limit = 100): Promise<ApiResponse<Packet[
   return fetchApi<ApiResponse<Packet[]>>(`/api/recent_packets?limit=${limit}`);
 }
 
+// Client-side packet filtering using recent_packets
+// (filtered_packets endpoint has upstream compatibility issues)
 export async function getFilteredPackets(filters: PacketFilters): Promise<ApiResponse<Packet[]>> {
-  const params = new URLSearchParams();
-  if (filters.type !== undefined) params.append('type', String(filters.type));
-  if (filters.route !== undefined) params.append('route', String(filters.route));
-  if (filters.start_timestamp) params.append('start_timestamp', String(filters.start_timestamp));
-  if (filters.end_timestamp) params.append('end_timestamp', String(filters.end_timestamp));
-  if (filters.limit) params.append('limit', String(filters.limit));
-
-  const url = `/api/filtered_packets?${params.toString()}`;
-  console.log('[API] getFilteredPackets URL:', url);
-  return fetchApi<ApiResponse<Packet[]>>(url);
+  // Fetch recent packets and filter client-side
+  const fetchLimit = Math.max(filters.limit || 1000, 5000);
+  const response = await getRecentPackets(fetchLimit);
+  
+  if (!response.success || !response.data) {
+    return response;
+  }
+  
+  let packets = response.data;
+  
+  // Apply filters client-side
+  if (filters.type !== undefined) {
+    packets = packets.filter(p => (p.type ?? p.payload_type) === filters.type);
+  }
+  if (filters.route !== undefined) {
+    packets = packets.filter(p => (p.route ?? p.route_type) === filters.route);
+  }
+  if (filters.start_timestamp) {
+    packets = packets.filter(p => p.timestamp >= filters.start_timestamp!);
+  }
+  if (filters.end_timestamp) {
+    packets = packets.filter(p => p.timestamp <= filters.end_timestamp!);
+  }
+  
+  // Apply final limit
+  if (filters.limit && packets.length > filters.limit) {
+    packets = packets.slice(0, filters.limit);
+  }
+  
+  return { success: true, data: packets, count: packets.length };
 }
 
 export async function getPacketByHash(hash: string): Promise<ApiResponse<Packet>> {
