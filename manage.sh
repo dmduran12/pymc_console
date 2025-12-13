@@ -271,6 +271,20 @@ run_pip_with_progress() {
     fi
 }
 
+# Attempt cubic-in-out easing using bash integer math (approximation)
+# Returns position 0-100 given input 0-100
+cubic_ease_inout() {
+    local t=$1  # 0-100
+    if [ $t -lt 50 ]; then
+        # Ease in: 4 * t^3 (scaled)
+        echo $(( (4 * t * t * t) / 10000 ))
+    else
+        # Ease out: 1 - (-2t + 2)^3 / 2
+        local p=$((100 - t))
+        echo $(( 100 - (4 * p * p * p) / 10000 ))
+    fi
+}
+
 # Run npm with animated progress bar
 run_npm_with_progress() {
     local description="$1"
@@ -280,6 +294,7 @@ run_npm_with_progress() {
     local pid
     local start_time=$(date +%s)
     local width=30
+    local cycle_frames=60  # frames per half-cycle (smoother animation)
     
     # Start command in background
     eval "$cmd" > "$log_file" 2>&1 &
@@ -287,15 +302,32 @@ run_npm_with_progress() {
     
     # Show animated progress bar while command runs
     printf "        ${ARROW} %s " "$description"
-    local i=0
+    local frame=0
     while kill -0 $pid 2>/dev/null; do
         local elapsed=$(($(date +%s) - start_time))
         local mins=$((elapsed / 60))
         local secs=$((elapsed % 60))
         
-        # Build animated bar (bouncing effect)
-        local anim_pos=$(( i % (width * 2) ))
-        [ $anim_pos -ge $width ] && anim_pos=$((width * 2 - anim_pos - 1))
+        # Calculate position in cycle (0 to cycle_frames*2)
+        local cycle_pos=$(( frame % (cycle_frames * 2) ))
+        local going_right=1
+        [ $cycle_pos -ge $cycle_frames ] && going_right=0
+        
+        # Get linear position within half-cycle (0-100)
+        local linear_t
+        if [ $going_right -eq 1 ]; then
+            linear_t=$(( (cycle_pos * 100) / cycle_frames ))
+        else
+            linear_t=$(( ((cycle_frames * 2 - cycle_pos) * 100) / cycle_frames ))
+        fi
+        
+        # Apply cubic easing
+        local eased_t=$(cubic_ease_inout $linear_t)
+        
+        # Convert to bar position
+        local anim_pos=$(( (eased_t * (width - 3)) / 100 ))
+        
+        # Build bar
         local bar=""
         for ((j=0; j<width; j++)); do
             if [ $j -ge $anim_pos ] && [ $j -lt $((anim_pos + 3)) ]; then
@@ -306,8 +338,8 @@ run_npm_with_progress() {
         done
         
         printf "\r        ${CYAN}[${bar}]${NC} %s ${DIM}(%dm %02ds)${NC}  " "$description" $mins $secs
-        sleep 0.1
-        ((i++))
+        sleep 0.05
+        ((frame++)) || true
     done
     
     # Get exit status
