@@ -211,6 +211,16 @@ print_completion() {
     echo ""
     echo -e "${GREEN}${BOLD}Installation Complete!${NC} ${CHECK}"
     echo ""
+    
+    # Disk usage report
+    echo -e "${BOLD}Disk Usage:${NC}"
+    local install_size=$(du -sh "$INSTALL_DIR" 2>/dev/null | cut -f1 || echo "N/A")
+    local config_size=$(du -sh "$CONFIG_DIR" 2>/dev/null | cut -f1 || echo "N/A")
+    local total_size=$(du -sh "$INSTALL_DIR" "$CONFIG_DIR" 2>/dev/null | tail -1 | cut -f1 || echo "N/A")
+    echo -e "  ${DIM}Installation:${NC}  $install_size"
+    echo -e "  ${DIM}Configuration:${NC} $config_size"
+    echo ""
+    
     echo -e "${BOLD}Access your dashboard:${NC}"
     echo -e "  ${ARROW} Web UI:  ${CYAN}http://$ip_address:3000${NC}"
     echo -e "  ${ARROW} API:     ${CYAN}http://$ip_address:8000${NC}"
@@ -567,22 +577,35 @@ do_install() {
     # Clear error trap
     trap - ERR
     
+    # =========================================================================
+    # Radio Configuration (terminal-based)
+    # =========================================================================
+    echo ""
+    echo -e "${BOLD}${CYAN}Radio Configuration${NC}"
+    echo -e "${DIM}Configure your radio settings for your region and hardware${NC}"
+    echo ""
+    
+    configure_radio_terminal
+    
+    # Restart backend with new config
+    print_info "Applying configuration..."
+    systemctl restart "$BACKEND_SERVICE" 2>/dev/null || true
+    sleep 2
+    if backend_running; then
+        print_success "Backend service running with new configuration"
+    else
+        print_warning "Backend may need GPIO configuration - use './manage.sh gpio'"
+    fi
+    
     # Show completion
     local ip_address=$(hostname -I | awk '{print $1}')
     print_completion "$ip_address"
     
-    echo -e "  ${BOLD}Next steps:${NC}"
-    echo -e "  ${DIM}1. Configure your radio settings${NC}"
-    echo -e "  ${DIM}2. Set up GPIO pins for your hardware${NC}"
-    echo -e "  ${DIM}3. Restart services to apply changes${NC}"
+    echo -e "${BOLD}Manage your installation:${NC}"
+    echo -e "  ${DIM}./manage.sh settings${NC}  - Configure radio"
+    echo -e "  ${DIM}./manage.sh gpio${NC}      - Configure GPIO pins"
+    echo -e "  ${DIM}./manage.sh${NC}           - Full management menu"
     echo ""
-    
-    read -p "  Press Enter to continue..." || true
-    
-    # Offer to configure radio
-    if ask_yes_no "Configure Radio" "Would you like to configure radio settings now?"; then
-        do_settings
-    fi
 }
 
 # ============================================================================
@@ -655,7 +678,144 @@ do_upgrade() {
 }
 
 # ============================================================================
-# Settings Function (Radio Configuration)
+# Terminal-based Radio Configuration (for install flow)
+# ============================================================================
+
+configure_radio_terminal() {
+    local config_file="$CONFIG_DIR/config.yaml"
+    
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found, skipping radio configuration"
+        return 0
+    fi
+    
+    # Node name
+    local current_name=$(yq '.repeater.node_name' "$config_file" 2>/dev/null || echo "mesh-repeater")
+    local random_suffix=$(printf "%04d" $((RANDOM % 10000)))
+    local default_name="pyRpt${random_suffix}"
+    
+    if [ "$current_name" = "mesh-repeater-01" ] || [ "$current_name" = "mesh-repeater" ]; then
+        current_name="$default_name"
+    fi
+    
+    echo -e "  ${BOLD}Node Name${NC}"
+    read -p "  Enter repeater name [$current_name]: " node_name
+    node_name=${node_name:-$current_name}
+    yq -i ".repeater.node_name = \"$node_name\"" "$config_file"
+    print_success "Node name: $node_name"
+    echo ""
+    
+    # Radio preset selection
+    echo -e "  ${BOLD}Radio Preset${NC}"
+    echo -e "  ${DIM}Select a preset or choose custom to enter manual values${NC}"
+    echo ""
+    
+    # Fetch presets
+    local presets_json=""
+    presets_json=$(curl -s --max-time 5 https://api.meshcore.nz/api/v1/config 2>/dev/null)
+    
+    if [ -z "$presets_json" ]; then
+        if [ -f "$INSTALL_DIR/radio-presets.json" ]; then
+            presets_json=$(cat "$INSTALL_DIR/radio-presets.json")
+        elif [ -f "$REPEATER_DIR/radio-presets.json" ]; then
+            presets_json=$(cat "$REPEATER_DIR/radio-presets.json")
+        fi
+    fi
+    
+    local preset_count=0
+    local preset_titles=()
+    local preset_freqs=()
+    local preset_sfs=()
+    local preset_bws=()
+    local preset_crs=()
+    
+    if [ -n "$presets_json" ]; then
+        while IFS= read -r line; do
+            local title=$(echo "$line" | jq -r '.title')
+            local freq=$(echo "$line" | jq -r '.frequency')
+            local sf=$(echo "$line" | jq -r '.spreading_factor')
+            local bw=$(echo "$line" | jq -r '.bandwidth')
+            local cr=$(echo "$line" | jq -r '.coding_rate')
+            
+            if [ -n "$title" ] && [ "$title" != "null" ]; then
+                ((preset_count++))
+                preset_titles+=("$title")
+                preset_freqs+=("$freq")
+                preset_sfs+=("$sf")
+                preset_bws+=("$bw")
+                preset_crs+=("$cr")
+                echo -e "  ${CYAN}$preset_count)${NC} $title ${DIM}(${freq}MHz SF$sf BW${bw}kHz)${NC}"
+            fi
+        done < <(echo "$presets_json" | jq -c '.[]' 2>/dev/null)
+    fi
+    
+    echo -e "  ${CYAN}C)${NC} Custom ${DIM}(enter values manually)${NC}"
+    echo ""
+    
+    read -p "  Select preset [1-$preset_count] or C for custom: " preset_choice
+    
+    local freq_mhz bw_khz sf cr
+    
+    if [[ "$preset_choice" =~ ^[Cc]$ ]]; then
+        # Custom values
+        echo ""
+        echo -e "  ${BOLD}Custom Radio Settings${NC}"
+        
+        local current_freq=$(yq '.radio.frequency' "$config_file" 2>/dev/null || echo "869618000")
+        local current_freq_mhz=$(awk "BEGIN {printf \"%.3f\", $current_freq / 1000000}")
+        read -p "  Frequency in MHz [$current_freq_mhz]: " freq_mhz
+        freq_mhz=${freq_mhz:-$current_freq_mhz}
+        
+        local current_sf=$(yq '.radio.spreading_factor' "$config_file" 2>/dev/null || echo "8")
+        read -p "  Spreading Factor (7-12) [$current_sf]: " sf
+        sf=${sf:-$current_sf}
+        
+        local current_bw=$(yq '.radio.bandwidth' "$config_file" 2>/dev/null || echo "62500")
+        local current_bw_khz=$(awk "BEGIN {printf \"%.1f\", $current_bw / 1000}")
+        read -p "  Bandwidth in kHz [$current_bw_khz]: " bw_khz
+        bw_khz=${bw_khz:-$current_bw_khz}
+        
+        local current_cr=$(yq '.radio.coding_rate' "$config_file" 2>/dev/null || echo "8")
+        read -p "  Coding Rate (5-8) [$current_cr]: " cr
+        cr=${cr:-$current_cr}
+    elif [[ "$preset_choice" =~ ^[0-9]+$ ]] && [ "$preset_choice" -ge 1 ] && [ "$preset_choice" -le "$preset_count" ]; then
+        # Use preset
+        local idx=$((preset_choice - 1))
+        freq_mhz="${preset_freqs[$idx]}"
+        sf="${preset_sfs[$idx]}"
+        bw_khz="${preset_bws[$idx]}"
+        cr="${preset_crs[$idx]}"
+        print_success "Using preset: ${preset_titles[$idx]}"
+    else
+        print_warning "Invalid selection, keeping current settings"
+        return 0
+    fi
+    
+    # Apply settings
+    local freq_hz=$(awk "BEGIN {printf \"%.0f\", $freq_mhz * 1000000}")
+    local bw_hz=$(awk "BEGIN {printf \"%.0f\", $bw_khz * 1000}")
+    
+    yq -i ".radio.frequency = $freq_hz" "$config_file"
+    yq -i ".radio.spreading_factor = $sf" "$config_file"
+    yq -i ".radio.bandwidth = $bw_hz" "$config_file"
+    yq -i ".radio.coding_rate = $cr" "$config_file"
+    
+    echo ""
+    print_success "Radio: ${freq_mhz}MHz SF$sf BW${bw_khz}kHz CR$cr"
+    
+    # TX Power
+    echo ""
+    local current_power=$(yq '.radio.tx_power' "$config_file" 2>/dev/null || echo "14")
+    read -p "  TX Power in dBm [$current_power]: " tx_power
+    tx_power=${tx_power:-$current_power}
+    yq -i ".radio.tx_power = $tx_power" "$config_file"
+    print_success "TX Power: ${tx_power}dBm"
+    
+    echo ""
+}
+
+# ============================================================================
+# Settings Function (Radio Configuration) - TUI version for manage.sh menu
 # ============================================================================
 
 do_settings() {
