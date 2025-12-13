@@ -812,6 +812,143 @@ configure_radio_terminal() {
     print_success "TX Power: ${tx_power}dBm"
     
     echo ""
+    
+    # Hardware selection
+    echo -e "  ${BOLD}Hardware Selection${NC}"
+    echo -e "  ${DIM}Select your LoRa hardware for GPIO configuration${NC}"
+    echo ""
+    
+    configure_hardware_terminal "$config_file"
+}
+
+# Terminal-based hardware/GPIO configuration
+configure_hardware_terminal() {
+    local config_file="${1:-$CONFIG_DIR/config.yaml}"
+    local hw_config=""
+    
+    # Find hardware presets file
+    if [ -f "$INSTALL_DIR/radio-settings.json" ]; then
+        hw_config="$INSTALL_DIR/radio-settings.json"
+    elif [ -f "$REPEATER_DIR/radio-settings.json" ]; then
+        hw_config="$REPEATER_DIR/radio-settings.json"
+    fi
+    
+    if [ -z "$hw_config" ] || [ ! -f "$hw_config" ]; then
+        print_warning "Hardware presets not found, skipping GPIO configuration"
+        print_info "Configure GPIO manually with: ./manage.sh gpio"
+        return 0
+    fi
+    
+    # Build hardware options
+    local hw_count=0
+    local hw_keys=()
+    local hw_names=()
+    
+    while IFS= read -r key; do
+        local name=$(jq -r ".hardware.\"$key\".name" "$hw_config" 2>/dev/null)
+        if [ -n "$name" ] && [ "$name" != "null" ]; then
+            ((hw_count++))
+            hw_keys+=("$key")
+            hw_names+=("$name")
+            echo -e "  ${CYAN}$hw_count)${NC} $name"
+        fi
+    done < <(jq -r '.hardware | keys[]' "$hw_config" 2>/dev/null)
+    
+    echo -e "  ${CYAN}C)${NC} Custom GPIO ${DIM}(enter pins manually)${NC}"
+    echo ""
+    
+    read -p "  Select hardware [1-$hw_count] or C for custom: " hw_choice
+    
+    if [[ "$hw_choice" =~ ^[Cc]$ ]]; then
+        # Custom GPIO
+        echo ""
+        echo -e "  ${BOLD}Custom GPIO Configuration${NC} ${YELLOW}(BCM pin numbering)${NC}"
+        
+        local current_cs=$(yq '.sx1262.cs_pin' "$config_file" 2>/dev/null || echo "21")
+        read -p "  Chip Select pin [$current_cs]: " cs_pin
+        cs_pin=${cs_pin:-$current_cs}
+        
+        local current_reset=$(yq '.sx1262.reset_pin' "$config_file" 2>/dev/null || echo "18")
+        read -p "  Reset pin [$current_reset]: " reset_pin
+        reset_pin=${reset_pin:-$current_reset}
+        
+        local current_busy=$(yq '.sx1262.busy_pin' "$config_file" 2>/dev/null || echo "20")
+        read -p "  Busy pin [$current_busy]: " busy_pin
+        busy_pin=${busy_pin:-$current_busy}
+        
+        local current_irq=$(yq '.sx1262.irq_pin' "$config_file" 2>/dev/null || echo "16")
+        read -p "  IRQ pin [$current_irq]: " irq_pin
+        irq_pin=${irq_pin:-$current_irq}
+        
+        local current_txen=$(yq '.sx1262.txen_pin' "$config_file" 2>/dev/null || echo "-1")
+        read -p "  TX Enable pin (-1 to disable) [$current_txen]: " txen_pin
+        txen_pin=${txen_pin:-$current_txen}
+        
+        local current_rxen=$(yq '.sx1262.rxen_pin' "$config_file" 2>/dev/null || echo "-1")
+        read -p "  RX Enable pin (-1 to disable) [$current_rxen]: " rxen_pin
+        rxen_pin=${rxen_pin:-$current_rxen}
+        
+        # Apply custom GPIO
+        yq -i ".sx1262.cs_pin = $cs_pin" "$config_file"
+        yq -i ".sx1262.reset_pin = $reset_pin" "$config_file"
+        yq -i ".sx1262.busy_pin = $busy_pin" "$config_file"
+        yq -i ".sx1262.irq_pin = $irq_pin" "$config_file"
+        yq -i ".sx1262.txen_pin = $txen_pin" "$config_file"
+        yq -i ".sx1262.rxen_pin = $rxen_pin" "$config_file"
+        
+        echo ""
+        print_success "Custom GPIO: CS=$cs_pin RST=$reset_pin BUSY=$busy_pin IRQ=$irq_pin"
+        
+    elif [[ "$hw_choice" =~ ^[0-9]+$ ]] && [ "$hw_choice" -ge 1 ] && [ "$hw_choice" -le "$hw_count" ]; then
+        # Use preset
+        local idx=$((hw_choice - 1))
+        local hw_key="${hw_keys[$idx]}"
+        local hw_name="${hw_names[$idx]}"
+        local preset=$(jq ".hardware.\"$hw_key\"" "$hw_config" 2>/dev/null)
+        
+        if [ -n "$preset" ] && [ "$preset" != "null" ]; then
+            # Extract all GPIO settings
+            local bus_id=$(echo "$preset" | jq -r '.bus_id // 0')
+            local cs_id=$(echo "$preset" | jq -r '.cs_id // 0')
+            local cs_pin=$(echo "$preset" | jq -r '.cs_pin // 21')
+            local reset_pin=$(echo "$preset" | jq -r '.reset_pin // 18')
+            local busy_pin=$(echo "$preset" | jq -r '.busy_pin // 20')
+            local irq_pin=$(echo "$preset" | jq -r '.irq_pin // 16')
+            local txen_pin=$(echo "$preset" | jq -r '.txen_pin // -1')
+            local rxen_pin=$(echo "$preset" | jq -r '.rxen_pin // -1')
+            local is_waveshare=$(echo "$preset" | jq -r '.is_waveshare // false')
+            local use_dio3_tcxo=$(echo "$preset" | jq -r '.use_dio3_tcxo // false')
+            local tx_power=$(echo "$preset" | jq -r '.tx_power // 22')
+            local preamble_length=$(echo "$preset" | jq -r '.preamble_length // 17')
+            
+            # Apply to config
+            yq -i ".sx1262.bus_id = $bus_id" "$config_file"
+            yq -i ".sx1262.cs_id = $cs_id" "$config_file"
+            yq -i ".sx1262.cs_pin = $cs_pin" "$config_file"
+            yq -i ".sx1262.reset_pin = $reset_pin" "$config_file"
+            yq -i ".sx1262.busy_pin = $busy_pin" "$config_file"
+            yq -i ".sx1262.irq_pin = $irq_pin" "$config_file"
+            yq -i ".sx1262.txen_pin = $txen_pin" "$config_file"
+            yq -i ".sx1262.rxen_pin = $rxen_pin" "$config_file"
+            yq -i ".sx1262.is_waveshare = $is_waveshare" "$config_file"
+            yq -i ".sx1262.use_dio3_tcxo = $use_dio3_tcxo" "$config_file"
+            yq -i ".radio.tx_power = $tx_power" "$config_file"
+            yq -i ".radio.preamble_length = $preamble_length" "$config_file"
+            
+            echo ""
+            print_success "Hardware: $hw_name"
+            print_success "GPIO: CS=$cs_pin RST=$reset_pin BUSY=$busy_pin IRQ=$irq_pin"
+            if [ "$txen_pin" != "-1" ]; then
+                print_info "TX/RX Enable: TXEN=$txen_pin RXEN=$rxen_pin"
+            fi
+            print_info "TX Power: ${tx_power}dBm"
+        fi
+    else
+        print_warning "Invalid selection, keeping current GPIO settings"
+        print_info "Configure GPIO later with: ./manage.sh gpio"
+    fi
+    
+    echo ""
 }
 
 # ============================================================================
