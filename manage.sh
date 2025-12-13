@@ -131,6 +131,71 @@ run_with_output() {
     fi
 }
 
+# Show a progress bar (updates in place)
+# Usage: show_progress_bar current total [description]
+show_progress_bar() {
+    local current=$1
+    local total=$2
+    local description="${3:-}"
+    local width=30
+    local percent=$((current * 100 / total))
+    local filled=$((current * width / total))
+    local empty=$((width - filled))
+    
+    # Build the bar
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    
+    # Print with carriage return to update in place
+    printf "\r        ${CYAN}[${bar}]${NC} ${percent}%% ${DIM}${description}${NC}  "
+}
+
+# Run a long command with elapsed time display
+run_with_elapsed_time() {
+    local description="$1"
+    shift
+    local cmd="$@"
+    local log_file=$(mktemp)
+    local pid
+    local start_time=$(date +%s)
+    
+    # Start command in background
+    eval "$cmd" > "$log_file" 2>&1 &
+    pid=$!
+    
+    # Show elapsed time while command runs
+    printf "        ${ARROW} %s " "$description"
+    while kill -0 $pid 2>/dev/null; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+        printf "\r        ${CYAN}⏱${NC}  %s ${DIM}(%dm %02ds)${NC}  " "$description" $mins $secs
+        sleep 1
+    done
+    
+    # Get exit status
+    wait $pid
+    local exit_code=$?
+    local elapsed=$(($(date +%s) - start_time))
+    local mins=$((elapsed / 60))
+    local secs=$((elapsed % 60))
+    
+    # Clear line and show result
+    printf "\r        "  # Clear
+    if [ $exit_code -eq 0 ]; then
+        echo -e "${CHECK} $description ${DIM}(${mins}m ${secs}s)${NC}"
+        rm -f "$log_file"
+        return 0
+    else
+        echo -e "${CROSS} ${RED}$description${NC} ${DIM}(${mins}m ${secs}s)${NC}"
+        echo -e "        ${DIM}Log output:${NC}"
+        tail -20 "$log_file" | sed 's/^/        /' 
+        rm -f "$log_file"
+        return 1
+    fi
+}
+
 # Print installation banner
 print_banner() {
     clear
@@ -391,27 +456,19 @@ do_install() {
     # Step 5: Install pymc_core
     # =========================================================================
     print_step 5 $total_steps "Installing pymc_core@$branch"
-    print_info "This may take a few minutes..."
     
-    if pip install "pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@$branch" 2>&1 | while read line; do
-        # Show progress dots
-        printf "."
-    done; then
-        echo ""
-        print_success "pymc_core installed successfully"
-    else
-        echo ""
+    run_with_elapsed_time "Downloading and installing pymc_core" "pip install 'pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@$branch'" || {
         print_error "Failed to install pymc_core"
         print_info "Check if branch '$branch' exists and network is available"
         return 1
-    fi
+    }
     
     # =========================================================================
     # Step 6: Clone and install pyMC_Repeater
     # =========================================================================
     print_step 6 $total_steps "Installing pyMC_Repeater@$branch"
     
-    run_with_spinner "Cloning repository" "git clone -b '$branch' https://github.com/rightup/pyMC_Repeater.git '$REPEATER_DIR'" || {
+    run_with_elapsed_time "Cloning repository" "git clone -b '$branch' https://github.com/rightup/pyMC_Repeater.git '$REPEATER_DIR'" || {
         print_error "Failed to clone pyMC_Repeater"
         print_info "Check if branch '$branch' exists"
         return 1
@@ -419,7 +476,7 @@ do_install() {
     
     cd "$REPEATER_DIR"
     
-    run_with_spinner "Installing Python package" "pip install -e ." || {
+    run_with_elapsed_time "Installing Python package" "pip install -e ." || {
         print_error "Failed to install pyMC_Repeater package"
         return 1
     }
@@ -1241,35 +1298,19 @@ EOF
     
     # Install npm dependencies
     cd "$FRONTEND_DIR"
-    print_info "Installing npm dependencies (this may take a few minutes)..."
     
-    if $npm_path install --legacy-peer-deps 2>&1 | while read line; do
-        # Count packages being installed
-        if [[ "$line" == *"added"* ]]; then
-            echo "$line" | sed 's/^/        /'
-        fi
-    done; then
-        print_success "npm dependencies installed"
-    else
+    run_with_elapsed_time "Installing npm dependencies" "$npm_path install --legacy-peer-deps" || {
         print_error "Failed to install npm dependencies"
         return 1
-    fi
+    }
     
     # Build frontend
-    print_info "Building production bundle (this may take a few minutes)..."
     rm -rf "$FRONTEND_DIR/.next" 2>/dev/null || true
     
-    if NEXT_PUBLIC_API_URL="http://${ip_address}:8000" $npm_path run build 2>&1 | while read line; do
-        # Show key build progress
-        if [[ "$line" == *"Compiling"* ]] || [[ "$line" == *"Compiled"* ]] || [[ "$line" == *"Creating"* ]]; then
-            echo -e "        ${DIM}$line${NC}"
-        fi
-    done; then
-        print_success "Production build complete"
-    else
+    run_with_elapsed_time "Building production bundle" "NEXT_PUBLIC_API_URL='http://${ip_address}:8000' $npm_path run build" || {
         print_error "Failed to build frontend"
         return 1
-    fi
+    }
     
     # Copy assets for standalone mode
     mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
