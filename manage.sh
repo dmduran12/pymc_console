@@ -629,8 +629,9 @@ do_install() {
     print_step 5 $total_steps "Installing pymc_core@$branch"
     
     run_npm_with_progress "Downloading and installing pymc_core" "pip install 'pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@$branch'" || {
-        print_error "Failed to install pymc_core"
-        print_info "Check if branch '$branch' exists and network is available"
+        print_error "Failed to install pymc_core@$branch"
+        print_info "Branch '$branch' must exist in both pymc_core and pyMC_Repeater"
+        print_info "Try: sudo ./manage.sh install dev"
         return 1
     }
     
@@ -650,7 +651,8 @@ do_install() {
     # Patch backend to support Next.js static file serving
     patch_nextjs_static_serving
     
-    run_npm_with_progress "Installing Python package" "pip install -e ." || {
+    # Use --no-deps since pymc_core was already installed in step 5
+    run_npm_with_progress "Installing Python package" "pip install -e . --no-deps" || {
         print_error "Failed to install pyMC_Repeater package"
         return 1
     }
@@ -777,12 +779,40 @@ do_upgrade() {
     
     local current_version=$(get_version)
     
-    if ! ask_yes_no "Confirm Upgrade" "Current version: $current_version\n\nThis will:\n- Update pyMC_Repeater from git\n- Rebuild the frontend\n- Preserve your configuration\n\nContinue?"; then
+    # Get current branch or default to dev
+    cd "$REPEATER_DIR" 2>/dev/null || true
+    local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "dev")
+    
+    # Branch selection
+    local branch="${1:-}"
+    if [ -z "$branch" ]; then
+        branch=$($DIALOG --backtitle "pyMC Console Management" --title "Select Branch" --menu "\nCurrent branch: $current_branch\n\nSelect the branch to upgrade to:" 16 60 4 \
+            "dev" "Development branch (recommended)" \
+            "main" "Stable release" \
+            "keep" "Keep current branch ($current_branch)" \
+            "custom" "Enter custom branch name" 3>&1 1>&2 2>&3)
+        
+        if [ -z "$branch" ]; then
+            return 0  # User cancelled
+        fi
+        
+        if [ "$branch" = "keep" ]; then
+            branch="$current_branch"
+        elif [ "$branch" = "custom" ]; then
+            branch=$(get_input "Custom Branch" "Enter the branch name:" "$current_branch")
+            if [ -z "$branch" ]; then
+                return 0
+            fi
+        fi
+    fi
+    
+    if ! ask_yes_no "Confirm Upgrade" "Current version: $current_version\nTarget branch: $branch\n\nThis will:\n- Update pyMC_Repeater to $branch\n- Update frontend dashboard\n- Preserve your configuration\n\nContinue?"; then
         return 0
     fi
     
     clear
     echo "=== pyMC Console Upgrade ==="
+    echo "Target branch: $branch"
     echo ""
     
     echo "[1/6] Stopping service..."
@@ -793,15 +823,27 @@ do_upgrade() {
     cp "$CONFIG_DIR/config.yaml" "$backup_file"
     echo "    Backup saved to: $backup_file"
     
-    echo "[3/6] Updating pyMC_Repeater..."
+    echo "[3/6] Updating pyMC_Repeater to $branch..."
     cd "$REPEATER_DIR"
     git fetch origin
-    git pull origin $(git rev-parse --abbrev-ref HEAD)
+    git checkout "$branch" 2>/dev/null || git checkout -b "$branch" "origin/$branch"
+    git pull origin "$branch"
     
     echo "[4/6] Updating Python packages..."
     source "$INSTALL_DIR/venv/bin/activate"
-    pip install --upgrade "pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@$(git rev-parse --abbrev-ref HEAD)"
-    pip install -e .
+    
+    echo "    Installing pymc_core@$branch..."
+    if ! pip install --upgrade "pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@$branch" 2>&1 | tail -5; then
+        echo ""
+        echo "    ✗ Branch '$branch' not found in pymc_core"
+        echo "    Both repos must use matching branches."
+        echo "    Try upgrading to 'dev' instead."
+        return 1
+    fi
+    
+    # Reinstall pyMC_Repeater (--no-deps since pymc_core already installed)
+    pip install -e . --no-deps >/dev/null 2>&1
+    echo "    ✓ Python packages updated"
     
     echo "[5/6] Merging configuration & updating frontend..."
     merge_config "$CONFIG_DIR/config.yaml" "$REPEATER_DIR/config.yaml.example"

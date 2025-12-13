@@ -7,7 +7,7 @@
 # Usage:
 #   ./install.sh              # Uses 'dev' branch (default)
 #   ./install.sh dev          # Uses 'dev' branch explicitly
-#   ./install.sh fix/timing   # Uses 'fix/timing' branch
+#   ./install.sh main         # Uses 'main' branch
 #
 
 set -e

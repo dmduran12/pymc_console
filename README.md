@@ -39,8 +39,8 @@ cd pymc_console
 ### Install with specific branch
 
 ```bash
-./install.sh dev          # stable development branch
-./install.sh fix/timing   # timing fixes branch
+./install.sh dev          # development branch (default)
+./install.sh main         # stable release branch
 ```
 
 ### Custom install location
@@ -121,11 +121,11 @@ sudo nano /etc/pymc_repeater/config.yaml
 This installer ensures `pymc_core` and `pyMC_Repeater` use matching branches:
 
 ```bash
-# Both will use 'dev' branch
+# Both will use 'dev' branch (default)
 ./install.sh dev
 
-# Both will use 'fix/timing' branch
-./install.sh fix/timing
+# Both will use 'main' branch
+./install.sh main
 ```
 
 The installer pre-installs `pymc_core` at the specified branch before installing `pyMC_Repeater`, ensuring pip respects the already-installed version.
