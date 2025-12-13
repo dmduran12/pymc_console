@@ -1319,7 +1319,7 @@ do_uninstall() {
         return 1
     fi
     
-    if ! ask_yes_no "⚠️  Confirm Uninstall" "\nThis will COMPLETELY REMOVE:\n\n- pyMC Repeater service and files\n- pyMC Console frontend\n- Configuration files\n- Log files\n- Service user\n\nA backup of your config will be saved to /tmp/\n\nThis action cannot be undone!\n\nContinue?"; then
+    if ! ask_yes_no "⚠️  Confirm Uninstall" "\nThis will COMPLETELY REMOVE:\n\n- pyMC Repeater service and files\n- pyMC Console frontend\n- Configuration files\n- Log files\n- Service user\n\nThis action cannot be undone!\n\nContinue?"; then
         return 0
     fi
     
@@ -1334,9 +1334,11 @@ do_uninstall() {
     systemctl disable "$BACKEND_SERVICE" 2>/dev/null || true
     
     echo "[2/6] Backing up configuration..."
+    local backup_path=""
     if [ -d "$CONFIG_DIR" ]; then
-        cp -r "$CONFIG_DIR" "/tmp/pymc_config_backup_$(date +%Y%m%d_%H%M%S)"
-        echo "    Backup saved to /tmp/"
+        backup_path="/tmp/pymc_config_backup_$(date +%Y%m%d_%H%M%S)"
+        cp -r "$CONFIG_DIR" "$backup_path"
+        echo "    Backup saved to: $backup_path"
     fi
     
     echo "[3/6] Removing systemd services..."
@@ -1359,8 +1361,19 @@ do_uninstall() {
     
     echo ""
     echo "=== Uninstall Complete ==="
+    echo ""
     
-    show_info "Uninstall Complete" "\npyMC Console has been completely removed.\n\nConfiguration backup saved to /tmp/\n\nThank you for using pyMC Console!"
+    # Offer to delete backup
+    if [ -n "$backup_path" ] && [ -d "$backup_path" ]; then
+        if ask_yes_no "Delete Backup?" "\nA backup of your configuration was saved to:\n$backup_path\n\nWould you like to delete this backup?\n\n(Choose 'No' to keep it for future reference)"; then
+            rm -rf "$backup_path"
+            show_info "Uninstall Complete" "\npyMC Console has been completely removed.\n\nBackup deleted.\n\nThank you for using pyMC Console!"
+        else
+            show_info "Uninstall Complete" "\npyMC Console has been completely removed.\n\nConfiguration backup saved to:\n$backup_path\n\nThank you for using pyMC Console!"
+        fi
+    else
+        show_info "Uninstall Complete" "\npyMC Console has been completely removed.\n\nThank you for using pyMC Console!"
+    fi
 }
 
 # ============================================================================
