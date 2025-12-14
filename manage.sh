@@ -2338,14 +2338,15 @@ Environment="PYTHONPATH=$REPEATER_DIR"
 Environment="PYTHONUNBUFFERED=1"
 
 # Start command - use python module directly with proper path
-ExecStart=$INSTALL_DIR/venv/bin/python -m repeater.main --config $CONFIG_DIR/config.yaml
+# Note: --log-level DEBUG is required to fix a timing bug in interrupt setup
+ExecStart=$INSTALL_DIR/venv/bin/python -m repeater.main --config $CONFIG_DIR/config.yaml --log-level DEBUG
 
 # Restart on failure
 Restart=on-failure
 RestartSec=5
 
 # Resource limits
-MemoryLimit=256M
+MemoryMax=256M
 
 # Logging
 StandardOutput=journal
