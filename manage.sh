@@ -2067,27 +2067,29 @@ PATCHEOF
 # ------------------------------------------------------------------------------
 # PATCH 3: pymc_core GPIO Bug Fixes for E22 Modules
 # ------------------------------------------------------------------------------
-# File: pymc_core/hardware/lora/LoRaRF/SX126x.py (installed via pip)
-# Purpose: Fix two GPIO bugs that break RX on E22 modules with external PA/LNA
+# Files patched:
+#   - pymc_core/hardware/lora/LoRaRF/SX126x.py (Fix A, Fix B)
+#   - pymc_core/hardware/sx1262_wrapper.py (Fix C)
+#
+# Purpose: Fix GPIO bugs that break RX on E22 modules with external PA/LNA
 # 
-# Bug A - GPIO Initialization:
+# Fix A - GPIO Initialization (SX126x.py):
 #   The dev branch refactored GPIO management to use a centralized GPIOPinManager.
 #   In _get_output() and _try_get_output(), pins are created with initial_value=True.
 #   This sets ALL output pins HIGH on first access, including TXEN.
 #   Fix: Change initial_value=True to initial_value=False.
 #
-# Bug B - TXEN Override in request():
+# Fix B - TXEN Override in request() (SX126x.py):
 #   The low-level SX126x driver's request() and listen() methods set TXEN HIGH
 #   when entering RX mode. This overrides the higher-level _control_tx_rx_pins()
 #   which correctly sets TXEN=LOW for RX mode.
-#   
-#   Code in request() around line 948:
-#     if self._txen != -1:
-#         self._txState = _get_output(self._txen).read()
-#         _get_output(self._txen).write(True)  # <-- WRONG for E22!
-#   
 #   Fix: Comment out the _get_output(self._txen).write(True) lines.
-#   The higher-level sx1262_wrapper.py handles TXEN/RXEN correctly.
+#
+# Fix C - RF Switch Init (sx1262_wrapper.py):
+#   At radio initialization, the wrapper calls lora.request(RX_CONTINUOUS) but
+#   doesn't set the RF switch pins first. This causes intermittent RX failures
+#   on restart because RXEN may not be HIGH when entering RX mode.
+#   Fix: Add _control_tx_rx_pins(tx_mode=False) before RX_CONTINUOUS at init.
 #
 # For E22 modules with external PA/LNA:
 #   - RX mode requires: TXEN=LOW, RXEN=HIGH  
@@ -2097,7 +2099,8 @@ PATCHEOF
 #   - GPIO12 (RXEN) = HIGH, GPIO13 (TXEN) = HIGH (both HIGH = broken)
 #   - TX packets transmit successfully  
 #   - RX count stays at 0 despite mesh traffic
-#   - After any TX, TXEN stays HIGH (never restored to LOW)
+#   - Noise floor reads ~-74 dBm instead of ~-116 dBm
+#   - Intermittent RX failures after service restart
 # ------------------------------------------------------------------------------
 patch_pymc_core_gpio() {
     # Find the installed SX126x.py in the virtual environment
@@ -2163,8 +2166,78 @@ patch_pymc_core_gpio() {
         fi
     fi
     
+    # -------------------------------------------------------------------------
+    # Fix C: RF switch initialization in sx1262_wrapper.py
+    # -------------------------------------------------------------------------
+    # Find the wrapper file
+    local wrapper_file="$INSTALL_DIR/venv/lib/python*/site-packages/pymc_core/hardware/sx1262_wrapper.py"
+    wrapper_file=$(ls $wrapper_file 2>/dev/null | head -1)
+    
+    if [ -n "$wrapper_file" ] && [ -f "$wrapper_file" ]; then
+        # Check if already patched (look for our comment marker)
+        if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
+            print_info "RF switch init already patched"
+        else
+            # Check if this is the dev branch version (has _control_tx_rx_pins method)
+            if grep -q '_control_tx_rx_pins' "$wrapper_file" 2>/dev/null; then
+                # Find the line with 'self.lora.request(self.lora.RX_CONTINUOUS)' in the begin() method
+                # We need to insert _control_tx_rx_pins(tx_mode=False) before it
+                # The init version is the one NOT inside a try block's nested code
+                
+                # Use Python for precise patching
+                python3 << PATCHEOF
+import re
+
+wrapper_file = "$wrapper_file"
+with open(wrapper_file, 'r') as f:
+    content = f.read()
+
+# Find the RX_CONTINUOUS call in the begin() method (the one with simple indentation)
+# Pattern: line starting with spaces, then self.lora.request(self.lora.RX_CONTINUOUS)
+# We want the one in begin(), not the ones in try/except blocks (which have more indentation)
+pattern = r'(\\n            )(self\\.lora\\.request\\(self\\.lora\\.RX_CONTINUOUS\\))'
+
+# Count occurrences to find the init one (usually around line 686)
+matches = list(re.finditer(pattern, content))
+
+if matches:
+    # Find the match that's in the begin() method (check context)
+    for match in matches:
+        start = match.start()
+        # Get surrounding context (100 chars before)
+        context_before = content[max(0, start-200):start]
+        # The init one comes after CAD threshold code or LDRO code
+        if 'CAD threshold' in context_before or 'Custom CAD' in context_before or 'LDRO' in context_before:
+            # This is the init call - insert our fix before it
+            insert_text = '\\n            # Set RF switch to RX mode before entering RX continuous\\n            self._control_tx_rx_pins(tx_mode=False)'
+            content = content[:match.start()] + insert_text + content[match.start():]
+            
+            with open(wrapper_file, 'w') as f:
+                f.write(content)
+            print("Patched sx1262_wrapper.py with RF switch init")
+            break
+    else:
+        print("Could not find init RX_CONTINUOUS call")
+else:
+    print("RX_CONTINUOUS pattern not found")
+PATCHEOF
+                
+                if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
+                    print_success "Fix C: RF switch init in sx1262_wrapper.py"
+                    ((patches_applied++))
+                else
+                    print_warning "Fix C may not have applied correctly"
+                fi
+            else
+                print_info "Fix C not needed (no _control_tx_rx_pins method found)"
+            fi
+        fi
+    else
+        print_info "sx1262_wrapper.py not found, skipping Fix C"
+    fi
+    
     if [ $patches_applied -gt 0 ]; then
-        print_success "Applied $patches_applied GPIO fix(es) to SX126x.py"
+        print_success "Applied $patches_applied GPIO fix(es) to pymc_core"
     fi
 }
 
