@@ -703,12 +703,6 @@ do_install() {
         return 1
     }
     
-    # -------------------------------------------------------------------------
-    # Apply pymc_core patch (AFTER pip install since it patches installed pkg)
-    # -------------------------------------------------------------------------
-    # EXPERIMENT: Commenting out GPIO patches to test if DEBUG fix alone is sufficient
-    # patch_pymc_core_gpio          # PATCH 3: Fix GPIO initialization bug
-    
     # =========================================================================
     # Step 7: Setup configuration
     # =========================================================================
@@ -923,12 +917,6 @@ do_upgrade() {
         print_info "Branch '$branch' must exist in both pymc_core and pyMC_Repeater repos"
         return 1
     }
-    
-    # -------------------------------------------------------------------------
-    # Apply pymc_core patch (AFTER pip install since it patches installed pkg)
-    # -------------------------------------------------------------------------
-    # EXPERIMENT: Commenting out GPIO patches to test if DEBUG fix alone is sufficient
-    # patch_pymc_core_gpio          # PATCH 3: Fix GPIO initialization bug
     
     # =========================================================================
     # Step 5: Update configuration & frontend
@@ -1819,14 +1807,10 @@ install_yq_silent() {
 #    - Allows web UI to update radio settings and save to config.yaml
 #    - PR Status: Pending
 #
-# 3. patch_pymc_core_gpio (pymc_core SX126x.py)
-#    - CRITICAL: Fixes two GPIO bugs in dev branch that break RX on E22 modules
-#    - Bug A: _get_output() sets initial_value=True (HIGH) for all pins
-#    - Bug B: request() method sets TXEN HIGH when entering RX mode
-#    - Impact: Both TXEN and RXEN end up HIGH, RF switch in undefined state
-#    - Fix A: Change initial_value=True to initial_value=False
-#    - Fix B: Comment out the TXEN=HIGH lines in request() and listen()
-#    - PR Status: Pending - should be filed against rightup/pyMC_core
+# NOTE: GPIO patches (Fix A-D) were removed after discovery that the real issue
+# was a race condition in pymc_core's interrupt initialization. Adding --log-level
+# DEBUG to the service provides enough delay for the asyncio event loop to
+# initialize before interrupt callbacks are registered. See create_backend_service().
 #
 # To generate clean patches for upstream PR:
 #   1. Clone fresh pyMC_Repeater
@@ -2110,217 +2094,6 @@ PATCHEOF
         print_success "Patched api_endpoints.py with update_radio_config"
     else
         print_warning "API patch may not have applied correctly"
-    fi
-}
-
-# ------------------------------------------------------------------------------
-# PATCH 3: pymc_core GPIO Bug Fixes for E22 Modules
-# ------------------------------------------------------------------------------
-# Files patched:
-#   - pymc_core/hardware/lora/LoRaRF/SX126x.py (Fix A, Fix B)
-#   - pymc_core/hardware/sx1262_wrapper.py (Fix C, Fix D)
-#
-# Purpose: Fix GPIO bugs that break RX on E22 modules with external PA/LNA
-# 
-# Fix A - GPIO Initialization (SX126x.py):
-#   The dev branch refactored GPIO management to use a centralized GPIOPinManager.
-#   In _get_output() and _try_get_output(), pins are created with initial_value=True.
-#   This sets ALL output pins HIGH on first access, including TXEN.
-#   Fix: Change initial_value=True to initial_value=False.
-#
-# Fix B - TXEN Override in request() (SX126x.py):
-#   The low-level SX126x driver's request() and listen() methods set TXEN HIGH
-#   when entering RX mode. This overrides the higher-level _control_tx_rx_pins()
-#   which correctly sets TXEN=LOW for RX mode.
-#   Fix: Comment out the _get_output(self._txen).write(True) lines.
-#
-# Fix C - RF Switch Init (sx1262_wrapper.py):
-#   At radio initialization, the wrapper calls lora.request(RX_CONTINUOUS) but
-#   doesn't set the RF switch pins first. This causes intermittent RX failures
-#   on restart because RXEN may not be HIGH when entering RX mode.
-#   Fix: Add _control_tx_rx_pins(tx_mode=False) before RX_CONTINUOUS at init.
-#
-# Fix D - Inverted RF Switch Logic (sx1262_wrapper.py):
-#   Some E22 module variants have the TXEN/RXEN pin labels swapped internally.
-#   Testing shows the antenna path connects to RX when TXEN=HIGH, RXEN=LOW
-#   (the opposite of what the labels suggest). This is confirmed by measuring
-#   RSSI: the correct RX config gives ~-110dBm noise floor, wrong gives ~-79dBm.
-#   Fix: Invert the pin states in _control_tx_rx_pins():
-#        - RX mode: set_pin_high(txen), set_pin_low(rxen)
-#        - TX mode: set_pin_low(txen), set_pin_high(rxen)
-#
-# For E22 modules with external PA/LNA (standard labeling):
-#   - RX mode requires: TXEN=LOW, RXEN=HIGH  
-#   - TX mode requires: TXEN=HIGH, RXEN=LOW
-# For E22 modules with INVERTED labeling:
-#   - RX mode requires: TXEN=HIGH, RXEN=LOW
-#   - TX mode requires: TXEN=LOW, RXEN=HIGH
-#
-# Observable Symptoms (before patch):
-#   - GPIO12 (RXEN) = HIGH, GPIO13 (TXEN) = HIGH (both HIGH = broken)
-#   - TX packets transmit successfully  
-#   - RX count stays at 0 despite mesh traffic
-#   - Noise floor reads ~-74 dBm instead of ~-116 dBm
-#   - Intermittent RX failures after service restart
-# ------------------------------------------------------------------------------
-patch_pymc_core_gpio() {
-    # Find the installed SX126x.py in the virtual environment
-    local sx126x_file="$INSTALL_DIR/venv/lib/python*/site-packages/pymc_core/hardware/lora/LoRaRF/SX126x.py"
-    sx126x_file=$(ls $sx126x_file 2>/dev/null | head -1)
-    
-    if [ -z "$sx126x_file" ] || [ ! -f "$sx126x_file" ]; then
-        # Try dist-packages (system install)
-        sx126x_file=$(find /usr/local/lib -name "SX126x.py" -path "*/pymc_core/*" 2>/dev/null | head -1)
-    fi
-    
-    if [ -z "$sx126x_file" ] || [ ! -f "$sx126x_file" ]; then
-        print_warning "SX126x.py not found, skipping GPIO patches"
-        return 0
-    fi
-    
-    local patches_applied=0
-    
-    # -------------------------------------------------------------------------
-    # Fix A: GPIO initialization (initial_value=True -> False)
-    # -------------------------------------------------------------------------
-    # Check if this is the dev branch version (has gpio_manager code)
-    if grep -q '_gpio_manager.setup_output_pin' "$sx126x_file" 2>/dev/null; then
-        # Check if already patched
-        if grep -q 'initial_value=False' "$sx126x_file" 2>/dev/null; then
-            print_info "GPIO initialization already patched"
-        else
-            # Apply the fix: change initial_value=True to initial_value=False
-            sed -i 's/_gpio_manager\.setup_output_pin(pin, initial_value=True)/_gpio_manager.setup_output_pin(pin, initial_value=False)/g' "$sx126x_file"
-            
-            if grep -q 'initial_value=False' "$sx126x_file" 2>/dev/null; then
-                print_success "Fix A: GPIO initialization (initial_value=False)"
-                ((patches_applied++)) || true
-            else
-                print_warning "Fix A may not have applied correctly"
-            fi
-        fi
-    else
-        print_info "Fix A not needed (main branch or different GPIO implementation)"
-    fi
-    
-    # -------------------------------------------------------------------------
-    # Fix B: TXEN override in request() and listen() methods
-    # -------------------------------------------------------------------------
-    # Check if the problematic pattern exists (TXEN set HIGH in RX methods)
-    if grep -q '_get_output(self._txen).write(True)' "$sx126x_file" 2>/dev/null; then
-        # Comment out the TXEN=HIGH lines - let higher-level code manage TXEN
-        # This pattern appears in both request() and listen() methods
-        sed -i 's/_get_output(self\._txen)\.write(True)/# _get_output(self._txen).write(True)  # PATCHED: E22 needs TXEN managed by wrapper/g' "$sx126x_file"
-        
-        if grep -q 'PATCHED: E22 needs TXEN' "$sx126x_file" 2>/dev/null; then
-            print_success "Fix B: TXEN override disabled in request()/listen()"
-            ((patches_applied++)) || true
-        else
-            print_warning "Fix B may not have applied correctly"
-        fi
-    else
-        # Check if already patched
-        if grep -q 'PATCHED: E22 needs TXEN' "$sx126x_file" 2>/dev/null; then
-            print_info "TXEN override already patched"
-        else
-            print_info "Fix B not needed (TXEN override pattern not found)"
-        fi
-    fi
-    
-    # -------------------------------------------------------------------------
-    # Fix C: RF switch initialization in sx1262_wrapper.py
-    # -------------------------------------------------------------------------
-    # Find the wrapper file
-    local wrapper_file="$INSTALL_DIR/venv/lib/python*/site-packages/pymc_core/hardware/sx1262_wrapper.py"
-    wrapper_file=$(ls $wrapper_file 2>/dev/null | head -1)
-    
-    if [ -n "$wrapper_file" ] && [ -f "$wrapper_file" ]; then
-        # Check if already patched (look for our comment marker)
-        if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
-            print_info "RF switch init already patched"
-        else
-            # Check if this is the dev branch version (has _control_tx_rx_pins method)
-            if grep -q '_control_tx_rx_pins' "$wrapper_file" 2>/dev/null; then
-                # Insert _control_tx_rx_pins(tx_mode=False) before the RX_CONTINUOUS call in begin()
-                # The init RX_CONTINUOUS has 12 spaces of indentation (not deeply nested)
-                # Use sed to find and insert before the pattern
-                
-                # First, find the line number of the init RX_CONTINUOUS (the one after CAD/LDRO setup)
-                local line_num=$(grep -n 'self.lora.request(self.lora.RX_CONTINUOUS)' "$wrapper_file" | \
-                    while IFS=: read num line; do
-                        # Check context - init call comes after CAD threshold setup
-                        local context=$(sed -n "$((num-10)),$((num-1))p" "$wrapper_file" 2>/dev/null)
-                        if echo "$context" | grep -qE '(CAD threshold|Custom CAD|LDRO)'; then
-                            echo "$num"
-                            break
-                        fi
-                    done)
-                
-                if [ -n "$line_num" ]; then
-                    # Insert our fix before that line (two lines, inserted in reverse order)
-                    sed -i "${line_num}i\\            self._control_tx_rx_pins(tx_mode=False)" "$wrapper_file"
-                    sed -i "${line_num}i\\            # Set RF switch to RX mode before entering RX continuous" "$wrapper_file"
-                    
-                    if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
-                        print_success "Fix C: RF switch init in sx1262_wrapper.py"
-                        ((patches_applied++)) || true
-                    else
-                        print_warning "Fix C may not have applied correctly"
-                    fi
-                else
-                    print_warning "Fix C: Could not find init RX_CONTINUOUS call"
-                fi
-            else
-                print_info "Fix C not needed (no _control_tx_rx_pins method found)"
-            fi
-        fi
-    else
-        print_info "sx1262_wrapper.py not found, skipping Fix C"
-    fi
-    
-    # -------------------------------------------------------------------------
-    # Fix D: Invert RF switch pin logic in _control_tx_rx_pins()
-    # -------------------------------------------------------------------------
-    # Some E22 modules have internally swapped TXEN/RXEN pin labels.
-    # The physical antenna path connects to RX when TXEN=HIGH (not LOW).
-    # This inverts the logic so RX uses TXEN=HIGH, RXEN=LOW.
-    if [ -n "$wrapper_file" ] && [ -f "$wrapper_file" ]; then
-        # Check if already patched (look for INVERTED marker)
-        if grep -q 'INVERTED for E22' "$wrapper_file" 2>/dev/null; then
-            print_info "RF switch inversion already patched"
-        else
-            # Check if the standard pattern exists
-            if grep -q 'self._gpio_manager.set_pin_high(self.txen_pin)' "$wrapper_file" 2>/dev/null; then
-                # Invert the TX mode logic: HIGH->LOW, LOW->HIGH
-                # TX mode currently: txen=HIGH, rxen=LOW -> change to txen=LOW, rxen=HIGH
-                sed -i 's/# TX: TXEN=HIGH, RXEN=LOW/# TX: TXEN=LOW, RXEN=HIGH (INVERTED for E22)/g' "$wrapper_file"
-                sed -i '/if tx_mode:/,/set_pin_low(self.rxen_pin)/ {
-                    s/set_pin_high(self.txen_pin)/set_pin_low(self.txen_pin)/
-                    s/set_pin_low(self.rxen_pin)/set_pin_high(self.rxen_pin)/
-                }' "$wrapper_file"
-                
-                # Invert the RX mode logic: LOW->HIGH, HIGH->LOW
-                # RX mode currently: txen=LOW, rxen=HIGH -> change to txen=HIGH, rxen=LOW
-                sed -i 's/# RX or idle: TXEN=LOW, RXEN=HIGH/# RX or idle: TXEN=HIGH, RXEN=LOW (INVERTED for E22)/g' "$wrapper_file"
-                sed -i '/else:/,/set_pin_high(self.rxen_pin)/ {
-                    s/set_pin_low(self.txen_pin)/set_pin_high(self.txen_pin)/
-                    s/set_pin_high(self.rxen_pin)/set_pin_low(self.rxen_pin)/
-                }' "$wrapper_file"
-                
-                if grep -q 'INVERTED for E22' "$wrapper_file" 2>/dev/null; then
-                    print_success "Fix D: RF switch pin logic inverted"
-                    ((patches_applied++)) || true
-                else
-                    print_warning "Fix D may not have applied correctly"
-                fi
-            else
-                print_info "Fix D not needed (pin control pattern not found)"
-            fi
-        fi
-    fi
-    
-    if [ $patches_applied -gt 0 ]; then
-        print_success "Applied $patches_applied GPIO fix(es) to pymc_core"
     fi
 }
 
