@@ -639,6 +639,9 @@ do_install() {
     # Patch backend to support Next.js static file serving
     patch_nextjs_static_serving
     
+    # Patch API endpoints for radio config updates
+    patch_api_endpoints
+    
     # =========================================================================
     # Step 6: Install pyMC_Repeater + dependencies (including pymc_core)
     # =========================================================================
@@ -854,6 +857,9 @@ do_upgrade() {
     
     # Patch backend to support Next.js static file serving
     patch_nextjs_static_serving
+    
+    # Patch API endpoints for radio config updates
+    patch_api_endpoints
     
     # Match upstream: let pip resolve ALL dependencies from pyproject.toml
     # This installs/updates pymc_core[hardware] automatically as a dependency
@@ -1850,6 +1856,148 @@ PATCHEOF
         print_success "Patched http_server.py for Next.js static serving"
     else
         print_warning "Patch may not have applied correctly"
+    fi
+}
+
+# Patch pyMC_Repeater's api_endpoints.py to add update_radio_config endpoint
+# This allows the frontend to update radio settings and save to config.yaml
+patch_api_endpoints() {
+    local api_file="$REPEATER_DIR/repeater/web/api_endpoints.py"
+    
+    if [ ! -f "$api_file" ]; then
+        print_warning "api_endpoints.py not found, skipping patch"
+        return 0
+    fi
+    
+    # Check if already patched
+    if grep -q 'def update_radio_config' "$api_file" 2>/dev/null; then
+        print_info "API endpoints already patched"
+        return 0
+    fi
+    
+    # Use Python to add the endpoint (note: no quotes around PATCHEOF to allow variable expansion)
+    python3 << PATCHEOF
+import re
+
+api_file = "$api_file"
+
+with open(api_file, 'r') as f:
+    content = f.read()
+
+# Add update_radio_config endpoint after save_cad_settings
+update_radio_config_code = '''
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    @cherrypy.tools.json_in()
+    def update_radio_config(self):
+        """Update radio configuration and save to config.yaml
+        
+        POST /api/update_radio_config
+        Body: {
+            "frequency_mhz": 906.875,
+            "bandwidth_khz": 250,
+            "spreading_factor": 10,
+            "coding_rate": 5,
+            "tx_power": 22
+        }
+        
+        Returns: {"success": true, "data": {"applied": [...], "persisted": true, "restart_required": true}}
+        """
+        try:
+            self._require_post()
+            data = cherrypy.request.json or {}
+            
+            if not data:
+                return self._error("No configuration provided")
+            
+            applied = []
+            
+            # Ensure radio config section exists
+            if "radio" not in self.config:
+                self.config["radio"] = {}
+            
+            # Update frequency (convert MHz to Hz for storage)
+            if "frequency_mhz" in data:
+                freq_hz = int(float(data["frequency_mhz"]) * 1_000_000)
+                self.config["radio"]["frequency"] = freq_hz
+                applied.append(f"frequency={data['frequency_mhz']}MHz")
+            
+            # Update bandwidth (convert kHz to Hz for storage)
+            if "bandwidth_khz" in data:
+                bw_hz = int(float(data["bandwidth_khz"]) * 1000)
+                self.config["radio"]["bandwidth"] = bw_hz
+                applied.append(f"bandwidth={data['bandwidth_khz']}kHz")
+            
+            # Update spreading factor
+            if "spreading_factor" in data:
+                sf = int(data["spreading_factor"])
+                if sf < 5 or sf > 12:
+                    return self._error("Spreading factor must be 5-12")
+                self.config["radio"]["spreading_factor"] = sf
+                applied.append(f"SF={sf}")
+            
+            # Update coding rate
+            if "coding_rate" in data:
+                cr = int(data["coding_rate"])
+                if cr < 5 or cr > 8:
+                    return self._error("Coding rate must be 5-8 (4/5 to 4/8)")
+                self.config["radio"]["coding_rate"] = cr
+                applied.append(f"CR=4/{cr}")
+            
+            # Update TX power
+            if "tx_power" in data:
+                power = int(data["tx_power"])
+                if power < 2 or power > 22:
+                    return self._error("TX power must be 2-22 dBm")
+                self.config["radio"]["tx_power"] = power
+                applied.append(f"power={power}dBm")
+            
+            if not applied:
+                return self._error("No valid settings provided")
+            
+            # Save to config file
+            config_path = getattr(self, '_config_path', '/etc/pymc_repeater/config.yaml')
+            self._save_config_to_file(config_path)
+            
+            logger.info(f"Radio config updated: {', '.join(applied)}")
+            
+            return self._success({
+                "applied": applied,
+                "persisted": True,
+                "live_update": False,
+                "restart_required": True,
+                "message": "Settings saved. Restart service to apply changes."
+            })
+            
+        except cherrypy.HTTPError:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating radio config: {e}")
+            return self._error(str(e))
+'''
+
+# Find the save_cad_settings method and insert after it
+# Look for the end of save_cad_settings (the except block)
+pattern = r'(    def save_cad_settings\(self\):.*?return self\._error\(e\))'
+match = re.search(pattern, content, re.DOTALL)
+
+if match:
+    insert_pos = match.end()
+    content = content[:insert_pos] + update_radio_config_code + content[insert_pos:]
+    
+    with open(api_file, 'w') as f:
+        f.write(content)
+    print("Patched api_endpoints.py with update_radio_config")
+else:
+    print("Could not find insertion point for update_radio_config")
+PATCHEOF
+    
+    # Verify patch was applied
+    if grep -q 'def update_radio_config' "$api_file" 2>/dev/null; then
+        print_success "Patched api_endpoints.py with update_radio_config"
+    else
+        print_warning "API patch may not have applied correctly"
     fi
 }
 
