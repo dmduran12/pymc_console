@@ -2148,7 +2148,7 @@ patch_pymc_core_gpio() {
             
             if grep -q 'initial_value=False' "$sx126x_file" 2>/dev/null; then
                 print_success "Fix A: GPIO initialization (initial_value=False)"
-                ((patches_applied++))
+                ((patches_applied++)) || true
             else
                 print_warning "Fix A may not have applied correctly"
             fi
@@ -2168,7 +2168,7 @@ patch_pymc_core_gpio() {
         
         if grep -q 'PATCHED: E22 needs TXEN' "$sx126x_file" 2>/dev/null; then
             print_success "Fix B: TXEN override disabled in request()/listen()"
-            ((patches_applied++))
+            ((patches_applied++)) || true
         else
             print_warning "Fix B may not have applied correctly"
         fi
@@ -2217,7 +2217,7 @@ patch_pymc_core_gpio() {
                     
                     if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
                         print_success "Fix C: RF switch init in sx1262_wrapper.py"
-                        ((patches_applied++))
+                        ((patches_applied++)) || true
                     else
                         print_warning "Fix C may not have applied correctly"
                     fi
