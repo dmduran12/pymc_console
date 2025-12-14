@@ -702,6 +702,21 @@ do_install() {
         return 1
     }
     
+    # Show verified git info so user can confirm what was cloned
+    cd "$CLONE_DIR"
+    local git_branch=$(git rev-parse --abbrev-ref HEAD)
+    local git_commit=$(git rev-parse --short HEAD)
+    local git_date=$(git log -1 --format=%cd --date=short)
+    local git_msg=$(git log -1 --format=%s | cut -c1-50)
+    echo ""
+    echo -e "        ${BOLD}Source Verification${NC}"
+    echo -e "        ${DIM}────────────────────────────────────────${NC}"
+    echo -e "        Branch:  ${CYAN}${git_branch}${NC}"
+    echo -e "        Commit:  ${CYAN}${git_commit}${NC} ${DIM}(${git_date})${NC}"
+    echo -e "        Message: ${DIM}${git_msg}${NC}"
+    echo -e "        ${DIM}────────────────────────────────────────${NC}"
+    echo ""
+    
     # -------------------------------------------------------------------------
     # Apply upstream patches to the clone (see UPSTREAM PATCHES section)
     # These will be removed once merged into pyMC_Repeater
@@ -950,6 +965,21 @@ do_upgrade() {
         }
     fi
     print_success "Repository updated"
+    
+    # Show verified git info so user can confirm what was pulled
+    cd "$CLONE_DIR"
+    local git_branch=$(git rev-parse --abbrev-ref HEAD)
+    local git_commit=$(git rev-parse --short HEAD)
+    local git_date=$(git log -1 --format=%cd --date=short)
+    local git_msg=$(git log -1 --format=%s | cut -c1-50)
+    echo ""
+    echo -e "        ${BOLD}Source Verification${NC}"
+    echo -e "        ${DIM}────────────────────────────────────────${NC}"
+    echo -e "        Branch:  ${CYAN}${git_branch}${NC}"
+    echo -e "        Commit:  ${CYAN}${git_commit}${NC} ${DIM}(${git_date})${NC}"
+    echo -e "        Message: ${DIM}${git_msg}${NC}"
+    echo -e "        ${DIM}────────────────────────────────────────${NC}"
+    echo ""
     
     # -------------------------------------------------------------------------
     # Apply upstream patches to the clone (see UPSTREAM PATCHES section)
