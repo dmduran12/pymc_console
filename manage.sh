@@ -2001,19 +2001,23 @@ run_upstream_installer() {
     local description="pyMC_Repeater $action"
     
     # Run upstream's manage.sh with fake dialog in background
-    # Tee output to both log file and viewport file for live display
+    # Key workarounds for upstream's interactive requirements:
+    # 1. Use 'script' command to provide a pseudo-TTY (bypasses [ ! -t 0 ] check)
+    # 2. Pipe 'yes' to auto-answer any 'read' prompts
+    # 3. Set TERM to make whiptail happy
     (
         cd "$CLONE_DIR"
         export DIALOG="$fake_dialog"
         export DEBIAN_FRONTEND=noninteractive
-        bash "$upstream_script" "$action" 2>&1 | while IFS= read -r line; do
+        export TERM=xterm
+        
+        # Use 'script' to provide pseudo-TTY, pipe endless newlines for any 'read' prompts
+        # Linux uses: script -q -c "cmd" /dev/null
+        yes '' | script -q /dev/null -c "bash '$upstream_script' '$action'" 2>&1 | while IFS= read -r line; do
             echo "$line" >> "$log_file"
-            # Extract meaningful status from line for viewport
-            # Strip ANSI codes and clean up for display
+            # Strip ANSI codes and clean up for viewport
             local clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
-            # Only show non-empty, meaningful lines
             if [[ -n "$clean_line" && ! "$clean_line" =~ ^[[:space:]]*$ ]]; then
-                # Truncate to fit viewport (50 chars max)
                 echo "${clean_line:0:50}" > "$viewport_file"
             fi
         done
