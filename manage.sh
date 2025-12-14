@@ -637,7 +637,7 @@ do_install() {
     cd "$REPEATER_DIR"
     
     # -------------------------------------------------------------------------
-    # Apply upstream patches (see UPSTREAM PATCHES section for details)
+    # Apply upstream patches to pyMC_Repeater (see UPSTREAM PATCHES section)
     # These will be removed once merged into pyMC_Repeater
     # -------------------------------------------------------------------------
     patch_nextjs_static_serving   # PATCH 1: Next.js static export support
@@ -655,6 +655,11 @@ do_install() {
         print_info "Branch '$branch' must exist in both pymc_core and pyMC_Repeater repos"
         return 1
     }
+    
+    # -------------------------------------------------------------------------
+    # Apply pymc_core patch (AFTER pip install since it patches installed pkg)
+    # -------------------------------------------------------------------------
+    patch_pymc_core_gpio          # PATCH 3: Fix GPIO initialization bug
     
     # =========================================================================
     # Step 7: Setup configuration
@@ -857,7 +862,7 @@ do_upgrade() {
     source "$INSTALL_DIR/venv/bin/activate"
     
     # -------------------------------------------------------------------------
-    # Apply upstream patches (see UPSTREAM PATCHES section for details)
+    # Apply upstream patches to pyMC_Repeater (see UPSTREAM PATCHES section)
     # These will be removed once merged into pyMC_Repeater
     # -------------------------------------------------------------------------
     patch_nextjs_static_serving   # PATCH 1: Next.js static export support
@@ -870,6 +875,11 @@ do_upgrade() {
         print_info "Branch '$branch' must exist in both pymc_core and pyMC_Repeater repos"
         return 1
     }
+    
+    # -------------------------------------------------------------------------
+    # Apply pymc_core patch (AFTER pip install since it patches installed pkg)
+    # -------------------------------------------------------------------------
+    patch_pymc_core_gpio          # PATCH 3: Fix GPIO initialization bug
     
     # =========================================================================
     # Step 5: Update configuration & frontend
@@ -1481,10 +1491,11 @@ select_hardware_preset() {
     # Build menu from hardware presets
     local menu_items=()
     
+    # Use keys_unsorted to preserve JSON insertion order (matches upstream grep-based parsing)
     while IFS= read -r key; do
         local name=$(jq -r ".hardware.\"$key\".name" "$hw_config")
         menu_items+=("$key" "$name")
-    done < <(jq -r '.hardware | keys[]' "$hw_config" 2>/dev/null)
+    done < <(jq -r '.hardware | keys_unsorted[]' "$hw_config" 2>/dev/null)
     
     if [ ${#menu_items[@]} -eq 0 ]; then
         show_error "No hardware presets found."
@@ -1758,6 +1769,13 @@ install_yq_silent() {
 #    - Adds POST /api/update_radio_config endpoint
 #    - Allows web UI to update radio settings and save to config.yaml
 #    - PR Status: Pending
+#
+# 3. patch_pymc_core_gpio (pymc_core SX126x.py)
+#    - CRITICAL: Fixes GPIO initialization bug in dev branch
+#    - Bug: _get_output() sets initial_value=True (HIGH) for all pins
+#    - Impact: Both TXEN and RXEN are HIGH, breaking RX on E22 modules
+#    - Fix: Change initial_value to False (LOW) - matches gpiozero default
+#    - PR Status: Pending - should be filed against rightup/pyMC_core
 #
 # To generate clean patches for upstream PR:
 #   1. Clone fresh pyMC_Repeater
@@ -2041,6 +2059,76 @@ PATCHEOF
         print_success "Patched api_endpoints.py with update_radio_config"
     else
         print_warning "API patch may not have applied correctly"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# PATCH 3: pymc_core GPIO Initialization Bug Fix
+# ------------------------------------------------------------------------------
+# File: pymc_core/hardware/lora/LoRaRF/SX126x.py (installed via pip)
+# Purpose: Fix GPIO pin initialization that breaks RX on E22 modules
+# 
+# Root Cause Analysis:
+#   The dev branch refactored GPIO management to use a centralized GPIOPinManager.
+#   In _get_output() and _try_get_output(), pins are created with initial_value=True.
+#   This sets ALL output pins HIGH on first access, including TXEN.
+#   
+#   For E22 modules with external PA/LNA:
+#     - RX mode requires: TXEN=LOW, RXEN=HIGH
+#     - TX mode requires: TXEN=HIGH, RXEN=LOW
+#   
+#   With initial_value=True, both TXEN and RXEN end up HIGH, which:
+#     - Puts the RF switch in an undefined state
+#     - TX works (TXEN=HIGH is correct for TX)
+#     - RX fails (TXEN should be LOW during RX)
+#
+# Observable Symptoms:
+#   - GPIO12 (RXEN) = HIGH, GPIO13 (TXEN) = HIGH (both HIGH = broken)
+#   - Noise floor shows reasonable value (~-116 dBm)
+#   - TX packets transmit successfully
+#   - RX count stays at 0 despite mesh traffic
+#   - Main branch works (shows GPIO12=LOW, GPIO13=HIGH)
+#
+# Fix:
+#   Change initial_value=True to initial_value=False in _get_output() and
+#   _try_get_output(). This matches gpiozero's DigitalOutputDevice default.
+# ------------------------------------------------------------------------------
+patch_pymc_core_gpio() {
+    # Find the installed SX126x.py in the virtual environment
+    local sx126x_file="$INSTALL_DIR/venv/lib/python*/site-packages/pymc_core/hardware/lora/LoRaRF/SX126x.py"
+    sx126x_file=$(ls $sx126x_file 2>/dev/null | head -1)
+    
+    if [ -z "$sx126x_file" ] || [ ! -f "$sx126x_file" ]; then
+        # Try dist-packages (system install)
+        sx126x_file=$(find /usr/local/lib -name "SX126x.py" -path "*/pymc_core/*" 2>/dev/null | head -1)
+    fi
+    
+    if [ -z "$sx126x_file" ] || [ ! -f "$sx126x_file" ]; then
+        print_warning "SX126x.py not found, skipping GPIO patch"
+        return 0
+    fi
+    
+    # Check if this is the dev branch version (has gpio_manager code)
+    if ! grep -q '_gpio_manager.setup_output_pin' "$sx126x_file" 2>/dev/null; then
+        print_info "SX126x.py doesn't need GPIO patch (main branch or already patched)"
+        return 0
+    fi
+    
+    # Check if already patched (initial_value=False)
+    if grep -q 'initial_value=False' "$sx126x_file" 2>/dev/null; then
+        print_info "GPIO initialization already patched"
+        return 0
+    fi
+    
+    # Apply the fix: change initial_value=True to initial_value=False
+    # This affects _get_output() and _try_get_output() functions
+    sed -i 's/_gpio_manager.setup_output_pin(pin, initial_value=True)/_gpio_manager.setup_output_pin(pin, initial_value=False)/g' "$sx126x_file"
+    
+    # Verify patch was applied
+    if grep -q 'initial_value=False' "$sx126x_file" 2>/dev/null; then
+        print_success "Patched SX126x.py GPIO initialization (initial_value=False)"
+    else
+        print_warning "GPIO patch may not have applied correctly"
     fi
 }
 
