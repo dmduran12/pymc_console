@@ -293,8 +293,9 @@ run_npm_with_progress() {
     local log_file=$(mktemp)
     local pid
     local start_time=$(date +%s)
-    local width=30
-    local cycle_frames=60  # frames per half-cycle (smoother animation)
+    local width=40
+    local cycle_frames=40  # frames per half-cycle (faster, smoother animation)
+    local cursor_width=2   # narrower cursor for higher fidelity
     
     # Start command in background
     eval "$cmd" > "$log_file" 2>&1 &
@@ -325,20 +326,34 @@ run_npm_with_progress() {
         local eased_t=$(cubic_ease_inout $linear_t)
         
         # Convert to bar position
-        local anim_pos=$(( (eased_t * (width - 3)) / 100 ))
+        local anim_pos=$(( (eased_t * (width - cursor_width)) / 100 ))
         
-        # Build bar
+        # Build bar with gradient effect using smaller Unicode blocks
         local bar=""
         for ((j=0; j<width; j++)); do
-            if [ $j -ge $anim_pos ] && [ $j -lt $((anim_pos + 3)) ]; then
-                bar+="█"
+            local dist_from_cursor
+            if [ $j -lt $anim_pos ]; then
+                dist_from_cursor=$((anim_pos - j))
+            elif [ $j -ge $((anim_pos + cursor_width)) ]; then
+                dist_from_cursor=$((j - anim_pos - cursor_width + 1))
             else
-                bar+="░"
+                dist_from_cursor=0
+            fi
+            
+            # Use gradient: ▓▒░ for trail effect
+            if [ $dist_from_cursor -eq 0 ]; then
+                bar+="█"  # Cursor
+            elif [ $dist_from_cursor -eq 1 ]; then
+                bar+="▓"  # Near trail
+            elif [ $dist_from_cursor -eq 2 ]; then
+                bar+="▒"  # Medium trail
+            else
+                bar+="░"  # Background
             fi
         done
         
         printf "\r        ${CYAN}[${bar}]${NC} %s ${DIM}(%dm %02ds)${NC}  " "$description" $mins $secs
-        sleep 0.05
+        sleep 0.033  # ~30fps for smoother animation
         ((frame++)) || true
     done
     
