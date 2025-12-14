@@ -1726,30 +1726,24 @@ do_uninstall() {
     echo ""
     
     # =========================================================================
-    # Step 1: Run upstream uninstaller first (via UPSTREAM INSTALLATION MANAGER)
+    # Step 1: Run upstream uninstaller (simple - no fancy progress bar needed)
     # =========================================================================
-    echo "[1/4] Running pyMC_Repeater uninstaller..."
+    echo "[1/4] Removing pyMC_Repeater..."
     
-    # Only run upstream uninstall if clone exists with manage.sh
-    if [ -f "$CLONE_DIR/manage.sh" ]; then
-        run_upstream_installer "uninstall" || {
-            echo "    ⚠ Upstream uninstall had issues, continuing with cleanup..."
-        }
-    else
-        echo "    Clone not found, performing manual cleanup..."
-        # Manual cleanup if no clone (matches what upstream does)
-        systemctl stop "$BACKEND_SERVICE" 2>/dev/null || true
-        systemctl disable "$BACKEND_SERVICE" 2>/dev/null || true
-        rm -f /etc/systemd/system/pymc-repeater.service
-        systemctl daemon-reload
-        rm -rf "$INSTALL_DIR"
-        rm -rf "$CONFIG_DIR"
-        rm -rf "$LOG_DIR"
-        rm -rf /var/lib/pymc_repeater
-        if id "$SERVICE_USER" &>/dev/null; then
-            userdel "$SERVICE_USER" 2>/dev/null || true
-        fi
+    # Always do manual cleanup - it's fast and reliable
+    # (upstream's uninstaller uses TUI which is complex to wrap)
+    systemctl stop "$BACKEND_SERVICE" 2>/dev/null || true
+    systemctl disable "$BACKEND_SERVICE" 2>/dev/null || true
+    rm -f /etc/systemd/system/pymc-repeater.service
+    systemctl daemon-reload
+    rm -rf "$INSTALL_DIR"
+    rm -rf "$CONFIG_DIR"
+    rm -rf "$LOG_DIR"
+    rm -rf /var/lib/pymc_repeater
+    if id "$SERVICE_USER" &>/dev/null; then
+        userdel "$SERVICE_USER" 2>/dev/null || true
     fi
+    echo "    ✓ pyMC_Repeater removed"
     
     # =========================================================================
     # Step 2: Remove pyMC Console extras (not handled by upstream)
@@ -1961,15 +1955,13 @@ FAKEDIALOG
 
 # Run upstream's manage.sh with a specific action, bypassing TUI
 # Usage: run_upstream_installer <action> [branch]
-# Actions: install, upgrade, uninstall
-# Features cubic easing progress bar with live viewport of upstream output
+# Actions: install, upgrade
 run_upstream_installer() {
     local action="$1"
     local branch="${2:-$DEFAULT_BRANCH}"
     local fake_dialog
     local upstream_script="$CLONE_DIR/manage.sh"
     local log_file=$(mktemp)
-    local viewport_file=$(mktemp)
     local exit_code=0
     
     # Verify clone exists
@@ -1991,9 +1983,6 @@ run_upstream_installer() {
     fi
     
     local start_time=$(date +%s)
-    local width=40
-    local cycle_frames=40
-    local cursor_width=2
     local description="pyMC_Repeater $action"
     
     # Run upstream's manage.sh with fake dialog in background
@@ -2008,89 +1997,18 @@ run_upstream_installer() {
         export TERM=xterm
         
         # Use 'script' to provide pseudo-TTY, pipe endless newlines for any 'read' prompts
-        # Linux uses: script -q -c "cmd" /dev/null
-        yes '' | script -q /dev/null -c "bash '$upstream_script' '$action'" 2>&1 | while IFS= read -r line; do
-            echo "$line" >> "$log_file"
-            # Strip ANSI codes and clean up for viewport
-            local clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
-            if [[ -n "$clean_line" && ! "$clean_line" =~ ^[[:space:]]*$ ]]; then
-                echo "${clean_line:0:50}" > "$viewport_file"
-            fi
-        done
+        yes '' | script -q /dev/null -c "bash '$upstream_script' '$action'" > "$log_file" 2>&1
     ) &
     local pid=$!
     
-    # Show animated progress bar with viewport while command runs
-    local frame=0
+    # Show spinner while command runs (simple, reliable)
+    local i=0
     while kill -0 $pid 2>/dev/null; do
         local elapsed=$(($(date +%s) - start_time))
         local mins=$((elapsed / 60))
         local secs=$((elapsed % 60))
-        
-        # Read current viewport line
-        local viewport=""
-        [ -f "$viewport_file" ] && viewport=$(cat "$viewport_file" 2>/dev/null | head -1)
-        [ -z "$viewport" ] && viewport="Initializing..."
-        
-        # Calculate position in cycle (0 to cycle_frames*2)
-        local cycle_pos=$(( frame % (cycle_frames * 2) ))
-        local going_right=1
-        [ $cycle_pos -ge $cycle_frames ] && going_right=0
-        
-        # Get linear position within half-cycle (0-100)
-        local linear_t
-        if [ $going_right -eq 1 ]; then
-            linear_t=$(( (cycle_pos * 100) / cycle_frames ))
-        else
-            linear_t=$(( ((cycle_frames * 2 - cycle_pos) * 100) / cycle_frames ))
-        fi
-        
-        # Apply cubic easing
-        local eased_t=$(cubic_ease_inout $linear_t)
-        local velocity=$(cubic_ease_velocity $linear_t)
-        
-        # Convert to bar position
-        local anim_pos=$(( (eased_t * (width - cursor_width)) / 100 ))
-        
-        # Motion blur based on velocity
-        local show_near_trail=0
-        [ $velocity -gt 60 ] && show_near_trail=1
-        local show_far_trail=0
-        [ $velocity -gt 85 ] && show_far_trail=1
-        local cursor_glow=0
-        [ $velocity -gt 90 ] && cursor_glow=1
-        
-        # Build bar with velocity-based effects
-        local bar=""
-        for ((j=0; j<width; j++)); do
-            local dist_from_cursor
-            if [ $j -lt $anim_pos ]; then
-                dist_from_cursor=$((anim_pos - j))
-            elif [ $j -ge $((anim_pos + cursor_width)) ]; then
-                dist_from_cursor=$((j - anim_pos - cursor_width + 1))
-            else
-                dist_from_cursor=0
-            fi
-            
-            if [ $dist_from_cursor -eq 0 ]; then
-                if [ $cursor_glow -eq 1 ]; then
-                    bar+="${WHITE}█${CYAN}"
-                else
-                    bar+="█"
-                fi
-            elif [ $dist_from_cursor -eq 1 ] && [ $show_near_trail -eq 1 ]; then
-                bar+="▓"
-            elif [ $dist_from_cursor -eq 2 ] && [ $show_far_trail -eq 1 ]; then
-                bar+="▒"
-            else
-                bar+="░"
-            fi
-        done
-        
-        # Print progress bar with viewport (single line, updates in place)
-        printf "\r        ${CYAN}[${bar}]${NC} ${DIM}%-50s${NC} ${DIM}(%dm %02ds)${NC}" "$viewport" $mins $secs
-        sleep 0.033
-        ((frame++)) || true
+        printf "\r        ${CYAN}%s${NC} %s ${DIM}(%dm %02ds)${NC}  " "${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1}" "$description" $mins $secs
+        sleep 0.1
     done
     
     # Get exit status
@@ -2106,10 +2024,10 @@ run_upstream_installer() {
     fi
     
     # Clean up
-    rm -f "$fake_dialog" "$viewport_file"
+    rm -f "$fake_dialog"
     
     # Clear line and show result
-    printf "\r%-120s\r" " "
+    printf "\r%-80s\r" " "
     if [ $exit_code -eq 0 ]; then
         echo -e "        ${CHECK} $description completed ${DIM}(${mins}m ${secs}s)${NC}"
         rm -f "$log_file"
