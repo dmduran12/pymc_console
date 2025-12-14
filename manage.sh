@@ -598,7 +598,7 @@ do_install() {
     echo -e "  ${DIM}Branch: $branch${NC}"
     echo -e "  ${DIM}Install directory: $INSTALL_DIR${NC}"
     
-    local total_steps=10
+    local total_steps=9
     
     # =========================================================================
     # Step 1: Create service user
@@ -641,7 +641,7 @@ do_install() {
         return 1
     }
     
-    run_with_spinner "Installing required packages" "apt-get install -y libffi-dev jq python3-pip python3-venv python3-rrdtool wget swig build-essential python3-dev curl git" || {
+    run_with_spinner "Installing required packages" "apt-get install -y libffi-dev jq python3-pip python3-rrdtool wget swig build-essential python3-dev curl git" || {
         print_error "Failed to install system packages"
         return 1
     }
@@ -654,26 +654,9 @@ do_install() {
     fi
     
     # =========================================================================
-    # Step 4: Create Python virtual environment
+    # Step 4: Clone pyMC_Repeater
     # =========================================================================
-    print_step 4 $total_steps "Setting up Python environment"
-    
-    run_with_spinner "Creating virtual environment" "python3 -m venv '$INSTALL_DIR/venv'" || {
-        print_error "Failed to create virtual environment"
-        return 1
-    }
-    
-    source "$INSTALL_DIR/venv/bin/activate"
-    
-    run_with_spinner "Upgrading pip" "pip install --upgrade pip wheel setuptools" || {
-        print_error "Failed to upgrade pip"
-        return 1
-    }
-    
-    # =========================================================================
-    # Step 5: Clone pyMC_Repeater
-    # =========================================================================
-    print_step 5 $total_steps "Cloning pyMC_Repeater@$branch"
+    print_step 4 $total_steps "Cloning pyMC_Repeater@$branch"
     
     run_npm_with_progress "Cloning repository" "git clone -b '$branch' https://github.com/rightup/pyMC_Repeater.git '$REPEATER_DIR'" || {
         print_error "Failed to clone pyMC_Repeater"
@@ -691,22 +674,22 @@ do_install() {
     patch_api_endpoints           # PATCH 2: Radio config API endpoint
     
     # =========================================================================
-    # Step 6: Install pyMC_Repeater + dependencies (including pymc_core)
+    # Step 5: Install pyMC_Repeater + dependencies (including pymc_core)
     # =========================================================================
-    print_step 6 $total_steps "Installing pyMC_Repeater + pymc_core (via pip)"
+    print_step 5 $total_steps "Installing pyMC_Repeater + pymc_core (via pip)"
     
-    # Match upstream: let pip resolve ALL dependencies from pyproject.toml
+    # Match upstream: use system Python with --break-system-packages
     # This installs pymc_core[hardware] automatically as a dependency
-    run_npm_with_progress "Installing Python packages" "pip install --force-reinstall --no-cache-dir ." || {
+    run_npm_with_progress "Installing Python packages" "pip install --break-system-packages --force-reinstall --no-cache-dir ." || {
         print_error "Failed to install pyMC_Repeater package"
         print_info "Branch '$branch' must exist in both pymc_core and pyMC_Repeater repos"
         return 1
     }
     
     # =========================================================================
-    # Step 7: Setup configuration
+    # Step 6: Setup configuration
     # =========================================================================
-    print_step 7 $total_steps "Setting up configuration"
+    print_step 6 $total_steps "Setting up configuration"
     
     cp "$REPEATER_DIR/config.yaml.example" "$CONFIG_DIR/config.yaml.example" && \
         print_success "Copied example configuration"
@@ -730,17 +713,17 @@ do_install() {
     fi
     
     # =========================================================================
-    # Step 8: Create backend systemd service
+    # Step 7: Create backend systemd service
     # =========================================================================
-    print_step 8 $total_steps "Creating backend service"
+    print_step 7 $total_steps "Creating backend service"
     
     create_backend_service
     print_success "Created pymc-repeater.service"
     
     # =========================================================================
-    # Step 9: Install static frontend
+    # Step 8: Install static frontend
     # =========================================================================
-    print_step 9 $total_steps "Installing static frontend"
+    print_step 8 $total_steps "Installing static frontend"
     
     install_static_frontend || {
         print_error "Frontend installation failed"
@@ -748,9 +731,9 @@ do_install() {
     }
     
     # =========================================================================
-    # Step 10: Finalize and start services
+    # Step 9: Finalize and start services
     # =========================================================================
-    print_step 10 $total_steps "Finalizing installation"
+    print_step 9 $total_steps "Finalizing installation"
     
     print_info "Setting permissions..."
     chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" /var/lib/pymc_repeater
@@ -901,7 +884,6 @@ do_upgrade() {
     # Step 4: Update Python packages
     # =========================================================================
     print_step 4 $total_steps "Updating Python packages"
-    source "$INSTALL_DIR/venv/bin/activate"
     
     # -------------------------------------------------------------------------
     # Apply upstream patches to pyMC_Repeater (see UPSTREAM PATCHES section)
@@ -910,9 +892,9 @@ do_upgrade() {
     patch_nextjs_static_serving   # PATCH 1: Next.js static export support
     patch_api_endpoints           # PATCH 2: Radio config API endpoint
     
-    # Match upstream: let pip resolve ALL dependencies from pyproject.toml
+    # Match upstream: use system Python with --break-system-packages
     # This installs/updates pymc_core[hardware] automatically as a dependency
-    run_npm_with_progress "Installing pyMC_Repeater + dependencies" "pip install --force-reinstall --no-cache-dir ." || {
+    run_npm_with_progress "Installing pyMC_Repeater + dependencies" "pip install --break-system-packages --force-reinstall --no-cache-dir ." || {
         print_error "Failed to install pyMC_Repeater"
         print_info "Branch '$branch' must exist in both pymc_core and pyMC_Repeater repos"
         return 1
@@ -2110,11 +2092,9 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$REPEATER_DIR
 Environment="PYTHONPATH=$REPEATER_DIR"
-Environment="PYTHONUNBUFFERED=1"
 
-# Start command - use python module directly with proper path
-# Note: --log-level DEBUG is required to fix a timing bug in interrupt setup
-ExecStart=$INSTALL_DIR/venv/bin/python -m repeater.main --config $CONFIG_DIR/config.yaml --log-level DEBUG
+# Start command - use system python (matches upstream)
+ExecStart=/usr/bin/python3 -m repeater.main --config $CONFIG_DIR/config.yaml
 
 # Restart on failure
 Restart=on-failure

@@ -64,10 +64,10 @@ The dashboard is a **static export** (`output: 'export'` in next.config.ts). Aft
 
 - `/opt/pymc_console/` - Main install directory
 - `/opt/pymc_console/pymc_repeater/` - Cloned pyMC_Repeater repo
-- `/opt/pymc_console/venv/` - Python virtual environment
 - `/etc/pymc_repeater/config.yaml` - Radio and repeater configuration
 - `/var/log/pymc_repeater/` - Log files
 - Systemd service: `pymc-repeater.service`
+- Python packages installed system-wide (via `pip --break-system-packages`)
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -167,9 +167,9 @@ manage.sh applies patches to pyMC_Repeater during install:
 
 These should eventually be merged upstream to pyMC_Repeater.
 
-### Important: DEBUG Log Level Fix
+### Important: System Python (No Virtualenv)
 
-The systemd service uses `--log-level DEBUG` which is **required** to fix a timing bug in pymc_core's interrupt initialization. Without it, the asyncio event loop isn't ready when interrupt callbacks register, causing RX to silently fail.
+The installer uses system Python with `--break-system-packages` to match upstream pyMC_Repeater. This is critical - using a virtualenv caused timing-related issues with GPIO interrupt initialization that manifested as RX failures, especially on faster hardware like Pi 5.
 
 ## Configuration
 
