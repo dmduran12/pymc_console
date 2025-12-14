@@ -2180,53 +2180,33 @@ patch_pymc_core_gpio() {
         else
             # Check if this is the dev branch version (has _control_tx_rx_pins method)
             if grep -q '_control_tx_rx_pins' "$wrapper_file" 2>/dev/null; then
-                # Find the line with 'self.lora.request(self.lora.RX_CONTINUOUS)' in the begin() method
-                # We need to insert _control_tx_rx_pins(tx_mode=False) before it
-                # The init version is the one NOT inside a try block's nested code
+                # Insert _control_tx_rx_pins(tx_mode=False) before the RX_CONTINUOUS call in begin()
+                # The init RX_CONTINUOUS has 12 spaces of indentation (not deeply nested)
+                # Use sed to find and insert before the pattern
                 
-                # Use Python for precise patching
-                python3 << PATCHEOF
-import re
-
-wrapper_file = "$wrapper_file"
-with open(wrapper_file, 'r') as f:
-    content = f.read()
-
-# Find the RX_CONTINUOUS call in the begin() method (the one with simple indentation)
-# Pattern: line starting with spaces, then self.lora.request(self.lora.RX_CONTINUOUS)
-# We want the one in begin(), not the ones in try/except blocks (which have more indentation)
-pattern = r'(\\n            )(self\\.lora\\.request\\(self\\.lora\\.RX_CONTINUOUS\\))'
-
-# Count occurrences to find the init one (usually around line 686)
-matches = list(re.finditer(pattern, content))
-
-if matches:
-    # Find the match that's in the begin() method (check context)
-    for match in matches:
-        start = match.start()
-        # Get surrounding context (100 chars before)
-        context_before = content[max(0, start-200):start]
-        # The init one comes after CAD threshold code or LDRO code
-        if 'CAD threshold' in context_before or 'Custom CAD' in context_before or 'LDRO' in context_before:
-            # This is the init call - insert our fix before it
-            insert_text = '\\n            # Set RF switch to RX mode before entering RX continuous\\n            self._control_tx_rx_pins(tx_mode=False)'
-            content = content[:match.start()] + insert_text + content[match.start():]
-            
-            with open(wrapper_file, 'w') as f:
-                f.write(content)
-            print("Patched sx1262_wrapper.py with RF switch init")
-            break
-    else:
-        print("Could not find init RX_CONTINUOUS call")
-else:
-    print("RX_CONTINUOUS pattern not found")
-PATCHEOF
+                # First, find the line number of the init RX_CONTINUOUS (the one after CAD/LDRO setup)
+                local line_num=$(grep -n 'self.lora.request(self.lora.RX_CONTINUOUS)' "$wrapper_file" | \
+                    while IFS=: read num line; do
+                        # Check context - init call comes after CAD threshold setup
+                        local context=$(sed -n "$((num-10)),$((num-1))p" "$wrapper_file" 2>/dev/null)
+                        if echo "$context" | grep -qE '(CAD threshold|Custom CAD|LDRO)'; then
+                            echo "$num"
+                            break
+                        fi
+                    done)
                 
-                if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
-                    print_success "Fix C: RF switch init in sx1262_wrapper.py"
-                    ((patches_applied++))
+                if [ -n "$line_num" ]; then
+                    # Insert our fix before that line
+                    sed -i "${line_num}i\\            # Set RF switch to RX mode before entering RX continuous\n            self._control_tx_rx_pins(tx_mode=False)" "$wrapper_file"
+                    
+                    if grep -q 'Set RF switch to RX mode before entering RX continuous' "$wrapper_file" 2>/dev/null; then
+                        print_success "Fix C: RF switch init in sx1262_wrapper.py"
+                        ((patches_applied++))
+                    else
+                        print_warning "Fix C may not have applied correctly"
+                    fi
                 else
-                    print_warning "Fix C may not have applied correctly"
+                    print_warning "Fix C: Could not find init RX_CONTINUOUS call"
                 fi
             else
                 print_info "Fix C not needed (no _control_tx_rx_pins method found)"
