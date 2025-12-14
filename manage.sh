@@ -1034,20 +1034,21 @@ configure_radio_terminal() {
     if [ $preset_count -eq 0 ]; then
         echo -e "  ${YELLOW}Could not fetch presets from API. Showing common options:${NC}"
         echo ""
-        # Fallback presets with common MeshCore configurations
-        preset_titles=("MeshCore USA" "MeshCore EU" "MeshCore UK" "MeshCore AU/NZ" "Long Range USA" "Long Range EU")
-        preset_freqs=("906.875" "869.525" "869.525" "917.0" "903.9" "869.4")
-        preset_sfs=("11" "11" "11" "11" "12" "12")
-        preset_bws=("250" "250" "250" "250" "125" "125")
-        preset_crs=("5" "5" "5" "5" "8" "8")
+        # Fallback presets - matches upstream api.meshcore.nz/api/v1/config + WestCoastMesh
+        preset_titles=("USA/Canada (Recommended)" "Australia" "EU/UK (Long Range)" "EU/UK (Narrow)" "New Zealand" "New Zealand (Narrow)" "WestCoastMesh US")
+        preset_freqs=("910.525" "915.800" "869.525" "869.618" "917.375" "917.375" "927.875")
+        preset_sfs=("7" "10" "11" "8" "11" "7" "7")
+        preset_bws=("62.5" "250" "250" "62.5" "250" "62.5" "62.5")
+        preset_crs=("5" "5" "5" "8" "5" "5" "5")
         preset_count=${#preset_titles[@]}
         
-        echo -e "  ${CYAN}1)${NC} MeshCore USA      ${DIM}(906.875MHz SF11 BW250kHz - Americas default)${NC}"
-        echo -e "  ${CYAN}2)${NC} MeshCore EU       ${DIM}(869.525MHz SF11 BW250kHz - Europe default)${NC}"
-        echo -e "  ${CYAN}3)${NC} MeshCore UK       ${DIM}(869.525MHz SF11 BW250kHz - UK ISM band)${NC}"
-        echo -e "  ${CYAN}4)${NC} MeshCore AU/NZ    ${DIM}(917.0MHz SF11 BW250kHz - Australia/NZ)${NC}"
-        echo -e "  ${CYAN}5)${NC} Long Range USA    ${DIM}(903.9MHz SF12 BW125kHz - Max range, slower)${NC}"
-        echo -e "  ${CYAN}6)${NC} Long Range EU     ${DIM}(869.4MHz SF12 BW125kHz - Max range, slower)${NC}"
+        echo -e "  ${CYAN}1)${NC} USA/Canada        ${DIM}(910.525MHz SF7 BW62.5kHz CR5 - Recommended)${NC}"
+        echo -e "  ${CYAN}2)${NC} Australia         ${DIM}(915.800MHz SF10 BW250kHz CR5)${NC}"
+        echo -e "  ${CYAN}3)${NC} EU/UK Long Range  ${DIM}(869.525MHz SF11 BW250kHz CR5)${NC}"
+        echo -e "  ${CYAN}4)${NC} EU/UK Narrow      ${DIM}(869.618MHz SF8 BW62.5kHz CR8)${NC}"
+        echo -e "  ${CYAN}5)${NC} New Zealand       ${DIM}(917.375MHz SF11 BW250kHz CR5)${NC}"
+        echo -e "  ${CYAN}6)${NC} New Zealand Narrow ${DIM}(917.375MHz SF7 BW62.5kHz CR5)${NC}"
+        echo -e "  ${CYAN}7)${NC} WestCoastMesh US  ${DIM}(927.875MHz SF7 BW62.5kHz CR5 - SoCal optimized)${NC}"
     fi
     
     echo -e "  ${CYAN}C)${NC} Custom ${DIM}(enter values manually)${NC}"
@@ -1115,22 +1116,22 @@ configure_radio_terminal() {
         print_warning "Invalid selection, keeping current radio settings"
     fi
     
-    # TX Power
+    # Hardware selection (before TX power so user can override hardware default)
     echo ""
-    local current_power=$(yq '.radio.tx_power' "$config_file" 2>/dev/null || echo "14")
-    read -p "  TX Power in dBm [$current_power]: " tx_power
-    tx_power=${tx_power:-$current_power}
-    yq -i ".radio.tx_power = $tx_power" "$config_file"
-    print_success "TX Power: ${tx_power}dBm"
-    
-    echo ""
-    
-    # Hardware selection
     echo -e "  ${BOLD}Hardware Selection${NC}"
     echo -e "  ${DIM}Select your LoRa hardware for GPIO configuration${NC}"
     echo ""
     
     configure_hardware_terminal "$config_file"
+    
+    # TX Power (after hardware selection so user's choice takes precedence)
+    echo -e "  ${BOLD}TX Power${NC}"
+    local current_power=$(yq '.radio.tx_power' "$config_file" 2>/dev/null || echo "22")
+    read -p "  TX Power in dBm [$current_power]: " tx_power
+    tx_power=${tx_power:-$current_power}
+    yq -i ".radio.tx_power = $tx_power" "$config_file"
+    print_success "TX Power: ${tx_power}dBm"
+    echo ""
 }
 
 # Terminal-based hardware/GPIO configuration
@@ -1244,6 +1245,7 @@ configure_hardware_terminal() {
             yq -i ".sx1262.rxen_pin = $rxen_pin" "$config_file"
             yq -i ".sx1262.is_waveshare = $is_waveshare" "$config_file"
             yq -i ".sx1262.use_dio3_tcxo = $use_dio3_tcxo" "$config_file"
+            # Note: tx_power is set as default but user can override in next step
             yq -i ".radio.tx_power = $tx_power" "$config_file"
             yq -i ".radio.preamble_length = $preamble_length" "$config_file"
             
@@ -1253,7 +1255,7 @@ configure_hardware_terminal() {
             if [ "$txen_pin" != "-1" ]; then
                 print_info "TX/RX Enable: TXEN=$txen_pin RXEN=$rxen_pin"
             fi
-            print_info "TX Power: ${tx_power}dBm"
+            print_info "Default TX Power: ${tx_power}dBm (you can change this next)"
         fi
     else
         print_warning "Invalid selection, keeping current GPIO settings"
@@ -2110,15 +2112,16 @@ install_backend_service() {
     if [ -f "$REPEATER_DIR/pymc-repeater.service" ]; then
         cp "$REPEATER_DIR/pymc-repeater.service" /etc/systemd/system/pymc-repeater.service
         
-        # WORKAROUND: Add --log-level DEBUG to fix pymc_core timing bug on Pi 5
+        # WORKAROUND (DISABLED FOR TESTING): Add --log-level DEBUG to fix pymc_core timing bug on Pi 5
         # Issue: asyncio event loop not ready when interrupt callbacks register
         # This slows down initialization enough for the event loop to start
         # TODO: File upstream issue at github.com/rightup/pyMC_core
-        sed -i 's|--config /etc/pymc_repeater/config.yaml$|--config /etc/pymc_repeater/config.yaml --log-level DEBUG|' \
-            /etc/systemd/system/pymc-repeater.service
+        # Uncomment below if RX still doesn't work without DEBUG:
+        # sed -i 's|--config /etc/pymc_repeater/config.yaml$|--config /etc/pymc_repeater/config.yaml --log-level DEBUG|' \
+        #     /etc/systemd/system/pymc-repeater.service
         
         print_success "Installed upstream service file"
-        print_info "Added --log-level DEBUG workaround for Pi 5 timing bug"
+        # print_info "Added --log-level DEBUG workaround for Pi 5 timing bug"
     else
         print_error "Service file not found in pyMC_Repeater repo"
         return 1
