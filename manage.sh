@@ -1738,8 +1738,10 @@ install_yq_silent() {
     wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" && chmod +x /usr/local/bin/yq
 }
 
-# Patch pyMC_Repeater's http_server.py to support Next.js static assets
-# This adds /_next and /images routes for serving the Next.js dashboard
+# Patch pyMC_Repeater's http_server.py to support Next.js static export
+# This adds:
+#   1. Route-specific index.html serving in default() for client-side routing
+#   2. /_next and /images static directory routes
 # TODO: Remove this patch once upstream pyMC_Repeater supports Next.js
 patch_nextjs_static_serving() {
     local http_server="$REPEATER_DIR/repeater/web/http_server.py"
@@ -1749,24 +1751,108 @@ patch_nextjs_static_serving() {
         return 0
     fi
     
-    # Check if already patched (look for _next)
-    if grep -q '"/_next"' "$http_server" 2>/dev/null; then
+    # Check if already patched (look for route_path which is unique to our patch)
+    if grep -q 'route_path = os.path.join' "$http_server" 2>/dev/null; then
         print_info "Next.js static serving already configured"
         return 0
     fi
     
-    # Apply patch using sed
-    # 1. Add next_dir and images_dir variables after assets_dir
-    sed -i 's|assets_dir = os.path.join(html_dir, "assets")|assets_dir = os.path.join(html_dir, "assets")\n            next_dir = os.path.join(html_dir, "_next")  # Next.js static assets\n            images_dir = os.path.join(html_dir, "images")  # Images directory|' "$http_server"
-    
-    # 2. Add /_next route config after /assets block
-    sed -i '/"\/favicon.ico": {/i\                # Next.js static assets (CSS, JS, fonts)\n                "/_next": {\n                    "tools.staticdir.on": True,\n                    "tools.staticdir.dir": next_dir,\n                    "tools.staticdir.content_types": {\n                        '"'"'js'"'"': '"'"'application/javascript'"'"',\n                        '"'"'css'"'"': '"'"'text/css'"'"',\n                        '"'"'woff2'"'"': '"'"'font/woff2'"'"',\n                        '"'"'woff'"'"': '"'"'font/woff'"'"',\n                    },\n                },\n                # Images directory\n                "/images": {\n                    "tools.staticdir.on": True,\n                    "tools.staticdir.dir": images_dir,\n                },' "$http_server"
-    
-    # 3. Add CORS for new routes
-    sed -i 's|config\["/favicon.ico"\]\["cors.expose.on"\] = True|config["/_next"]["cors.expose.on"] = True\n                config["/images"]["cors.expose.on"] = True\n                config["/favicon.ico"]["cors.expose.on"] = True|' "$http_server"
+    # Use Python to apply the patch reliably (sed is fragile for multi-line changes)
+    python3 << PATCHEOF
+import re
+import os
+
+http_server_path = "$http_server"
+
+with open(http_server_path, 'r') as f:
+    content = f.read()
+
+# 1. Patch the default() method to serve route-specific index.html files
+# Match the default method and replace just the body after the API check
+old_pattern = r'''(    @cherrypy\.expose
+    def default\(self, \*args, \*\*kwargs\):.*?# Let API routes pass through
+        if args and args\[0\] == 'api':
+            raise cherrypy\.NotFound\(\)
+        
+        # For )(all other routes, serve the Vue\.js app \(client-side routing\)|any other route, serve index\.html \(Vue router handles it\))(
+        return self\.index\(\))'''
+
+new_body = r'''\1Next.js static export, try to serve the specific route's index.html
+        # e.g., /packets/ -> html/packets/index.html
+        if args:
+            # Build path to route-specific index.html
+            route_path = os.path.join(self.html_dir, *args, "index.html")
+            if os.path.isfile(route_path):
+                try:
+                    with open(route_path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                except Exception as e:
+                    logger.error(f"Error serving {route_path}: {e}")
+        
+        # Fallback to root index.html for SPA routing
+        return self.index()'''
+
+content = re.sub(old_pattern, new_body, content, flags=re.DOTALL)
+
+# Update docstring
+content = content.replace(
+    'Handle client-side routing - serve index.html for all non-API routes.',
+    'Handle routing for static export - serve the correct index.html for each route.'
+)
+
+# 2. Add next_dir and images_dir after assets_dir
+if 'next_dir = os.path.join' not in content:
+    content = content.replace(
+        'assets_dir = os.path.join(html_dir, "assets")',
+        '''assets_dir = os.path.join(html_dir, "assets")
+            next_dir = os.path.join(html_dir, "_next")  # Next.js static assets
+            images_dir = os.path.join(html_dir, "images")  # Images directory'''
+    )
+
+# 3. Add /_next and /images route configs before /favicon.ico
+if '"/_next":' not in content:
+    next_config = '''# Next.js static assets (CSS, JS, fonts, etc.)
+                "/_next": {
+                    "tools.staticdir.on": True,
+                    "tools.staticdir.dir": next_dir,
+                    "tools.staticdir.content_types": {
+                        'js': 'application/javascript',
+                        'css': 'text/css',
+                        'map': 'application/json',
+                        'woff2': 'font/woff2',
+                        'woff': 'font/woff',
+                        'ttf': 'font/ttf',
+                    },
+                },
+                # Images directory
+                "/images": {
+                    "tools.staticdir.on": True,
+                    "tools.staticdir.dir": images_dir,
+                },
+                "/favicon.ico": {'''
+    content = content.replace('"/favicon.ico": {', next_config)
+
+# 4. Add CORS for new routes
+if 'config["/_next"]' not in content and 'config["/favicon.ico"]["cors.expose.on"]' in content:
+    content = content.replace(
+        'config["/favicon.ico"]["cors.expose.on"] = True',
+        '''config["/_next"]["cors.expose.on"] = True
+                config["/images"]["cors.expose.on"] = True
+                config["/favicon.ico"]["cors.expose.on"] = True'''
+    )
+
+# Update comment from Vue.js to frontend
+content = content.replace(
+    '# Serve static files from the html directory (compiled Vue.js app)',
+    '# Serve static files from the html directory (compiled frontend app)'
+)
+
+with open(http_server_path, 'w') as f:
+    f.write(content)
+PATCHEOF
     
     # Verify patch was applied
-    if grep -q '"/_next"' "$http_server" 2>/dev/null; then
+    if grep -q 'route_path = os.path.join' "$http_server" 2>/dev/null; then
         print_success "Patched http_server.py for Next.js static serving"
     else
         print_warning "Patch may not have applied correctly"
