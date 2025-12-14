@@ -125,23 +125,23 @@ export default function SystemStatsPage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-text-muted">Usage</span>
-                <span className="text-text-primary font-medium">{stats.cpu_percent.toFixed(1)}%</span>
+                <span className="text-text-primary font-medium">{stats.cpu.usage_percent.toFixed(1)}%</span>
               </div>
-              <ProgressBar value={stats.cpu_percent} />
-              {stats.load_average && stats.load_average.length >= 3 && (
+              <ProgressBar value={stats.cpu.usage_percent} />
+              {stats.cpu.load_avg && (
                 <div className="mt-4 pt-4 border-t border-border-subtle">
                   <p className="text-sm text-text-muted mb-2">Load Average</p>
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div>
-                      <p className="text-lg font-medium text-text-primary">{stats.load_average[0].toFixed(2)}</p>
+                      <p className="text-lg font-medium text-text-primary">{stats.cpu.load_avg['1min'].toFixed(2)}</p>
                       <p className="text-xs text-text-muted">1 min</p>
                     </div>
                     <div>
-                      <p className="text-lg font-medium text-text-primary">{stats.load_average[1].toFixed(2)}</p>
+                      <p className="text-lg font-medium text-text-primary">{stats.cpu.load_avg['5min'].toFixed(2)}</p>
                       <p className="text-xs text-text-muted">5 min</p>
                     </div>
                     <div>
-                      <p className="text-lg font-medium text-text-primary">{stats.load_average[2].toFixed(2)}</p>
+                      <p className="text-lg font-medium text-text-primary">{stats.cpu.load_avg['15min'].toFixed(2)}</p>
                       <p className="text-xs text-text-muted">15 min</p>
                     </div>
                   </div>
@@ -164,15 +164,15 @@ export default function SystemStatsPage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-text-muted">Usage</span>
-                <span className="text-text-primary font-medium">{stats.memory_percent.toFixed(1)}%</span>
+                <span className="text-text-primary font-medium">{stats.memory.usage_percent.toFixed(1)}%</span>
               </div>
-              <ProgressBar value={stats.memory_percent} color="secondary" />
+              <ProgressBar value={stats.memory.usage_percent} color="secondary" />
               <div className="flex justify-between text-sm mt-2">
                 <span className="text-text-muted">
-                  {stats.memory_used_mb.toFixed(0)} MB used
+                  {(stats.memory.used / (1024 * 1024)).toFixed(0)} MB used
                 </span>
                 <span className="text-text-muted">
-                  {stats.memory_total_mb.toFixed(0)} MB total
+                  {(stats.memory.total / (1024 * 1024)).toFixed(0)} MB total
                 </span>
               </div>
             </div>
@@ -192,15 +192,15 @@ export default function SystemStatsPage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-text-muted">Usage</span>
-                <span className="text-text-primary font-medium">{stats.disk_percent.toFixed(1)}%</span>
+                <span className="text-text-primary font-medium">{stats.disk.usage_percent.toFixed(1)}%</span>
               </div>
-              <ProgressBar value={stats.disk_percent} color="green" />
+              <ProgressBar value={stats.disk.usage_percent} color="green" />
               <div className="flex justify-between text-sm mt-2">
                 <span className="text-text-muted">
-                  {stats.disk_used_gb.toFixed(1)} GB used
+                  {(stats.disk.used / (1024 * 1024 * 1024)).toFixed(1)} GB used
                 </span>
                 <span className="text-text-muted">
-                  {stats.disk_total_gb.toFixed(1)} GB total
+                  {(stats.disk.total / (1024 * 1024 * 1024)).toFixed(1)} GB total
                 </span>
               </div>
             </div>
@@ -214,26 +214,42 @@ export default function SystemStatsPage() {
               </div>
               <div>
                 <h2 className="text-lg font-medium text-text-primary">Temperature</h2>
-                <p className="text-sm text-text-muted">CPU temperature</p>
+                <p className="text-sm text-text-muted">System temperatures</p>
               </div>
             </div>
-            {stats.temperature !== undefined && stats.temperature !== null ? (
+            {stats.temperatures && Object.keys(stats.temperatures).length > 0 ? (
               <div className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-text-muted">Current</span>
-                  <span className="text-text-primary font-medium">{stats.temperature.toFixed(1)}°C</span>
-                </div>
-                <ProgressBar value={stats.temperature} max={100} color="yellow" />
-                <p className="text-xs text-text-muted mt-2">
-                  {stats.temperature < 50 ? 'Normal operating temperature' : 
-                   stats.temperature < 70 ? 'Warm - consider cooling' : 
-                   'Hot - check cooling system'}
-                </p>
+                {/* Show CPU thermal as primary */}
+                {stats.temperatures.cpu_thermal !== undefined && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-text-muted">CPU</span>
+                      <span className="text-text-primary font-medium">{stats.temperatures.cpu_thermal.toFixed(1)}°C</span>
+                    </div>
+                    <ProgressBar value={stats.temperatures.cpu_thermal} max={100} color="yellow" />
+                    <p className="text-xs text-text-muted mt-2">
+                      {stats.temperatures.cpu_thermal < 50 ? 'Normal operating temperature' : 
+                       stats.temperatures.cpu_thermal < 70 ? 'Warm - consider cooling' : 
+                       'Hot - check cooling system'}
+                    </p>
+                  </>
+                )}
+                {/* Show other temps */}
+                {Object.entries(stats.temperatures)
+                  .filter(([key]) => key !== 'cpu_thermal')
+                  .slice(0, 3)
+                  .map(([key, value]) => (
+                    <div key={key} className="flex justify-between text-sm pt-2 border-t border-border-subtle">
+                      <span className="text-text-muted">{key.replace(/_/g, ' ')}</span>
+                      <span className="text-text-secondary">{value.toFixed(1)}°C</span>
+                    </div>
+                  ))
+                }
               </div>
             ) : (
               <div className="flex items-center justify-center h-24 text-text-muted">
                 <Activity className="w-5 h-5 mr-2" />
-                Temperature sensor not available
+                Temperature sensors not available
               </div>
             )}
           </div>

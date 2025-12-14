@@ -186,16 +186,41 @@ export interface PacketTypeStats {
   [key: string]: number;
 }
 
+// Hardware stats - matches pyMC_Repeater's StorageCollector.get_hardware_stats()
 export interface HardwareStats {
-  cpu_percent: number;
-  memory_percent: number;
-  memory_used_mb: number;
-  memory_total_mb: number;
-  disk_percent: number;
-  disk_used_gb: number;
-  disk_total_gb: number;
-  temperature?: number;
-  load_average: number[];
+  cpu: {
+    usage_percent: number;
+    count: number;
+    frequency: number;
+    load_avg: {
+      '1min': number;
+      '5min': number;
+      '15min': number;
+    };
+  };
+  memory: {
+    total: number;      // bytes
+    available: number;  // bytes
+    used: number;       // bytes
+    usage_percent: number;
+  };
+  disk: {
+    total: number;      // bytes
+    used: number;       // bytes
+    free: number;       // bytes
+    usage_percent: number;
+  };
+  network: {
+    bytes_sent: number;
+    bytes_recv: number;
+    packets_sent: number;
+    packets_recv: number;
+  };
+  system: {
+    uptime: number;     // seconds
+    boot_time: number;  // unix timestamp
+  };
+  temperatures: Record<string, number>;  // e.g. { cpu_thermal: 46.3, nvme_0: 45.85 }
 }
 
 export interface ApiResponse<T> {
