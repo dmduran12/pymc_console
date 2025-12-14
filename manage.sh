@@ -53,7 +53,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-CYAN_GLOW='\033[97;48;5;51m'  # White on bright cyan background for intense glow
+WHITE='\033[97m'  # Bright white for glow effect
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m' # No Color
@@ -395,11 +395,11 @@ run_npm_with_progress() {
             
             # Build character with motion blur effect
             if [ $dist_from_cursor -eq 0 ]; then
-                # Solid cursor - glow at apex velocity
+                # Solid cursor - glow at apex velocity (just turns white)
                 if [ $cursor_glow -eq 1 ]; then
-                    bar+="${CYAN_GLOW}█${NC}${CYAN}"  # Intense glowing cursor
+                    bar+="${WHITE}█${CYAN}"  # White cursor at peak velocity
                 else
-                    bar+="█"  # Normal cursor
+                    bar+="█"  # Normal cyan cursor
                 fi
             elif [ $dist_from_cursor -eq 1 ] && [ $show_near_trail -eq 1 ]; then
                 bar+="▓"  # Near motion blur - appears when moving
