@@ -864,6 +864,9 @@ do_upgrade() {
         return 1
     }
     
+    # Patch backend to support Next.js static file serving
+    patch_nextjs_static_serving
+    
     run_with_spinner "Installing pyMC_Repeater" "pip install -e . --no-deps" || {
         print_error "Failed to install pyMC_Repeater"
         return 1
