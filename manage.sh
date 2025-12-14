@@ -27,7 +27,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-CYAN_BRIGHT='\033[1;96m'  # Bright/bold cyan for glow effect
+CYAN_GLOW='\033[97;48;5;51m'  # White on bright cyan background for intense glow
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m' # No Color
@@ -345,15 +345,15 @@ run_npm_with_progress() {
         local anim_pos=$(( (eased_t * (width - cursor_width)) / 100 ))
         
         # Determine trail intensity based on velocity (motion blur when fast)
-        # velocity 0-30: no trail, 30-70: short trail, 70+: full trail
+        # velocity 0-60: no trail, 60-85: near trail, 85+: full trail
         local show_near_trail=0
-        [ $velocity -gt 30 ] && show_near_trail=1
+        [ $velocity -gt 60 ] && show_near_trail=1
         local show_far_trail=0
-        [ $velocity -gt 70 ] && show_far_trail=1
+        [ $velocity -gt 85 ] && show_far_trail=1
         
-        # Glow on cursor at apex velocity (tight window: 85-100%)
+        # Glow on cursor at apex velocity (tight window: 90-100%)
         local cursor_glow=0
-        [ $velocity -gt 85 ] && cursor_glow=1
+        [ $velocity -gt 90 ] && cursor_glow=1
         
         # Build bar with velocity-based effects
         local bar=""
@@ -371,7 +371,7 @@ run_npm_with_progress() {
             if [ $dist_from_cursor -eq 0 ]; then
                 # Solid cursor - glow at apex velocity
                 if [ $cursor_glow -eq 1 ]; then
-                    bar+="${CYAN_BRIGHT}█${CYAN}"  # Glowing cursor
+                    bar+="${CYAN_GLOW}█${NC}${CYAN}"  # Intense glowing cursor
                 else
                     bar+="█"  # Normal cursor
                 fi
