@@ -636,11 +636,12 @@ do_install() {
     
     cd "$REPEATER_DIR"
     
-    # Patch backend to support Next.js static file serving
-    patch_nextjs_static_serving
-    
-    # Patch API endpoints for radio config updates
-    patch_api_endpoints
+    # -------------------------------------------------------------------------
+    # Apply upstream patches (see UPSTREAM PATCHES section for details)
+    # These will be removed once merged into pyMC_Repeater
+    # -------------------------------------------------------------------------
+    patch_nextjs_static_serving   # PATCH 1: Next.js static export support
+    patch_api_endpoints           # PATCH 2: Radio config API endpoint
     
     # =========================================================================
     # Step 6: Install pyMC_Repeater + dependencies (including pymc_core)
@@ -855,11 +856,12 @@ do_upgrade() {
     print_step 4 $total_steps "Updating Python packages"
     source "$INSTALL_DIR/venv/bin/activate"
     
-    # Patch backend to support Next.js static file serving
-    patch_nextjs_static_serving
-    
-    # Patch API endpoints for radio config updates
-    patch_api_endpoints
+    # -------------------------------------------------------------------------
+    # Apply upstream patches (see UPSTREAM PATCHES section for details)
+    # These will be removed once merged into pyMC_Repeater
+    # -------------------------------------------------------------------------
+    patch_nextjs_static_serving   # PATCH 1: Next.js static export support
+    patch_api_endpoints           # PATCH 2: Radio config API endpoint
     
     # Match upstream: let pip resolve ALL dependencies from pyproject.toml
     # This installs/updates pymc_core[hardware] automatically as a dependency
@@ -1738,11 +1740,42 @@ install_yq_silent() {
     wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" && chmod +x /usr/local/bin/yq
 }
 
-# Patch pyMC_Repeater's http_server.py to support Next.js static export
-# This adds:
-#   1. Route-specific index.html serving in default() for client-side routing
-#   2. /_next and /images static directory routes
-# TODO: Remove this patch once upstream pyMC_Repeater supports Next.js
+# ============================================================================
+# UPSTREAM PATCHES
+# ============================================================================
+# These patches modify pyMC_Repeater to support pymc_console features.
+# They are applied during install/upgrade and should be converted to a
+# clean PR for https://github.com/rightup/pyMC_Repeater once stable.
+#
+# PATCH REGISTRY:
+# ---------------
+# 1. patch_nextjs_static_serving (http_server.py)
+#    - Adds route-specific index.html serving for Next.js static export
+#    - Adds /_next and /images static directory routes
+#    - PR Status: Pending
+#
+# 2. patch_api_endpoints (api_endpoints.py)
+#    - Adds POST /api/update_radio_config endpoint
+#    - Allows web UI to update radio settings and save to config.yaml
+#    - PR Status: Pending
+#
+# To generate clean patches for upstream PR:
+#   1. Clone fresh pyMC_Repeater
+#   2. Apply patches via manage.sh upgrade
+#   3. git diff > patches/feature-name.patch
+# ============================================================================
+
+# ------------------------------------------------------------------------------
+# PATCH 1: Next.js Static Export Support
+# ------------------------------------------------------------------------------
+# File: repeater/web/http_server.py
+# Purpose: Enable serving Next.js static export instead of Vue.js SPA
+# Changes:
+#   - default() method: Serve route-specific index.html (e.g., /packets/ -> packets/index.html)
+#   - Add /_next static directory for Next.js chunks/assets
+#   - Add /images static directory for background images
+#   - Update CORS config for new routes
+# ------------------------------------------------------------------------------
 patch_nextjs_static_serving() {
     local http_server="$REPEATER_DIR/repeater/web/http_server.py"
     
@@ -1859,8 +1892,18 @@ PATCHEOF
     fi
 }
 
-# Patch pyMC_Repeater's api_endpoints.py to add update_radio_config endpoint
-# This allows the frontend to update radio settings and save to config.yaml
+# ------------------------------------------------------------------------------
+# PATCH 2: Radio Configuration API Endpoint
+# ------------------------------------------------------------------------------
+# File: repeater/web/api_endpoints.py
+# Purpose: Allow web UI to update radio settings without SSH/CLI
+# Changes:
+#   - Add POST /api/update_radio_config endpoint
+#   - Accepts: frequency_mhz, bandwidth_khz, spreading_factor, coding_rate, tx_power
+#   - Validates input ranges (SF 5-12, CR 5-8, power 2-22 dBm)
+#   - Saves to config.yaml via existing _save_config_to_file()
+#   - Returns restart_required: true (live radio update not yet supported)
+# ------------------------------------------------------------------------------
 patch_api_endpoints() {
     local api_file="$REPEATER_DIR/repeater/web/api_endpoints.py"
     
