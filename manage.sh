@@ -1966,12 +1966,14 @@ FAKEDIALOG
 # Run upstream's manage.sh with a specific action, bypassing TUI
 # Usage: run_upstream_installer <action> [branch]
 # Actions: install, upgrade, uninstall
+# Features cubic easing progress bar with live viewport of upstream output
 run_upstream_installer() {
     local action="$1"
     local branch="${2:-$DEFAULT_BRANCH}"
     local fake_dialog
     local upstream_script="$CLONE_DIR/manage.sh"
     local log_file=$(mktemp)
+    local viewport_file=$(mktemp)
     local exit_code=0
     
     # Verify clone exists
@@ -1992,35 +1994,128 @@ run_upstream_installer() {
         mv "$radio_config_script" "$radio_config_backup"
     fi
     
-    print_info "Running upstream installer ($action)..."
+    local start_time=$(date +%s)
+    local width=40
+    local cycle_frames=40
+    local cursor_width=2
+    local description="pyMC_Repeater $action"
     
-    # Run upstream's manage.sh with fake dialog
-    # We use env to override DIALOG and run from the clone directory
+    # Run upstream's manage.sh with fake dialog in background
+    # Tee output to both log file and viewport file for live display
     (
         cd "$CLONE_DIR"
-        # Export DIALOG to use our fake, and set DEBIAN_FRONTEND to skip other prompts
         export DIALOG="$fake_dialog"
         export DEBIAN_FRONTEND=noninteractive
-        # Run the action
-        bash "$upstream_script" "$action"
-    ) > "$log_file" 2>&1
+        bash "$upstream_script" "$action" 2>&1 | while IFS= read -r line; do
+            echo "$line" >> "$log_file"
+            # Extract meaningful status from line for viewport
+            # Strip ANSI codes and clean up for display
+            local clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
+            # Only show non-empty, meaningful lines
+            if [[ -n "$clean_line" && ! "$clean_line" =~ ^[[:space:]]*$ ]]; then
+                # Truncate to fit viewport (50 chars max)
+                echo "${clean_line:0:50}" > "$viewport_file"
+            fi
+        done
+    ) &
+    local pid=$!
+    
+    # Show animated progress bar with viewport while command runs
+    local frame=0
+    while kill -0 $pid 2>/dev/null; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+        
+        # Read current viewport line
+        local viewport=""
+        [ -f "$viewport_file" ] && viewport=$(cat "$viewport_file" 2>/dev/null | head -1)
+        [ -z "$viewport" ] && viewport="Initializing..."
+        
+        # Calculate position in cycle (0 to cycle_frames*2)
+        local cycle_pos=$(( frame % (cycle_frames * 2) ))
+        local going_right=1
+        [ $cycle_pos -ge $cycle_frames ] && going_right=0
+        
+        # Get linear position within half-cycle (0-100)
+        local linear_t
+        if [ $going_right -eq 1 ]; then
+            linear_t=$(( (cycle_pos * 100) / cycle_frames ))
+        else
+            linear_t=$(( ((cycle_frames * 2 - cycle_pos) * 100) / cycle_frames ))
+        fi
+        
+        # Apply cubic easing
+        local eased_t=$(cubic_ease_inout $linear_t)
+        local velocity=$(cubic_ease_velocity $linear_t)
+        
+        # Convert to bar position
+        local anim_pos=$(( (eased_t * (width - cursor_width)) / 100 ))
+        
+        # Motion blur based on velocity
+        local show_near_trail=0
+        [ $velocity -gt 60 ] && show_near_trail=1
+        local show_far_trail=0
+        [ $velocity -gt 85 ] && show_far_trail=1
+        local cursor_glow=0
+        [ $velocity -gt 90 ] && cursor_glow=1
+        
+        # Build bar with velocity-based effects
+        local bar=""
+        for ((j=0; j<width; j++)); do
+            local dist_from_cursor
+            if [ $j -lt $anim_pos ]; then
+                dist_from_cursor=$((anim_pos - j))
+            elif [ $j -ge $((anim_pos + cursor_width)) ]; then
+                dist_from_cursor=$((j - anim_pos - cursor_width + 1))
+            else
+                dist_from_cursor=0
+            fi
+            
+            if [ $dist_from_cursor -eq 0 ]; then
+                if [ $cursor_glow -eq 1 ]; then
+                    bar+="${WHITE}█${CYAN}"
+                else
+                    bar+="█"
+                fi
+            elif [ $dist_from_cursor -eq 1 ] && [ $show_near_trail -eq 1 ]; then
+                bar+="▓"
+            elif [ $dist_from_cursor -eq 2 ] && [ $show_far_trail -eq 1 ]; then
+                bar+="▒"
+            else
+                bar+="░"
+            fi
+        done
+        
+        # Print progress bar with viewport (single line, updates in place)
+        printf "\r        ${CYAN}[${bar}]${NC} ${DIM}%-50s${NC} ${DIM}(%dm %02ds)${NC}" "$viewport" $mins $secs
+        sleep 0.033
+        ((frame++)) || true
+    done
+    
+    # Get exit status
+    wait $pid
     exit_code=$?
+    local elapsed=$(($(date +%s) - start_time))
+    local mins=$((elapsed / 60))
+    local secs=$((elapsed % 60))
     
     # Restore radio config script if we backed it up
     if [ -n "$radio_config_backup" ] && [ -f "$radio_config_backup" ]; then
         mv "$radio_config_backup" "$radio_config_script"
     fi
     
-    # Clean up fake dialog
-    rm -f "$fake_dialog"
+    # Clean up
+    rm -f "$fake_dialog" "$viewport_file"
     
-    # Check result
+    # Clear line and show result
+    printf "\r%-120s\r" " "
     if [ $exit_code -eq 0 ]; then
-        print_success "Upstream $action completed"
+        echo -e "        ${CHECK} $description completed ${DIM}(${mins}m ${secs}s)${NC}"
         rm -f "$log_file"
         return 0
     else
-        print_error "Upstream $action failed (exit code: $exit_code)"
+        echo -e "        ${CROSS} ${RED}$description failed${NC} ${DIM}(${mins}m ${secs}s)${NC}"
         echo -e "        ${DIM}Log output:${NC}"
         tail -30 "$log_file" | sed 's/^/        /'
         rm -f "$log_file"
