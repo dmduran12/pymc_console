@@ -662,6 +662,9 @@ do_install() {
     # Remove existing if present (fresh install)
     [ -d "$REPEATER_DIR/.git" ] && rm -rf "$REPEATER_DIR"
     
+    # Mark directory as safe for git (running as root on user-owned dir)
+    git config --global --add safe.directory "$REPEATER_DIR" 2>/dev/null || true
+    
     run_npm_with_progress "Cloning repository" "git clone -b '$branch' https://github.com/rightup/pyMC_Repeater.git '$REPEATER_DIR'" || {
         print_error "Failed to clone pyMC_Repeater"
         print_info "Check if branch '$branch' exists"
@@ -869,6 +872,9 @@ do_upgrade() {
     # =========================================================================
     print_step 3 $total_steps "Updating pyMC_Repeater@$branch"
     cd "$REPEATER_DIR"
+    
+    # Mark directory as safe for git (running as root on user-owned dir)
+    git config --global --add safe.directory "$REPEATER_DIR" 2>/dev/null || true
     
     run_with_spinner "Fetching updates" "git fetch origin" || {
         print_error "Failed to fetch updates"
