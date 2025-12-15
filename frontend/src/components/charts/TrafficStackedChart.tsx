@@ -31,25 +31,22 @@ interface TrafficStackedChartProps {
 // Legend order: TX Util, RX Util, Received, Forwarded, Dropped
 const LEGEND_ORDER = ['TX Util', 'RX Util', 'Received', 'Forwarded', 'Dropped'];
 
-// Rolling average window size (number of data points to average)
-// Large window for heavy smoothing - shows general trend, not individual spikes
-const ROLLING_AVG_WINDOW = 60;
+// EMA smoothing factor (0-1): lower = smoother/more momentum, higher = more responsive
+// 0.05 means each point is 5% new data, 95% previous trend
+const EMA_ALPHA = 0.05;
 
-/** Apply rolling average smoothing to an array of numbers */
-function rollingAverage(data: number[], windowSize: number): number[] {
+/** Apply exponential moving average - maintains momentum when values drop to zero */
+function exponentialMovingAverage(data: number[], alpha: number): number[] {
   if (data.length === 0) return [];
   const result: number[] = [];
-  const halfWindow = Math.floor(windowSize / 2);
+  
+  // Initialize with first non-zero value or first value
+  let ema = data[0];
   
   for (let i = 0; i < data.length; i++) {
-    let sum = 0;
-    let count = 0;
-    // Look back and forward by half the window size
-    for (let j = Math.max(0, i - halfWindow); j <= Math.min(data.length - 1, i + halfWindow); j++) {
-      sum += data[j];
-      count++;
-    }
-    result.push(sum / count);
+    // EMA formula: new_ema = alpha * current_value + (1 - alpha) * previous_ema
+    ema = alpha * data[i] + (1 - alpha) * ema;
+    result.push(ema);
   }
   return result;
 }
@@ -182,11 +179,11 @@ function TrafficStackedChartComponent({
       };
     });
     
-    // Apply rolling average smoothing to utilization values
+    // Apply exponential moving average smoothing to utilization values
     const txUtilValues = rawData.map(d => d.txUtil);
     const rxUtilValues = rawData.map(d => d.rxUtil);
-    const smoothedTx = rollingAverage(txUtilValues, ROLLING_AVG_WINDOW);
-    const smoothedRx = rollingAverage(rxUtilValues, ROLLING_AVG_WINDOW);
+    const smoothedTx = exponentialMovingAverage(txUtilValues, EMA_ALPHA);
+    const smoothedRx = exponentialMovingAverage(rxUtilValues, EMA_ALPHA);
     
     // Return data with smoothed utilization
     return rawData.map((d, i) => ({
