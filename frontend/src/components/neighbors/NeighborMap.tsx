@@ -77,12 +77,12 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
     if (positions.length > 0 && !hasFitted.current) {
       hasFitted.current = true;
       if (positions.length === 1) {
-        map.setView(positions[0], 12);
+        map.setView(positions[0], 13);
       } else {
         // Tighter padding for better initial framing of the mesh
         map.fitBounds(positions, { 
-          padding: [30, 30],
-          maxZoom: 14 
+          padding: [40, 40],
+          maxZoom: 14
         });
       }
     }
@@ -202,7 +202,7 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
         {localNode && localNode.latitude && localNode.longitude && (
           <CircleMarker
             center={[localNode.latitude, localNode.longitude]}
-            radius={5}
+            radius={10}
             fillColor={SIGNAL_COLORS.localNode}
             color="transparent"
             weight={0}
@@ -234,7 +234,7 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
             <CircleMarker
               key={hash}
               center={[neighbor.latitude, neighbor.longitude]}
-              radius={4}
+              radius={8}
               fillColor={color}
               color="transparent"
               weight={0}
