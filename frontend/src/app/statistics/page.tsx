@@ -4,30 +4,19 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useStats } from '@/lib/stores/useStore';
 import { BarChart3, TrendingUp, PieChart, Radio, Compass } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
 import * as api from '@/lib/api';
 import type { GraphData } from '@/types/api';
 import type { BucketedStats, UtilizationStats } from '@/lib/api';
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
-import { ChartTooltip } from '@/components/charts/ChartTooltip';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
 import { TrafficStackedChart } from '@/components/charts/TrafficStackedChart';
 import { NeighborPolarChart } from '@/components/charts/NeighborPolarChart';
+import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
-import { useChartColorArray } from '@/lib/hooks/useThemeColors';
 
 export default function StatisticsPage() {
   const stats = useStats();
-  const chartColors = useChartColorArray();
   const [bucketedStats, setBucketedStats] = useState<BucketedStats | null>(null);
   const [utilizationStats, setUtilizationStats] = useState<UtilizationStats | null>(null);
   const [packetTypeData, setPacketTypeData] = useState<GraphData | null>(null);
@@ -150,20 +139,24 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
       .filter((item) => item.value > 0);
   }, [packetTypeData]);
 
-  // Transform noise floor data - memoized
-  const noiseFloorChartData = useMemo(() => {
-    if (!noiseFloorData || !noiseFloorData.series || noiseFloorData.series.length === 0) return [];
-    const { timestamps, series } = noiseFloorData;
-    return timestamps.map((ts, i) => {
-      const point: Record<string, number | string> = {
-        time: new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        timestamp: ts,
-      };
-      series.forEach((s) => {
-        point[s.name] = s.data[i]?.[1] ?? 0;
-      });
-      return point;
-    });
+  // Extract noise floor timestamps and values for heatmap
+  const noiseFloorHeatmapData = useMemo(() => {
+    if (!noiseFloorData || !noiseFloorData.series || noiseFloorData.series.length === 0) {
+      return { timestamps: [], values: [] };
+    }
+    // Use the first series (usually "noise_floor")
+    const series = noiseFloorData.series[0];
+    const timestamps: number[] = [];
+    const values: number[] = [];
+    
+    for (const point of series.data) {
+      if (point[0] !== null && point[1] !== null) {
+        timestamps.push(point[0]);
+        values.push(point[1]);
+      }
+    }
+    
+    return { timestamps, values };
   }, [noiseFloorData]);
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
@@ -252,52 +245,18 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
               )}
             </div>
 
-            {/* Noise Floor Chart */}
+            {/* Noise Floor Heatmap */}
             <div className="glass-card card-padding">
               <div className="flex items-center gap-2 mb-6">
                 <Radio className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">RF Noise Floor</h2>
+                <span className="type-data-xs text-text-muted ml-auto">dBm</span>
               </div>
-              {noiseFloorChartData.length > 0 ? (
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height={224}>
-                    <LineChart data={noiseFloorChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                      <XAxis 
-                        dataKey="time" 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                        dy={8}
-                      />
-                      <YAxis 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                        dx={-8}
-                        domain={['auto', 'auto']}
-                        tickFormatter={(v) => `${v}`}
-                      />
-                      <Tooltip content={<ChartTooltip />} />
-                      {noiseFloorData?.series?.map((s, i) => (
-                        <Line
-                          key={s.name}
-                          type="monotone"
-                          dataKey={s.name}
-                          stroke={chartColors[i % chartColors.length]}
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="h-64 flex items-center justify-center text-text-muted">
-                  No noise floor data available
-                </div>
-              )}
+              <NoiseFloorHeatmap
+                timestamps={noiseFloorHeatmapData.timestamps}
+                values={noiseFloorHeatmapData.values}
+                height={224}
+              />
             </div>
           </div>
         </>
