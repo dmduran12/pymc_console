@@ -6,7 +6,7 @@ import { useStats } from '@/lib/stores/useStore';
 import { BarChart3, TrendingUp, PieChart, Radio, Compass } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { GraphData } from '@/types/api';
-import type { BucketedStats, UtilizationStats } from '@/lib/api';
+import type { BucketedStats, UtilizationStats, NoiseFloorHistoryItem } from '@/lib/api';
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
@@ -20,7 +20,7 @@ export default function StatisticsPage() {
   const [bucketedStats, setBucketedStats] = useState<BucketedStats | null>(null);
   const [utilizationStats, setUtilizationStats] = useState<UtilizationStats | null>(null);
   const [packetTypeData, setPacketTypeData] = useState<GraphData | null>(null);
-  const [noiseFloorData, setNoiseFloorData] = useState<GraphData | null>(null);
+  const [noiseFloorHistory, setNoiseFloorHistory] = useState<NoiseFloorHistoryItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
@@ -41,7 +41,7 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
           api.getBucketedStats(timeRangeMinutes, bucketCount),
           api.getUtilizationStats(timeRange),
           api.getPacketTypeGraphData(timeRange),
-          api.getNoiseFloorChartData(timeRange),
+          api.getNoiseFloorHistory(timeRange),
         ]);
 
         if (bucketedRes.success && bucketedRes.data) {
@@ -53,8 +53,8 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
         if (packetTypeRes.success && packetTypeRes.data) {
           setPacketTypeData(packetTypeRes.data);
         }
-        if (noiseFloorRes.success && noiseFloorRes.data) {
-          setNoiseFloorData(noiseFloorRes.data.chart_data);
+        if (noiseFloorRes.success && noiseFloorRes.data?.history) {
+          setNoiseFloorHistory(noiseFloorRes.data.history);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load chart data');
@@ -112,11 +112,11 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
     }
   }, [timeRange]);
 
-  // Poll noise floor chart
+  // Poll noise floor history
   const pollNoiseFloor = useCallback(async () => {
     try {
-      const res = await api.getNoiseFloorChartData(timeRange);
-      if (res.success && res.data) setNoiseFloorData(res.data.chart_data);
+      const res = await api.getNoiseFloorHistory(timeRange);
+      if (res.success && res.data?.history) setNoiseFloorHistory(res.data.history);
     } catch (_) {
       // ignore polling errors
     }
@@ -141,23 +141,15 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
 
   // Extract noise floor timestamps and values for heatmap
   const noiseFloorHeatmapData = useMemo(() => {
-    if (!noiseFloorData || !noiseFloorData.series || noiseFloorData.series.length === 0) {
+    if (noiseFloorHistory.length === 0) {
       return { timestamps: [], values: [] };
     }
-    // Use the first series (usually "noise_floor")
-    const series = noiseFloorData.series[0];
-    const timestamps: number[] = [];
-    const values: number[] = [];
     
-    for (const point of series.data) {
-      if (point[0] !== null && point[1] !== null) {
-        timestamps.push(point[0]);
-        values.push(point[1]);
-      }
-    }
+    const timestamps = noiseFloorHistory.map(item => item.timestamp);
+    const values = noiseFloorHistory.map(item => item.noise_floor_dbm);
     
     return { timestamps, values };
-  }, [noiseFloorData]);
+  }, [noiseFloorHistory]);
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
 

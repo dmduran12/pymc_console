@@ -108,8 +108,20 @@ export async function getMetricsGraphData(hours = 24): Promise<ApiResponse<Graph
   return fetchApi<ApiResponse<GraphData>>(`/api/metrics_graph_data?hours=${hours}`);
 }
 
-export async function getNoiseFloorChartData(hours = 24): Promise<ApiResponse<{ chart_data: GraphData }>> {
-  return fetchApi<ApiResponse<{ chart_data: GraphData }>>(`/api/noise_floor_chart_data?hours=${hours}`);
+// Noise floor history - returns array of {timestamp, noise_floor_dbm}
+export interface NoiseFloorHistoryItem {
+  timestamp: number;
+  noise_floor_dbm: number;
+}
+
+export interface NoiseFloorHistoryResponse {
+  history: NoiseFloorHistoryItem[];
+  hours: number;
+  count: number;
+}
+
+export async function getNoiseFloorHistory(hours = 24): Promise<ApiResponse<NoiseFloorHistoryResponse>> {
+  return fetchApi<ApiResponse<NoiseFloorHistoryResponse>>(`/api/noise_floor_history?hours=${hours}`);
 }
 
 // Hardware stats
