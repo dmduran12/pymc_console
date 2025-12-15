@@ -31,6 +31,28 @@ interface TrafficStackedChartProps {
 // Legend order: TX Util, RX Util, Received, Forwarded, Dropped
 const LEGEND_ORDER = ['TX Util', 'RX Util', 'Received', 'Forwarded', 'Dropped'];
 
+// Rolling average window size (number of data points to average)
+const ROLLING_AVG_WINDOW = 3;
+
+/** Apply rolling average smoothing to an array of numbers */
+function rollingAverage(data: number[], windowSize: number): number[] {
+  if (data.length === 0) return [];
+  const result: number[] = [];
+  const halfWindow = Math.floor(windowSize / 2);
+  
+  for (let i = 0; i < data.length; i++) {
+    let sum = 0;
+    let count = 0;
+    // Look back and forward by half the window size
+    for (let j = Math.max(0, i - halfWindow); j <= Math.min(data.length - 1, i + halfWindow); j++) {
+      sum += data[j];
+      count++;
+    }
+    result.push(sum / count);
+  }
+  return result;
+}
+
 // Custom legend component - left justified with specific order
 function TrafficLegend({ payload }: { payload?: Array<{ value: string; color: string }> }) {
   if (!payload) return null;
@@ -125,7 +147,8 @@ function TrafficStackedChartComponent({
     const totalTransmitted = transmitted?.reduce((sum, b) => sum + b.count, 0) ?? 
                              forwarded.reduce((sum, b) => sum + b.count, 0);
 
-    return received.map((bucket, i) => {
+    // First pass: collect raw utilization values
+    const rawData = received.map((bucket, i) => {
       // 24-hour time format
       const time = new Date(bucket.start * 1000).toLocaleTimeString([], {
         hour: '2-digit',
@@ -157,6 +180,19 @@ function TrafficStackedChartComponent({
         rxUtil: util.rxUtil,
       };
     });
+    
+    // Apply rolling average smoothing to utilization values
+    const txUtilValues = rawData.map(d => d.txUtil);
+    const rxUtilValues = rawData.map(d => d.rxUtil);
+    const smoothedTx = rollingAverage(txUtilValues, ROLLING_AVG_WINDOW);
+    const smoothedRx = rollingAverage(rxUtilValues, ROLLING_AVG_WINDOW);
+    
+    // Return data with smoothed utilization
+    return rawData.map((d, i) => ({
+      ...d,
+      txUtil: smoothedTx[i],
+      rxUtil: smoothedRx[i],
+    }));
   }, [received, forwarded, dropped, transmitted, utilizationBins, txUtilization, rxUtilization]);
 
   if (chartData.length === 0) {
