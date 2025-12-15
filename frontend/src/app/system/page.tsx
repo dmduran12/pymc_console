@@ -62,13 +62,38 @@ const TemperatureGauge = memo(function TemperatureGauge({
 }) {
   const percentage = Math.min(Math.max(((value - min) / (max - min)) * 100, 0), 100);
   
-  // Determine status text and color class for the value
+  // Determine status text and colors (matching the gradient thresholds)
   const getStatus = () => {
-    if (value < TEMP_THRESHOLDS.cold) return { text: 'Cool', colorClass: 'text-accent-tertiary' };
-    if (value < TEMP_THRESHOLDS.normal) return { text: 'Normal', colorClass: 'text-accent-success' };
-    if (value < TEMP_THRESHOLDS.warm) return { text: 'Warm', colorClass: 'text-accent-secondary' };
-    if (value < TEMP_THRESHOLDS.hot) return { text: 'Hot', colorClass: 'text-amber-500' };
-    return { text: 'DANGER', colorClass: 'text-accent-danger' };
+    if (value < TEMP_THRESHOLDS.cold) return { 
+      text: 'Cool', 
+      bg: 'bg-accent-tertiary/20', 
+      text_color: 'text-accent-tertiary',
+      border: 'border-accent-tertiary/30'
+    };
+    if (value < TEMP_THRESHOLDS.normal) return { 
+      text: 'Normal', 
+      bg: 'bg-accent-success/20', 
+      text_color: 'text-accent-success',
+      border: 'border-accent-success/30'
+    };
+    if (value < TEMP_THRESHOLDS.warm) return { 
+      text: 'Warm', 
+      bg: 'bg-accent-secondary/20', 
+      text_color: 'text-accent-secondary',
+      border: 'border-accent-secondary/30'
+    };
+    if (value < TEMP_THRESHOLDS.hot) return { 
+      text: 'Hot', 
+      bg: 'bg-orange-500/20', 
+      text_color: 'text-orange-400',
+      border: 'border-orange-500/30'
+    };
+    return { 
+      text: 'DANGER', 
+      bg: 'bg-accent-danger/20', 
+      text_color: 'text-accent-danger',
+      border: 'border-accent-danger/30'
+    };
   };
   
   const status = getStatus();
@@ -125,24 +150,34 @@ const TemperatureGauge = memo(function TemperatureGauge({
   )`;
 
   return (
-    <div className="space-y-2">
-      <div className="flex justify-between items-baseline">
-        <span className="text-sm text-text-muted">{label}</span>
-        <div className="flex items-baseline gap-2">
-          <span className={clsx('text-xs font-medium', status.colorClass)}>{status.text}</span>
-          <span className="text-lg font-semibold text-text-primary tabular-nums">{value.toFixed(1)}°C</span>
+    <div className="space-y-1">
+      {/* Label row with status pill and temp */}
+      <div className="flex justify-between items-center">
+        <span className="text-xs text-text-muted">{label}</span>
+        <div className="flex items-center gap-1.5">
+          {/* Status pill */}
+          <span className={clsx(
+            'px-1.5 py-0.5 text-[10px] font-medium rounded-full border',
+            status.bg, status.text_color, status.border
+          )}>
+            {status.text}
+          </span>
+          {/* Temperature value */}
+          <span className={clsx('text-sm font-semibold tabular-nums', status.text_color)}>
+            {value.toFixed(1)}°
+          </span>
         </div>
       </div>
       
-      {/* Grafana-style bar gauge - Gradient mode */}
-      <div className="relative h-4 bg-white/5 rounded-full overflow-hidden">
-        {/* Full gradient background (dimmed) - shows the full scale */}
+      {/* Compact bar gauge */}
+      <div className="relative h-2.5 bg-white/5 rounded-full overflow-hidden">
+        {/* Full gradient background (dimmed) */}
         <div 
           className="absolute inset-0 opacity-15 rounded-full"
           style={{ background: scaleGradient }}
         />
         
-        {/* Active bar - gradient reveals colors as temp increases */}
+        {/* Active bar */}
         <div 
           className="absolute inset-y-0 left-0 rounded-full transition-all duration-300 ease-out"
           style={{ 
@@ -159,18 +194,12 @@ const TemperatureGauge = memo(function TemperatureGauge({
             return (
               <div
                 key={threshold}
-                className="absolute w-px h-2 bg-white/25"
+                className="absolute w-px h-1.5 bg-white/20"
                 style={{ left: `${pos}%` }}
               />
             );
           })}
         </div>
-      </div>
-      
-      {/* Scale labels */}
-      <div className="flex justify-between text-[10px] text-text-muted tabular-nums">
-        <span>{min}°</span>
-        <span>{max}°</span>
       </div>
     </div>
   );
@@ -345,17 +374,17 @@ export default function SystemStatsPage() {
 
           {/* Temperature - 12 cols mobile, 6 cols md */}
           <div className="col-span-full md:col-span-6 glass-card card-padding">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-lg bg-accent-secondary/20 flex items-center justify-center">
-                <Thermometer className="w-6 h-6 text-accent-secondary" />
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-accent-secondary/20 flex items-center justify-center">
+                <Thermometer className="w-5 h-5 text-accent-secondary" />
               </div>
               <div>
-                <h2 className="text-lg font-medium text-text-primary">Temperature</h2>
-                <p className="text-sm text-text-muted">System temperatures</p>
+                <h2 className="text-base font-medium text-text-primary">Temperature</h2>
+                <p className="text-xs text-text-muted">System sensors</p>
               </div>
             </div>
             {stats.temperatures && Object.keys(stats.temperatures).length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-2.5">
                 {/* Show CPU thermal as primary gauge */}
                 {stats.temperatures.cpu_thermal !== undefined && (
                   <TemperatureGauge 
@@ -365,10 +394,10 @@ export default function SystemStatsPage() {
                     max={100} 
                   />
                 )}
-                {/* Show other temps as smaller gauges */}
+                {/* Show other temps */}
                 {Object.entries(stats.temperatures)
                   .filter(([key]) => key !== 'cpu_thermal')
-                  .slice(0, 2)
+                  .slice(0, 3)
                   .map(([key, value]) => (
                     <TemperatureGauge
                       key={key}
@@ -381,9 +410,9 @@ export default function SystemStatsPage() {
                 }
               </div>
             ) : (
-              <div className="flex items-center justify-center h-24 text-text-muted">
-                <Activity className="w-5 h-5 mr-2" />
-                Temperature sensors not available
+              <div className="flex items-center justify-center h-20 text-text-muted text-sm">
+                <Activity className="w-4 h-4 mr-2" />
+                No sensors available
               </div>
             )}
           </div>
