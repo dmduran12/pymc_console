@@ -1,7 +1,17 @@
 'use client';
 
-import { useEffect, useState, memo, useMemo } from 'react';
-import { Cpu, HardDrive, MemoryStick, Thermometer, Activity, RefreshCw } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback, memo } from 'react';
+import { Cpu, HardDrive, Thermometer, Activity, RefreshCw } from 'lucide-react';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
 import * as api from '@/lib/api';
 import type { HardwareStats } from '@/types/api';
 import clsx from 'clsx';
@@ -39,38 +49,6 @@ const ProgressBar = memo(function ProgressBar({ value, max = 100, color = 'prima
   );
 });
 
-/** Mini sparkline for load average (1m, 5m, 15m as horizontal bars) */
-const LoadSparkline = memo(function LoadSparkline({ 
-  load1, load5, load15, cpuCount 
-}: { 
-  load1: number; load5: number; load15: number; cpuCount: number;
-}) {
-  // Normalize to CPU count (load of cpuCount = 100%)
-  const max = Math.max(cpuCount * 1.5, load1, load5, load15);
-  const values = [load1, load5, load15];
-  const labels = ['1m', '5m', '15m'];
-  
-  return (
-    <div className="flex items-end gap-1 h-8">
-      {values.map((val, i) => {
-        const height = Math.max((val / max) * 100, 8);
-        const isHigh = val > cpuCount;
-        return (
-          <div key={labels[i]} className="flex-1 flex flex-col items-center gap-0.5">
-            <div 
-              className={clsx(
-                'w-full rounded-sm transition-all duration-300',
-                isHigh ? 'bg-accent-danger' : 'bg-accent-tertiary'
-              )}
-              style={{ height: `${height}%` }}
-            />
-            <span className="text-[8px] text-text-muted uppercase">{labels[i]}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-});
 
 /** Temperature thresholds in Celsius */
 const TEMP_THRESHOLDS = {
@@ -238,25 +216,189 @@ const TemperatureGauge = memo(function TemperatureGauge({
   );
 });
 
+// Chart colors
+const CPU_COLOR = '#60A5FA'; // Blue
+const MEMORY_COLOR = '#F9D26F'; // Amber/Yellow
+
+// 20-minute window in milliseconds
+const WINDOW_MS = 20 * 60 * 1000;
+
+/** Data point for historical tracking */
+interface ResourceDataPoint {
+  timestamp: number;
+  time: string;
+  cpu: number;
+  memory: number;
+}
+
+/** Custom legend component */
+function ResourcesLegend({ payload }: { payload?: Array<{ value: string; color: string }> }) {
+  if (!payload) return null;
+  return (
+    <div className="flex items-center gap-4 justify-center text-xs font-mono">
+      {payload.map((entry, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="text-text-muted">{entry.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Custom tooltip for resources chart */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ResourcesTooltip({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) {
+  if (!active || !payload || payload.length === 0) return null;
+  
+  return (
+    <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
+      <div className="font-medium text-text-primary mb-1">{label}</div>
+      {payload.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="text-text-muted">{entry.name}:</span>
+          <span className="text-text-primary tabular-nums">
+            {entry.value.toFixed(1)}%
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** System Resources chart component */
+const SystemResourcesChart = memo(function SystemResourcesChart({ 
+  data,
+}: { 
+  data: ResourceDataPoint[];
+}) {
+
+  if (data.length === 0) {
+    return (
+      <div className="h-48 flex items-center justify-center text-text-muted">
+        Collecting data...
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-48">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data}>
+          <defs>
+            <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={CPU_COLOR} stopOpacity={0.4} />
+              <stop offset="95%" stopColor={CPU_COLOR} stopOpacity={0.05} />
+            </linearGradient>
+            <linearGradient id="memoryGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={MEMORY_COLOR} stopOpacity={0.4} />
+              <stop offset="95%" stopColor={MEMORY_COLOR} stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="rgba(255,255,255,0.06)"
+            vertical={false}
+          />
+          <XAxis
+            dataKey="time"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+            dy={8}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            domain={[0, 100]}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
+            dx={-8}
+            width={32}
+            tickFormatter={(v) => `${v}%`}
+          />
+          <Tooltip content={<ResourcesTooltip />} />
+          <Legend content={<ResourcesLegend />} />
+          <Area
+            type="monotone"
+            dataKey="cpu"
+            name="CPU"
+            stroke={CPU_COLOR}
+            strokeWidth={2}
+            fill="url(#cpuGradient)"
+            isAnimationActive={false}
+          />
+          <Area
+            type="monotone"
+            dataKey="memory"
+            name="Memory"
+            stroke={MEMORY_COLOR}
+            strokeWidth={2}
+            fill="url(#memoryGradient)"
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+});
+
 export default function SystemStatsPage() {
   const [stats, setStats] = useState<HardwareStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Historical data for the rolling chart
+  const [resourceHistory, setResourceHistory] = useState<ResourceDataPoint[]>([]);
+  const lastFetchRef = useRef<number>(0);
 
-  async function fetchStats() {
+  // Memoized fetch function that also accumulates history
+  const fetchStats = useCallback(async () => {
     try {
       const response = await api.getHardwareStats();
       if (response.success && response.data) {
         setStats(response.data);
         setError(null);
+        
+        // Accumulate data point with timestamp
+        const now = Date.now();
+        // Prevent duplicate entries if polled multiple times rapidly
+        if (now - lastFetchRef.current >= 1000) {
+          lastFetchRef.current = now;
+          const timeStr = new Date(now).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          });
+          
+          setResourceHistory(prev => {
+            const cutoff = now - WINDOW_MS;
+            // Filter out old entries and add new one
+            const filtered = prev.filter(p => p.timestamp > cutoff);
+            return [...filtered, {
+              timestamp: now,
+              time: timeStr,
+              cpu: response.data!.cpu.usage_percent,
+              memory: response.data!.memory.usage_percent,
+            }];
+          });
+        }
       } else {
         setError(response.error || 'Failed to fetch hardware stats');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch hardware stats');
     }
-  }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -272,7 +414,7 @@ export default function SystemStatsPage() {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [fetchStats]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -310,66 +452,48 @@ export default function SystemStatsPage() {
         </div>
       ) : stats ? (
         <div className="grid-12">
-          {/* CPU Usage - 12 cols mobile, 6 cols md */}
-          <div className="col-span-full md:col-span-6 glass-card card-padding">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-lg bg-accent-tertiary/20 flex items-center justify-center">
-                <Cpu className="w-6 h-6 text-accent-tertiary" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-lg font-medium text-text-primary">CPU Usage</h2>
-                <p className="text-sm text-text-muted">{stats.cpu.count} cores</p>
-              </div>
-              <span className="text-2xl font-semibold text-text-primary tabular-nums">
-                {stats.cpu.usage_percent.toFixed(0)}%
-              </span>
-            </div>
-            <div className="space-y-3">
-              <ProgressBar value={stats.cpu.usage_percent} />
-              {stats.cpu.load_avg && (
-                <div className="mt-3 pt-3 border-t border-border-subtle">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-text-muted uppercase tracking-wide">Load Average</p>
-                    <p className="text-xs text-text-muted tabular-nums">
-                      {stats.cpu.load_avg['1min'].toFixed(2)} / {stats.cpu.load_avg['5min'].toFixed(2)} / {stats.cpu.load_avg['15min'].toFixed(2)}
-                    </p>
-                  </div>
-                  <LoadSparkline 
-                    load1={stats.cpu.load_avg['1min']}
-                    load5={stats.cpu.load_avg['5min']}
-                    load15={stats.cpu.load_avg['15min']}
-                    cpuCount={stats.cpu.count}
-                  />
+          {/* System Resources - Full width time-series chart */}
+          <div className="col-span-full glass-card card-padding">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-accent-tertiary/20 flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-accent-tertiary" />
                 </div>
-              )}
+                <div>
+                  <h2 className="text-base font-medium text-text-primary">System Resources</h2>
+                  <p className="text-xs text-text-muted">20 minute rolling window</p>
+                </div>
+              </div>
+              {/* Current values */}
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <span className="text-xs text-text-muted uppercase">CPU</span>
+                  <div className="text-lg font-semibold tabular-nums" style={{ color: CPU_COLOR }}>
+                    {stats.cpu.usage_percent.toFixed(0)}%
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs text-text-muted uppercase">MEM</span>
+                  <div className="text-lg font-semibold tabular-nums" style={{ color: MEMORY_COLOR }}>
+                    {stats.memory.usage_percent.toFixed(0)}%
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-
-          {/* Memory Usage - 12 cols mobile, 6 cols md */}
-          <div className="col-span-full md:col-span-6 glass-card card-padding">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-lg bg-accent-secondary/20 flex items-center justify-center">
-                <MemoryStick className="w-6 h-6 text-accent-secondary" />
+            <SystemResourcesChart data={resourceHistory} />
+            {/* Summary stats below chart */}
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle text-xs text-text-muted">
+              <div className="flex items-center gap-4">
+                <span>{stats.cpu.count} CPU cores</span>
+                {stats.cpu.load_avg && (
+                  <span className="tabular-nums">
+                    Load: {stats.cpu.load_avg['1min'].toFixed(2)} / {stats.cpu.load_avg['5min'].toFixed(2)} / {stats.cpu.load_avg['15min'].toFixed(2)}
+                  </span>
+                )}
               </div>
-              <div>
-                <h2 className="text-lg font-medium text-text-primary">Memory Usage</h2>
-                <p className="text-sm text-text-muted">RAM utilization</p>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-text-muted">Usage</span>
-                <span className="text-text-primary font-medium">{stats.memory.usage_percent.toFixed(1)}%</span>
-              </div>
-              <ProgressBar value={stats.memory.usage_percent} color="secondary" />
-              <div className="flex justify-between text-sm mt-2">
-                <span className="text-text-muted">
-                  {(stats.memory.used / (1024 * 1024)).toFixed(0)} MB used
-                </span>
-                <span className="text-text-muted">
-                  {(stats.memory.total / (1024 * 1024)).toFixed(0)} MB total
-                </span>
-              </div>
+              <span className="tabular-nums">
+                {(stats.memory.used / (1024 * 1024)).toFixed(0)} / {(stats.memory.total / (1024 * 1024)).toFixed(0)} MB
+              </span>
             </div>
           </div>
 
