@@ -73,16 +73,33 @@ const TemperatureGauge = memo(function TemperatureGauge({
   
   const status = getStatus();
   
-  // CSS gradient: cold (cyan/blue) → normal (green) → warm (yellow) → hot (orange) → danger (red)
-  // Using CSS variables for theme compatibility
-  const gradientStyle = {
-    background: `linear-gradient(to right, 
-      var(--accent-tertiary) 0%, 
-      var(--accent-success) 30%, 
-      var(--accent-secondary) 50%, 
-      #f97316 70%, 
-      var(--accent-danger) 90%
-    )`,
+  // Get the color at the current temperature position
+  // Maps temperature to gradient: cold (cyan) → normal (green) → warm (yellow) → hot (orange) → danger (red)
+  const getTemperatureColor = () => {
+    if (value < TEMP_THRESHOLDS.cold) return 'var(--accent-tertiary)';
+    if (value < TEMP_THRESHOLDS.normal) return 'var(--accent-success)';
+    if (value < TEMP_THRESHOLDS.warm) return 'var(--accent-secondary)';
+    if (value < TEMP_THRESHOLDS.hot) return '#f97316';
+    return 'var(--accent-danger)';
+  };
+
+  // Build gradient that reveals colors up to current temperature
+  // The gradient spans the FULL bar width, but only shows colors up to current temp
+  const getRevealGradient = () => {
+    const range = max - min;
+    const coldPos = ((TEMP_THRESHOLDS.cold - min) / range) * 100;
+    const normalPos = ((TEMP_THRESHOLDS.normal - min) / range) * 100;
+    const warmPos = ((TEMP_THRESHOLDS.warm - min) / range) * 100;
+    const hotPos = ((TEMP_THRESHOLDS.hot - min) / range) * 100;
+    
+    return `linear-gradient(to right,
+      var(--accent-tertiary) 0%,
+      var(--accent-tertiary) ${coldPos}%,
+      var(--accent-success) ${normalPos}%,
+      var(--accent-secondary) ${warmPos}%,
+      #f97316 ${hotPos}%,
+      var(--accent-danger) 100%
+    )`;
   };
 
   return (
@@ -97,31 +114,30 @@ const TemperatureGauge = memo(function TemperatureGauge({
       
       {/* Grafana-style bar gauge */}
       <div className="relative h-4 bg-white/5 rounded-full overflow-hidden">
-        {/* Full gradient background (dimmed) */}
+        {/* Full gradient background (dimmed) - shows where temp COULD go */}
         <div 
-          className="absolute inset-0 opacity-20 rounded-full"
-          style={gradientStyle}
+          className="absolute inset-0 opacity-15 rounded-full"
+          style={{ background: getRevealGradient() }}
         />
         
-        {/* Active portion with gradient */}
+        {/* Active portion - gradient reveals colors up to current temp */}
         <div 
           className="absolute inset-y-0 left-0 rounded-full transition-all duration-300 ease-out"
           style={{ 
-            ...gradientStyle,
+            background: getRevealGradient(),
             width: `${percentage}%`,
-            clipPath: 'inset(0 0 0 0 round 9999px)',
           }}
         />
         
         {/* Tick marks for thresholds */}
-        <div className="absolute inset-0 flex items-center">
+        <div className="absolute inset-0 flex items-center pointer-events-none">
           {[TEMP_THRESHOLDS.normal, TEMP_THRESHOLDS.warm, TEMP_THRESHOLDS.hot].map((threshold) => {
             const pos = ((threshold - min) / (max - min)) * 100;
             if (pos < 0 || pos > 100) return null;
             return (
               <div
                 key={threshold}
-                className="absolute w-px h-2 bg-white/30"
+                className="absolute w-px h-2 bg-white/20"
                 style={{ left: `${pos}%` }}
               />
             );
