@@ -89,31 +89,31 @@ function LogLevelToggle() {
           onClick={() => handleToggle('INFO')}
           disabled={isChanging}
           className={clsx(
-            'px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 transition-colors',
+            'px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium flex items-center gap-2 transition-colors',
             selectedLevel === 'INFO'
-              ? 'bg-accent-primary/20 text-accent-primary'
+              ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/30'
               : 'bg-bg-subtle text-text-muted hover:bg-bg-elevated',
             isChanging && 'opacity-50 cursor-not-allowed'
           )}
         >
-          <Info className="w-3 h-3" />
+          <Info className="w-4 h-4" />
           INFO
         </button>
         <button
           onClick={() => handleToggle('DEBUG')}
           disabled={isChanging}
           className={clsx(
-            'px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 transition-colors border-l border-border-subtle',
+            'px-3 py-1.5 sm:px-4 sm:py-2 text-sm font-medium flex items-center gap-2 transition-colors border-l border-border-subtle',
             selectedLevel === 'DEBUG'
-              ? 'bg-amber-500/20 text-amber-400'
+              ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
               : 'bg-bg-subtle text-text-muted hover:bg-bg-elevated',
             isChanging && 'opacity-50 cursor-not-allowed'
           )}
         >
           {isChanging ? (
-            <Loader2 className="w-3 h-3 animate-spin" />
+            <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
-            <Bug className="w-3 h-3" />
+            <Bug className="w-4 h-4" />
           )}
           DEBUG
         </button>
