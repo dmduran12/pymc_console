@@ -104,9 +104,11 @@ function TrafficStackedChartComponent({
   const RECEIVED_COLOR = metricColors.received; // Green
   const FORWARDED_COLOR = metricColors.forwarded; // Blue
   const DROPPED_COLOR = chartColors.chart5; // Theme accent
+  
   // Transform bucket data for composite chart
-  const chartData = useMemo(() => {
-    if (!received || received.length === 0) return [];
+  // RX utilization is scaled to correlate with packet counts on left Y-axis
+  const { chartData, maxPackets } = useMemo(() => {
+    if (!received || received.length === 0) return { chartData: [], maxPackets: 0 };
 
     // Build a lookup map from utilization bins by timestamp
     // Backend sends 't' as bin start timestamp in milliseconds
@@ -185,11 +187,23 @@ function TrafficStackedChartComponent({
     const smoothedTx = simpleMovingAverage(txUtilValues, SMA_WINDOW);
     const smoothedRx = simpleMovingAverage(rxUtilValues, SMA_WINDOW);
     
-    return rawData.map((d, i) => ({
+    // Calculate max stacked packet count and max RX util for scaling
+    const maxStackedPackets = Math.max(...rawData.map(d => d.received + d.forwarded + d.dropped));
+    const maxRxUtil = Math.max(...smoothedRx, 1); // min 1 to avoid div by zero
+    
+    // Scale factor: maps RX util percentage to packet count domain
+    // When RX util is at max, the line should reach the top of the packet bars
+    const scaleFactor = maxStackedPackets / maxRxUtil;
+    
+    const data = rawData.map((d, i) => ({
       ...d,
       txUtil: smoothedTx[i],
       rxUtil: smoothedRx[i],
+      // Scaled version for plotting on left Y-axis
+      rxUtilScaled: smoothedRx[i] * scaleFactor,
     }));
+    
+    return { chartData: data, maxPackets: maxStackedPackets };
   }, [received, forwarded, dropped, transmitted, utilizationBins, txUtilization, rxUtilization]);
 
   if (chartData.length === 0) {
@@ -201,24 +215,35 @@ function TrafficStackedChartComponent({
   }
 
   // Custom tooltip for composite chart
-  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
     if (!active || !payload || payload.length === 0) return null;
     
     return (
       <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
         <div className="font-medium text-text-primary mb-1">{label}</div>
-        {payload.map((entry, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="text-text-muted">{entry.name}:</span>
-            <span className="text-text-primary tabular-nums">
-              {entry.name.includes('Util') ? `${entry.value.toFixed(1)}%` : entry.value}
-            </span>
-          </div>
-        ))}
+        {payload.map((entry, i) => {
+          // For RX Util, show the original percentage from payload data
+          const isRxUtil = entry.dataKey === 'rxUtilScaled';
+          const displayValue = isRxUtil 
+            ? `${entry.payload.rxUtil.toFixed(1)}%`
+            : entry.name.includes('Util') 
+              ? `${entry.value.toFixed(1)}%` 
+              : entry.value;
+          
+          return (
+            <div key={i} className="flex items-center gap-2">
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: entry.color }}
+              />
+              <span className="text-text-muted">{entry.name}:</span>
+              <span className="text-text-primary tabular-nums">
+                {displayValue}
+              </span>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -299,7 +324,7 @@ function TrafficStackedChartComponent({
             isAnimationActive={false}
           />
           
-          {/* Stepped lines for airtime utilization - rendered AFTER bars so they appear on top */}
+          {/* Utilization lines - TX on right axis (%), RX scaled to left axis (correlates with packets) */}
           <Line
             yAxisId="right"
             type="monotone"
@@ -311,9 +336,9 @@ function TrafficStackedChartComponent({
             isAnimationActive={false}
           />
           <Line
-            yAxisId="right"
+            yAxisId="left"
             type="monotone"
-            dataKey="rxUtil"
+            dataKey="rxUtilScaled"
             name="RX Util"
             stroke={AIRTIME_RX_COLOR}
             strokeWidth={2}
