@@ -112,14 +112,29 @@ export function useChartColors(): ChartColors {
     // Initial read
     updateColors();
 
-    // Listen for theme changes
+    // Listen for theme changes via custom event
     const handleThemeChange = () => {
-      // Small delay to let CSS variables update
-      setTimeout(updateColors, 50);
+      // Delay to let CSS variables update after data-theme attribute changes
+      setTimeout(updateColors, 100);
     };
 
+    // Also observe data-theme attribute changes directly
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.attributeName === 'data-theme') {
+          setTimeout(updateColors, 50);
+          break;
+        }
+      }
+    });
+    
+    observer.observe(document.documentElement, { attributes: true });
     window.addEventListener('background-change', handleThemeChange);
-    return () => window.removeEventListener('background-change', handleThemeChange);
+    
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('background-change', handleThemeChange);
+    };
   }, []);
 
   return colors;
@@ -144,9 +159,24 @@ export function useMetricColors(): MetricColors {
 
     updateColors();
 
-    const handleThemeChange = () => setTimeout(updateColors, 50);
+    const handleThemeChange = () => setTimeout(updateColors, 100);
+    
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.attributeName === 'data-theme') {
+          setTimeout(updateColors, 50);
+          break;
+        }
+      }
+    });
+    
+    observer.observe(document.documentElement, { attributes: true });
     window.addEventListener('background-change', handleThemeChange);
-    return () => window.removeEventListener('background-change', handleThemeChange);
+    
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('background-change', handleThemeChange);
+    };
   }, []);
 
   return colors;
@@ -178,9 +208,24 @@ export function usePacketColors(): PacketColors {
 
     updateColors();
 
-    const handleThemeChange = () => setTimeout(updateColors, 50);
+    const handleThemeChange = () => setTimeout(updateColors, 100);
+    
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.attributeName === 'data-theme') {
+          setTimeout(updateColors, 50);
+          break;
+        }
+      }
+    });
+    
+    observer.observe(document.documentElement, { attributes: true });
     window.addEventListener('background-change', handleThemeChange);
-    return () => window.removeEventListener('background-change', handleThemeChange);
+    
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('background-change', handleThemeChange);
+    };
   }, []);
 
   return colors;
