@@ -2,7 +2,6 @@
 
 import { useState, memo, useMemo, useCallback } from 'react';
 import { Treemap, ResponsiveContainer } from 'recharts';
-import { getPacketTypeShortLabel } from '@/lib/constants';
 import { useChartColorArray } from '@/lib/hooks/useThemeColors';
 
 interface PacketTypeData {
@@ -25,7 +24,7 @@ interface TreemapNodeProps {
   colors: string[];
   depth: number;
   hoveredIndex: number | null;
-  onHover: (index: number | null) => void;
+  onHover: (index: number | null, event?: React.MouseEvent) => void;
   total: number;
 }
 
@@ -36,29 +35,27 @@ function TreemapCell({
   width,
   height,
   name,
-  value,
   index,
   colors,
   depth,
   hoveredIndex,
   onHover,
-  total,
 }: TreemapNodeProps) {
   // Only render leaf nodes (depth === 1)
   if (depth !== 1) return null;
   
-  const percent = ((value / total) * 100).toFixed(1);
   const isHovered = hoveredIndex === index;
   const isDimmed = hoveredIndex !== null && !isHovered;
   const color = colors[index % colors.length];
   
   // Only show label if cell is large enough
-  const showLabel = width > 40 && height > 30;
-  const showPercent = width > 50 && height > 45;
+  const showLabel = width > 45 && height > 24;
+  // Padding from bottom-left corner
+  const padding = 6;
   
   return (
     <g
-      onMouseEnter={() => onHover(index)}
+      onMouseEnter={(e) => onHover(index, e)}
       onMouseLeave={() => onHover(null)}
       style={{ cursor: 'default' }}
     >
@@ -69,41 +66,90 @@ function TreemapCell({
         height={height}
         fill={color}
         opacity={isDimmed ? 0.4 : 1}
-        stroke="rgba(0,0,0,0.3)"
+        stroke="rgba(0,0,0,0.2)"
         strokeWidth={1}
-        rx={4}
+        rx={3}
         style={{ transition: 'opacity 150ms ease' }}
       />
       {showLabel && (
         <text
-          x={x + width / 2}
-          y={y + height / 2 - (showPercent ? 6 : 0)}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="rgba(0,0,0,0.8)"
-          fontSize={11}
-          fontWeight={600}
-          fontFamily="var(--font-mono)"
-          style={{ textTransform: 'uppercase', pointerEvents: 'none' }}
+          x={x + padding}
+          y={y + height - padding}
+          textAnchor="start"
+          dominantBaseline="auto"
+          fill="rgba(0,0,0,0.85)"
+          className="type-data-xs"
+          style={{ 
+            fontSize: 'var(--step--2)',
+            fontFamily: 'var(--font-mono)',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            pointerEvents: 'none',
+          }}
         >
-          {getPacketTypeShortLabel(name)}
-        </text>
-      )}
-      {showPercent && (
-        <text
-          x={x + width / 2}
-          y={y + height / 2 + 10}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="rgba(0,0,0,0.6)"
-          fontSize={10}
-          fontFamily="var(--font-mono)"
-          style={{ pointerEvents: 'none' }}
-        >
-          {percent}%
+          {name.toUpperCase()}
         </text>
       )}
     </g>
+  );
+}
+
+/** Tooltip component positioned away from cursor */
+function TreemapTooltip({ 
+  data, 
+  total,
+  color,
+  position,
+}: { 
+  data: { name: string; value: number } | null;
+  total: number;
+  color: string;
+  position: { x: number; y: number } | null;
+}) {
+  if (!data || !position) return null;
+  
+  const percent = ((data.value / total) * 100).toFixed(1);
+  
+  return (
+    <div 
+      className="absolute z-50 pointer-events-none"
+      style={{
+        left: position.x + 16,
+        top: position.y - 60,
+      }}
+    >
+      <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 shadow-lg">
+        <div className="flex items-center gap-2 mb-1">
+          <span 
+            className="w-2.5 h-2.5 rounded-sm flex-shrink-0" 
+            style={{ backgroundColor: color }}
+          />
+          <span className="type-data-sm font-semibold text-text-primary uppercase">
+            {data.name.toUpperCase()}
+          </span>
+        </div>
+        <div className="space-y-0.5 type-data-xs text-text-muted">
+          <div className="flex justify-between gap-4">
+            <span>Count</span>
+            <span className="text-text-primary tabular-nums font-medium">
+              {data.value.toLocaleString()}
+            </span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span>Share</span>
+            <span className="text-text-primary tabular-nums font-medium">
+              {percent}%
+            </span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span>Of Total</span>
+            <span className="text-text-primary tabular-nums font-medium">
+              {total.toLocaleString()}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -113,6 +159,7 @@ function TreemapCell({
  */
 function PacketTypesChartComponent({ data }: PacketTypesChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const chartColors = useChartColorArray();
 
   const { treemapData, total } = useMemo(() => {
@@ -129,9 +176,27 @@ function PacketTypesChartComponent({ data }: PacketTypesChartProps) {
     return { treemapData, total };
   }, [data]);
 
-  const handleHover = useCallback((index: number | null) => {
+  const handleHover = useCallback((index: number | null, event?: React.MouseEvent) => {
     setHoveredIndex(index);
+    if (event && index !== null) {
+      const rect = (event.currentTarget as SVGElement).closest('.treemap-container')?.getBoundingClientRect();
+      if (rect) {
+        setMousePos({
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        });
+      }
+    } else {
+      setMousePos(null);
+    }
   }, []);
+
+  // Get hovered data for tooltip
+  const hoveredData = hoveredIndex !== null ? {
+    name: treemapData[hoveredIndex]?.name ?? '',
+    value: treemapData[hoveredIndex]?.size ?? 0,
+  } : null;
+  const hoveredColor = hoveredIndex !== null ? chartColors[hoveredIndex % chartColors.length] : '';
 
   if (data.length === 0 || total === 0) {
     return (
@@ -142,7 +207,7 @@ function PacketTypesChartComponent({ data }: PacketTypesChartProps) {
   }
 
   return (
-    <div className="h-56">
+    <div className="h-56 relative treemap-container">
       <ResponsiveContainer width="100%" height="100%">
         <Treemap
           data={treemapData}
@@ -168,6 +233,12 @@ function PacketTypesChartComponent({ data }: PacketTypesChartProps) {
           )}
         />
       </ResponsiveContainer>
+      <TreemapTooltip 
+        data={hoveredData}
+        total={total}
+        color={hoveredColor}
+        position={mousePos}
+      />
     </div>
   );
 }
