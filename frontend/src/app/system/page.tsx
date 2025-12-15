@@ -39,6 +39,105 @@ const ProgressBar = memo(function ProgressBar({ value, max = 100, color = 'prima
   );
 });
 
+/** Temperature thresholds in Celsius */
+const TEMP_THRESHOLDS = {
+  cold: 30,
+  normal: 50,
+  warm: 65,
+  hot: 80,
+  danger: 90,
+};
+
+/** Grafana-style bar gauge for temperature with gradient */
+const TemperatureGauge = memo(function TemperatureGauge({ 
+  value, 
+  label,
+  min = 20, 
+  max = 100 
+}: { 
+  value: number; 
+  label: string;
+  min?: number; 
+  max?: number;
+}) {
+  const percentage = Math.min(Math.max(((value - min) / (max - min)) * 100, 0), 100);
+  
+  // Determine status text and color class for the value
+  const getStatus = () => {
+    if (value < TEMP_THRESHOLDS.cold) return { text: 'Cool', colorClass: 'text-accent-tertiary' };
+    if (value < TEMP_THRESHOLDS.normal) return { text: 'Normal', colorClass: 'text-accent-success' };
+    if (value < TEMP_THRESHOLDS.warm) return { text: 'Warm', colorClass: 'text-accent-secondary' };
+    if (value < TEMP_THRESHOLDS.hot) return { text: 'Hot', colorClass: 'text-amber-500' };
+    return { text: 'DANGER', colorClass: 'text-accent-danger' };
+  };
+  
+  const status = getStatus();
+  
+  // CSS gradient: cold (cyan/blue) → normal (green) → warm (yellow) → hot (orange) → danger (red)
+  // Using CSS variables for theme compatibility
+  const gradientStyle = {
+    background: `linear-gradient(to right, 
+      var(--accent-tertiary) 0%, 
+      var(--accent-success) 30%, 
+      var(--accent-secondary) 50%, 
+      #f97316 70%, 
+      var(--accent-danger) 90%
+    )`,
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between items-baseline">
+        <span className="text-sm text-text-muted">{label}</span>
+        <div className="flex items-baseline gap-2">
+          <span className={clsx('text-xs font-medium', status.colorClass)}>{status.text}</span>
+          <span className="text-lg font-semibold text-text-primary tabular-nums">{value.toFixed(1)}°C</span>
+        </div>
+      </div>
+      
+      {/* Grafana-style bar gauge */}
+      <div className="relative h-4 bg-white/5 rounded-full overflow-hidden">
+        {/* Full gradient background (dimmed) */}
+        <div 
+          className="absolute inset-0 opacity-20 rounded-full"
+          style={gradientStyle}
+        />
+        
+        {/* Active portion with gradient */}
+        <div 
+          className="absolute inset-y-0 left-0 rounded-full transition-all duration-300 ease-out"
+          style={{ 
+            ...gradientStyle,
+            width: `${percentage}%`,
+            clipPath: 'inset(0 0 0 0 round 9999px)',
+          }}
+        />
+        
+        {/* Tick marks for thresholds */}
+        <div className="absolute inset-0 flex items-center">
+          {[TEMP_THRESHOLDS.normal, TEMP_THRESHOLDS.warm, TEMP_THRESHOLDS.hot].map((threshold) => {
+            const pos = ((threshold - min) / (max - min)) * 100;
+            if (pos < 0 || pos > 100) return null;
+            return (
+              <div
+                key={threshold}
+                className="absolute w-px h-2 bg-white/30"
+                style={{ left: `${pos}%` }}
+              />
+            );
+          })}
+        </div>
+      </div>
+      
+      {/* Scale labels */}
+      <div className="flex justify-between text-[10px] text-text-muted tabular-nums">
+        <span>{min}°</span>
+        <span>{max}°</span>
+      </div>
+    </div>
+  );
+});
+
 export default function SystemStatsPage() {
   const [stats, setStats] = useState<HardwareStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -218,31 +317,28 @@ export default function SystemStatsPage() {
               </div>
             </div>
             {stats.temperatures && Object.keys(stats.temperatures).length > 0 ? (
-              <div className="space-y-3">
-                {/* Show CPU thermal as primary */}
+              <div className="space-y-4">
+                {/* Show CPU thermal as primary gauge */}
                 {stats.temperatures.cpu_thermal !== undefined && (
-                  <>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-text-muted">CPU</span>
-                      <span className="text-text-primary font-medium">{stats.temperatures.cpu_thermal.toFixed(1)}°C</span>
-                    </div>
-                    <ProgressBar value={stats.temperatures.cpu_thermal} max={100} color="yellow" />
-                    <p className="text-xs text-text-muted mt-2">
-                      {stats.temperatures.cpu_thermal < 50 ? 'Normal operating temperature' : 
-                       stats.temperatures.cpu_thermal < 70 ? 'Warm - consider cooling' : 
-                       'Hot - check cooling system'}
-                    </p>
-                  </>
+                  <TemperatureGauge 
+                    value={stats.temperatures.cpu_thermal} 
+                    label="CPU" 
+                    min={20} 
+                    max={100} 
+                  />
                 )}
-                {/* Show other temps */}
+                {/* Show other temps as smaller gauges */}
                 {Object.entries(stats.temperatures)
                   .filter(([key]) => key !== 'cpu_thermal')
-                  .slice(0, 3)
+                  .slice(0, 2)
                   .map(([key, value]) => (
-                    <div key={key} className="flex justify-between text-sm pt-2 border-t border-border-subtle">
-                      <span className="text-text-muted">{key.replace(/_/g, ' ')}</span>
-                      <span className="text-text-secondary">{value.toFixed(1)}°C</span>
-                    </div>
+                    <TemperatureGauge
+                      key={key}
+                      value={value}
+                      label={key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                      min={20}
+                      max={100}
+                    />
                   ))
                 }
               </div>
