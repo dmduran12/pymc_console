@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, memo } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { Cpu, HardDrive, Thermometer, Activity, RefreshCw } from 'lucide-react';
 import {
   AreaChart,
@@ -16,6 +16,7 @@ import * as api from '@/lib/api';
 import type { HardwareStats } from '@/types/api';
 import clsx from 'clsx';
 import { POLLING_INTERVALS } from '@/lib/constants';
+import { useResourceHistory, useAddResourceDataPoint, type ResourceDataPoint } from '@/lib/stores/useStore';
 
 interface ProgressBarProps {
   value: number;
@@ -225,14 +226,6 @@ const WINDOW_MS = 20 * 60 * 1000;
 // Number of slots in the 20-minute window (at 3s polling = 400 slots)
 const NUM_SLOTS = Math.floor(WINDOW_MS / POLLING_INTERVALS.system);
 
-/** Data point for historical tracking */
-interface ResourceDataPoint {
-  timestamp: number;
-  time: string;
-  cpu: number;
-  memory: number;
-}
-
 /** Custom legend component */
 function ResourcesLegend({ payload }: { payload?: Array<{ value: string; color: string }> }) {
   if (!payload) return null;
@@ -410,9 +403,9 @@ export default function SystemStatsPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   
-  // Historical data for the rolling chart
-  const [resourceHistory, setResourceHistory] = useState<ResourceDataPoint[]>([]);
-  const lastFetchRef = useRef<number>(0);
+  // Use global store for resource history (persists across page navigation)
+  const resourceHistory = useResourceHistory();
+  const addResourceDataPoint = useAddResourceDataPoint();
 
   // Memoized fetch function that also accumulates history
   const fetchStats = useCallback(async () => {
@@ -422,42 +415,19 @@ export default function SystemStatsPage() {
         setStats(response.data);
         setError(null);
         
-        // Accumulate data point with timestamp
-        const now = Date.now();
-        // Prevent duplicate entries if polled multiple times rapidly
-        if (now - lastFetchRef.current >= 1000) {
-          lastFetchRef.current = now;
-          const timeStr = new Date(now).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-          });
-          
-          setResourceHistory(prev => {
-            // Keep entries by count (NUM_SLOTS) rather than time-based pruning
-            // This prevents data loss when browser goes idle and wakes up
-            const newEntry = {
-              timestamp: now,
-              time: timeStr,
-              cpu: response.data!.cpu.usage_percent,
-              memory: response.data!.memory.usage_percent,
-            };
-            const updated = [...prev, newEntry];
-            // Keep only the most recent NUM_SLOTS entries
-            if (updated.length > NUM_SLOTS) {
-              return updated.slice(-NUM_SLOTS);
-            }
-            return updated;
-          });
-        }
+        // Add data point to global store (handles deduplication internally)
+        addResourceDataPoint(
+          response.data.cpu.usage_percent,
+          response.data.memory.usage_percent,
+          NUM_SLOTS
+        );
       } else {
         setError(response.error || 'Failed to fetch hardware stats');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch hardware stats');
     }
-  }, []);
+  }, [addResourceDataPoint]);
 
   useEffect(() => {
     let mounted = true;

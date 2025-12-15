@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import type { Stats, Packet, LogEntry } from '@/types/api';
 import * as api from '@/lib/api';
 
+/** Data point for system resource history */
+export interface ResourceDataPoint {
+  timestamp: number;
+  time: string;
+  cpu: number;
+  memory: number;
+}
+
 interface StoreState {
   // Stats
   stats: Stats | null;
@@ -25,6 +33,10 @@ interface StoreState {
   flashReceived: number; // Increment to trigger flash
   flashAdvert: number;   // Increment to trigger flash
 
+  // System resource history (persists across page navigation)
+  resourceHistory: ResourceDataPoint[];
+  lastResourceFetch: number; // Prevent duplicate entries
+
   // Actions
   fetchStats: () => Promise<void>;
   fetchPackets: (limit?: number) => Promise<void>;
@@ -35,6 +47,7 @@ interface StoreState {
   sendAdvert: () => Promise<boolean>;
   triggerFlashReceived: () => void;
   triggerFlashAdvert: () => void;
+  addResourceDataPoint: (cpu: number, memory: number, maxSlots: number) => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -55,6 +68,9 @@ const store = create<StoreState>((set, get) => ({
   
   flashReceived: 0,
   flashAdvert: 0,
+
+  resourceHistory: [],
+  lastResourceFetch: 0,
 
   // Actions
   fetchStats: async () => {
@@ -164,6 +180,34 @@ const store = create<StoreState>((set, get) => ({
   triggerFlashAdvert: () => {
     set({ flashAdvert: get().flashAdvert + 1 });
   },
+
+  addResourceDataPoint: (cpu: number, memory: number, maxSlots: number) => {
+    const now = Date.now();
+    const { lastResourceFetch, resourceHistory } = get();
+    
+    // Prevent duplicate entries if called multiple times rapidly
+    if (now - lastResourceFetch < 1000) return;
+    
+    const timeStr = new Date(now).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    
+    const newEntry: ResourceDataPoint = {
+      timestamp: now,
+      time: timeStr,
+      cpu,
+      memory,
+    };
+    
+    const updated = [...resourceHistory, newEntry];
+    // Keep only the most recent maxSlots entries
+    const trimmed = updated.length > maxSlots ? updated.slice(-maxSlots) : updated;
+    
+    set({ resourceHistory: trimmed, lastResourceFetch: now });
+  },
 }));
 
 // Main store hook (full access)
@@ -191,3 +235,5 @@ export const useSetDutyCycle = () => store((s) => s.setDutyCycle);
 export const useSendAdvert = () => store((s) => s.sendAdvert);
 export const useTriggerFlashReceived = () => store((s) => s.triggerFlashReceived);
 export const useTriggerFlashAdvert = () => store((s) => s.triggerFlashAdvert);
+export const useResourceHistory = () => store((s) => s.resourceHistory);
+export const useAddResourceDataPoint = () => store((s) => s.addResourceDataPoint);
