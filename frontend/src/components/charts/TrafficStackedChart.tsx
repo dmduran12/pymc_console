@@ -28,8 +28,8 @@ interface TrafficStackedChartProps {
   rxUtilization?: number;
 }
 
-// Legend order: TX Util, RX Util, Received, Forwarded, Dropped
-const LEGEND_ORDER = ['TX Util', 'RX Util', 'Received', 'Forwarded', 'Dropped'];
+// Legend order: RX Util, Received, Forwarded, Dropped
+const LEGEND_ORDER = ['RX Util', 'Received', 'Forwarded', 'Dropped'];
 
 // Simple moving average window (number of periods)
 const SMA_WINDOW = 4;
@@ -99,8 +99,7 @@ function TrafficStackedChartComponent({
   const metricColors = useMetricColors();
   
   // Derived colors from theme
-  const AIRTIME_TX_COLOR = chartColors.chart1; // Cyan/mint
-  const AIRTIME_RX_COLOR = metricColors.dropped; // Red
+  const AIRTIME_RX_COLOR = 'rgba(255,255,255,0.9)'; // White for RX util line
   const RECEIVED_COLOR = metricColors.received; // Green
   const FORWARDED_COLOR = metricColors.forwarded; // Blue
   const DROPPED_COLOR = chartColors.chart5; // Theme accent
@@ -265,7 +264,7 @@ function TrafficStackedChartComponent({
             dy={8}
             interval="preserveStartEnd"
           />
-          {/* Left Y-axis for packet counts */}
+          {/* Left Y-axis for packet counts (RX util is scaled to this axis) */}
           <YAxis
             yAxisId="left"
             axisLine={false}
@@ -273,18 +272,6 @@ function TrafficStackedChartComponent({
             tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
             dx={-8}
             width={32}
-          />
-          {/* Right Y-axis for utilization % - auto-scale based on data */}
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-            dx={8}
-            width={36}
-            domain={[0, 'auto']}
-            tickFormatter={(v) => `${v.toFixed(1)}%`}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend content={<TrafficLegend />} />
@@ -324,24 +311,14 @@ function TrafficStackedChartComponent({
             isAnimationActive={false}
           />
           
-          {/* Utilization lines - TX on right axis (%), RX scaled to left axis (correlates with packets) */}
-          <Line
-            yAxisId="right"
-            type="monotone"
-            dataKey="txUtil"
-            name="TX Util"
-            stroke={AIRTIME_TX_COLOR}
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-          />
+          {/* RX Utilization line - scaled to left axis (correlates with packets) */}
           <Line
             yAxisId="left"
             type="monotone"
             dataKey="rxUtilScaled"
             name="RX Util"
             stroke={AIRTIME_RX_COLOR}
-            strokeWidth={2}
+            strokeWidth={3}
             dot={false}
             isAnimationActive={false}
           />
