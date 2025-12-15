@@ -354,7 +354,7 @@ const SystemResourcesChart = memo(function SystemResourcesChart({
             dataKey="time"
             axisLine={false}
             tickLine={false}
-            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
             dy={8}
             interval={tickInterval}
           />

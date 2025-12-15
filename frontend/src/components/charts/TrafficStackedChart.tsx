@@ -257,7 +257,7 @@ function TrafficStackedChartComponent({
             dataKey="time"
             axisLine={false}
             tickLine={false}
-            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11, fontFamily: 'var(--font-mono)' }}
+            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
             dy={8}
             interval="preserveStartEnd"
           />
@@ -276,7 +276,7 @@ function TrafficStackedChartComponent({
             orientation="right"
             axisLine={false}
             tickLine={false}
-            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}
             dx={8}
             width={40}
             domain={[0, maxRxUtil > 0 ? maxRxUtil : 1]}

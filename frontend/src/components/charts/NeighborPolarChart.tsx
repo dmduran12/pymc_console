@@ -344,8 +344,8 @@ function NeighborPolarChartComponent({
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="rgba(255,255,255,0.5)"
-                fontSize={11}
-                fontFamily="var(--font-mono)"
+                fontSize={10}
+                fontFamily="'JetBrains Mono', monospace"
               >
                 {dir}
               </text>

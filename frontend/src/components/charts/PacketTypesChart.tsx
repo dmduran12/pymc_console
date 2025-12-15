@@ -49,9 +49,9 @@ function TreemapCell({
   const color = colors[index % colors.length];
   
   // Only show label if cell is large enough
-  const showLabel = width > 45 && height > 24;
+  const showLabel = width > 40 && height > 18;
   // Padding from bottom-left corner
-  const padding = 6;
+  const padding = 4;
   
   return (
     <g
@@ -78,11 +78,10 @@ function TreemapCell({
           textAnchor="start"
           dominantBaseline="auto"
           fill="rgba(0,0,0,0.85)"
-          className="type-data-xs"
+          fontSize={9}
+          fontFamily="'JetBrains Mono', monospace"
+          fontWeight={600}
           style={{ 
-            fontSize: 'var(--step--2)',
-            fontFamily: 'var(--font-mono)',
-            fontWeight: 600,
             textTransform: 'uppercase',
             pointerEvents: 'none',
           }}
