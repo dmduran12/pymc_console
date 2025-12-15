@@ -92,12 +92,22 @@ function NeighborPolarChartComponent({
   const [pulseKey, setPulseKey] = useState(0);
   const prevLastSeenRef = useRef<Record<string, number>>({});
   
-  // Radar pulse effect - trigger every PULSE_INTERVAL
+  // Radar pulse effect - trigger immediately on mount, then every PULSE_INTERVAL
   useEffect(() => {
+    // Trigger first pulse after a short delay (let component render first)
+    const initialTimeout = setTimeout(() => {
+      setPulseKey(1);
+    }, 100);
+    
+    // Then continue pulsing every interval
     const interval = setInterval(() => {
       setPulseKey(k => k + 1);
     }, PULSE_INTERVAL);
-    return () => clearInterval(interval);
+    
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
   }, []);
   
   // Process neighbors into polar coordinates
@@ -226,34 +236,35 @@ function NeighborPolarChartComponent({
         <svg width={size} height={size} className="mx-auto">
           {/* SVG Definitions for animations */}
           <defs>
-            {/* Radar pulse animation - ease-out expansion */}
             <style>
               {`
-                @keyframes radar-pulse {
+                @keyframes radar-pulse-scale {
                   0% {
-                    r: 0;
-                    opacity: 0.4;
+                    transform: scale(0);
+                    opacity: 0.5;
                   }
                   100% {
-                    r: ${radius};
+                    transform: scale(1);
                     opacity: 0;
                   }
                 }
-                @keyframes neighbor-blink {
+                @keyframes neighbor-blink-scale {
                   0%, 100% {
+                    transform: scale(1);
                     opacity: 0;
-                    r: 14;
                   }
                   50% {
-                    opacity: 0.7;
-                    r: 18;
+                    transform: scale(1.3);
+                    opacity: 0.8;
                   }
                 }
                 .radar-pulse-circle {
-                  animation: radar-pulse ${PULSE_DURATION}ms cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+                  transform-origin: center;
+                  animation: radar-pulse-scale ${PULSE_DURATION}ms cubic-bezier(0.15, 0.6, 0.4, 1) forwards;
                 }
-                .neighbor-blink {
-                  animation: neighbor-blink ${BLINK_DURATION}ms ease-out forwards;
+                .neighbor-blink-ring {
+                  transform-origin: center;
+                  animation: neighbor-blink-scale ${BLINK_DURATION}ms ease-out forwards;
                 }
               `}
             </style>
@@ -273,16 +284,18 @@ function NeighborPolarChartComponent({
           ))}
           
           {/* Radar pulse - expanding circle from center */}
-          <circle
-            key={`pulse-${pulseKey}`}
-            cx={center}
-            cy={center}
-            r={0}
-            fill="none"
-            stroke="rgba(255,255,255,0.4)"
-            strokeWidth={1.5}
-            className="radar-pulse-circle"
-          />
+          {pulseKey > 0 && (
+            <circle
+              key={`pulse-${pulseKey}`}
+              cx={center}
+              cy={center}
+              r={radius}
+              fill="none"
+              stroke="rgba(255,255,255,0.5)"
+              strokeWidth={1.5}
+              className="radar-pulse-circle"
+            />
+          )}
           
           {/* Compass lines (N-S, E-W, diagonals) */}
           {DIRECTIONS.map((dir, i) => {
@@ -345,11 +358,11 @@ function NeighborPolarChartComponent({
                   <circle
                     cx={x}
                     cy={y}
-                    r={14}
+                    r={12}
                     fill="none"
-                    stroke="rgba(255,255,255,0.8)"
+                    stroke="rgba(255,255,255,0.9)"
                     strokeWidth={2}
-                    className="neighbor-blink"
+                    className="neighbor-blink-ring"
                   />
                 )}
                 {/* Glow effect for hovered */}
