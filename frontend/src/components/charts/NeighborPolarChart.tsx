@@ -8,8 +8,13 @@ import type { NeighborInfo } from '@/types/api';
 const PULSE_INTERVAL = 10000;
 // Pulse animation duration in ms  
 const PULSE_DURATION = 2000;
+// Local node ping duration (50% of pulse)
+const LOCAL_PING_DURATION = PULSE_DURATION / 2;
 // Blink duration in ms
 const BLINK_DURATION = 600;
+// Colors
+const LOCAL_NODE_COLOR = '#60A5FA';
+const LOCAL_NODE_PING_COLOR = '#4CFFB5'; // Bright teal
 
 interface NeighborPolarChartProps {
   neighbors: Record<string, NeighborInfo>;
@@ -241,11 +246,21 @@ function NeighborPolarChartComponent({
                 @keyframes radar-pulse-scale {
                   0% {
                     transform: scale(0);
-                    opacity: 0.5;
+                    opacity: 0.6;
+                    stroke-width: 4;
                   }
                   100% {
                     transform: scale(1);
                     opacity: 0;
+                    stroke-width: 0.5;
+                  }
+                }
+                @keyframes local-node-ping {
+                  0% {
+                    fill: ${LOCAL_NODE_PING_COLOR};
+                  }
+                  100% {
+                    fill: ${LOCAL_NODE_COLOR};
                   }
                 }
                 @keyframes neighbor-blink-scale {
@@ -261,6 +276,9 @@ function NeighborPolarChartComponent({
                 .radar-pulse-circle {
                   transform-origin: center;
                   animation: radar-pulse-scale ${PULSE_DURATION}ms cubic-bezier(0.15, 0.6, 0.4, 1) forwards;
+                }
+                .local-node-ping {
+                  animation: local-node-ping ${LOCAL_PING_DURATION}ms ease-out forwards;
                 }
                 .neighbor-blink-ring {
                   transform-origin: center;
@@ -334,14 +352,16 @@ function NeighborPolarChartComponent({
             );
           })}
           
-          {/* Center dot (local node) */}
+          {/* Center dot (local node) - with ping animation on pulse */}
           <circle
+            key={`local-${pulseKey}`}
             cx={center}
             cy={center}
             r={6}
-            fill="#60A5FA"
+            fill={LOCAL_NODE_COLOR}
             stroke="rgba(255,255,255,0.3)"
             strokeWidth={1}
+            className={pulseKey > 0 ? 'local-node-ping' : ''}
           />
           
           {/* Neighbor dots */}
