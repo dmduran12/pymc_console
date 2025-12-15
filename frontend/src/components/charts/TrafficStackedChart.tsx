@@ -31,24 +31,86 @@ interface TrafficStackedChartProps {
 // Legend order: TX Util, RX Util, Received, Forwarded, Dropped
 const LEGEND_ORDER = ['TX Util', 'RX Util', 'Received', 'Forwarded', 'Dropped'];
 
-// EMA smoothing factor (0-1): lower = smoother/more momentum, higher = more responsive
-// 0.05 means each point is 5% new data, 95% previous trend
-const EMA_ALPHA = 0.05;
+// Polynomial degree for trend fitting (higher = more flexible, lower = smoother)
+const POLY_DEGREE = 4;
 
-/** Apply exponential moving average - maintains momentum when values drop to zero */
-function exponentialMovingAverage(data: number[], alpha: number): number[] {
+/** Fit a polynomial to data points and return smoothed values */
+function polynomialFit(data: number[], degree: number): number[] {
   if (data.length === 0) return [];
-  const result: number[] = [];
+  if (data.length <= degree) return [...data]; // Not enough points
   
-  // Initialize with first non-zero value or first value
-  let ema = data[0];
+  const n = data.length;
+  const x = data.map((_, i) => i / (n - 1)); // Normalize x to [0, 1]
+  const y = data;
   
-  for (let i = 0; i < data.length; i++) {
-    // EMA formula: new_ema = alpha * current_value + (1 - alpha) * previous_ema
-    ema = alpha * data[i] + (1 - alpha) * ema;
-    result.push(ema);
+  // Build Vandermonde matrix for least squares: X * coeffs = y
+  // Using normal equations: (X^T * X) * coeffs = X^T * y
+  const cols = degree + 1;
+  
+  // X^T * X matrix
+  const XtX: number[][] = Array(cols).fill(0).map(() => Array(cols).fill(0));
+  // X^T * y vector
+  const Xty: number[] = Array(cols).fill(0);
+  
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < cols; j++) {
+      const xij = Math.pow(x[i], j);
+      Xty[j] += xij * y[i];
+      for (let k = 0; k < cols; k++) {
+        XtX[j][k] += xij * Math.pow(x[i], k);
+      }
+    }
   }
-  return result;
+  
+  // Solve using Gaussian elimination
+  const coeffs = solveLinearSystem(XtX, Xty);
+  if (!coeffs) return [...data]; // Fallback if solve fails
+  
+  // Evaluate polynomial at each point
+  return x.map(xi => {
+    let val = 0;
+    for (let j = 0; j < coeffs.length; j++) {
+      val += coeffs[j] * Math.pow(xi, j);
+    }
+    return Math.max(0, val); // Clamp to non-negative
+  });
+}
+
+/** Gaussian elimination to solve Ax = b */
+function solveLinearSystem(A: number[][], b: number[]): number[] | null {
+  const n = A.length;
+  const aug = A.map((row, i) => [...row, b[i]]); // Augmented matrix
+  
+  // Forward elimination
+  for (let i = 0; i < n; i++) {
+    // Find pivot
+    let maxRow = i;
+    for (let k = i + 1; k < n; k++) {
+      if (Math.abs(aug[k][i]) > Math.abs(aug[maxRow][i])) maxRow = k;
+    }
+    [aug[i], aug[maxRow]] = [aug[maxRow], aug[i]];
+    
+    if (Math.abs(aug[i][i]) < 1e-10) return null; // Singular
+    
+    for (let k = i + 1; k < n; k++) {
+      const factor = aug[k][i] / aug[i][i];
+      for (let j = i; j <= n; j++) {
+        aug[k][j] -= factor * aug[i][j];
+      }
+    }
+  }
+  
+  // Back substitution
+  const x = Array(n).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    x[i] = aug[i][n];
+    for (let j = i + 1; j < n; j++) {
+      x[i] -= aug[i][j] * x[j];
+    }
+    x[i] /= aug[i][i];
+  }
+  
+  return x;
 }
 
 // Custom legend component - left justified with specific order
@@ -179,11 +241,11 @@ function TrafficStackedChartComponent({
       };
     });
     
-    // Apply exponential moving average smoothing to utilization values
+    // Apply polynomial fit smoothing to utilization values
     const txUtilValues = rawData.map(d => d.txUtil);
     const rxUtilValues = rawData.map(d => d.rxUtil);
-    const smoothedTx = exponentialMovingAverage(txUtilValues, EMA_ALPHA);
-    const smoothedRx = exponentialMovingAverage(rxUtilValues, EMA_ALPHA);
+    const smoothedTx = polynomialFit(txUtilValues, POLY_DEGREE);
+    const smoothedRx = polynomialFit(rxUtilValues, POLY_DEGREE);
     
     // Return data with smoothed utilization
     return rawData.map((d, i) => ({
