@@ -10,7 +10,7 @@ import type { BucketedStats, UtilizationStats, NoiseFloorHistoryItem } from '@/l
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
-import { TrafficStackedChart, useRxUtilStats } from '@/components/charts/TrafficStackedChart';
+import { TrafficStackedChart } from '@/components/charts/TrafficStackedChart';
 import { NeighborPolarChart } from '@/components/charts/NeighborPolarChart';
 import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
@@ -157,14 +157,37 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
   const spreadingFactor = stats?.config?.radio?.spreading_factor ?? 8;
   const bandwidthKhz = stats?.config?.radio?.bandwidth ?? 125;
   
-  // Get RX util stats (max and mean) for the current time period
-  const rxUtilStats = useRxUtilStats(
-    utilizationStats?.bins,
-    bucketedStats?.received,
-    bucketedStats?.bucket_duration_seconds,
-    spreadingFactor,
-    bandwidthKhz
-  );
+  // Calculate RX util stats directly from bucket data
+  const rxUtilStats = useMemo(() => {
+    const received = bucketedStats?.received;
+    const bucketDurationSeconds = bucketedStats?.bucket_duration_seconds ?? 0;
+    
+    if (!received || received.length === 0 || bucketDurationSeconds <= 0) {
+      return { max: 0, mean: 0 };
+    }
+    
+    // Calculate airtime per packet based on radio config
+    // Simplified formula matching pyMC_Repeater/repeater/airtime.py
+    const pktLen = 40; // Average packet length
+    const symbolTime = Math.pow(2, spreadingFactor) / bandwidthKhz; // ms
+    const preambleTime = 8 * symbolTime;
+    const payloadSymbols = (pktLen + 4.25) * 8;
+    const payloadTime = payloadSymbols * symbolTime;
+    const airtimePerPacketMs = preambleTime + payloadTime;
+    
+    const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
+    
+    // Calculate util for each bucket
+    const utils = received.map(bucket => {
+      const rxAirtimeMs = bucket.count * airtimePerPacketMs;
+      return (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
+    });
+    
+    const max = Math.max(...utils, 0);
+    const mean = utils.reduce((a, b) => a + b, 0) / utils.length;
+    
+    return { max, mean };
+  }, [bucketedStats?.received, bucketedStats?.bucket_duration_seconds, spreadingFactor, bandwidthKhz]);
 
   return (
     <div className="section-gap">
@@ -201,16 +224,12 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
                 <TrendingUp className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Traffic Flow</h2>
                 <div className="ml-auto flex items-center gap-4">
-                  {(rxUtilStats.max > 0 || rxUtilStats.mean > 0) && (
-                    <>
-                      <span className="type-data-xs text-text-muted">
-                        Max <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.max.toFixed(1)}%</span>
-                      </span>
-                      <span className="type-data-xs text-text-muted">
-                        Mean <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.mean.toFixed(1)}%</span>
-                      </span>
-                    </>
-                  )}
+                  <span className="type-data-xs text-text-muted">
+                    Max <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.max.toFixed(1)}%</span>
+                  </span>
+                  <span className="type-data-xs text-text-muted">
+                    Mean <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.mean.toFixed(1)}%</span>
+                  </span>
                   <span className="pill-tag">{currentRange.label}</span>
                 </div>
               </div>
