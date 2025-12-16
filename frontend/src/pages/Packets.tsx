@@ -1,5 +1,3 @@
-'use client';
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Radio, Filter, RefreshCw, Circle, X } from 'lucide-react';
 import clsx from 'clsx';
@@ -13,7 +11,7 @@ import { useFlashAdvert } from '@/lib/stores/useStore';
 import { PacketRow } from '@/components/packets/PacketRow';
 import { PacketDetailModal } from '@/components/packets/PacketDetailModal';
 
-export default function PacketsPage() {
+export default function Packets() {
   const [packets, setPackets] = useState<Packet[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveMode, setLiveMode] = useState(true);

@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState, useCallback, memo } from 'react';
 import { Cpu, HardDrive, Thermometer, Activity, RefreshCw } from 'lucide-react';
 import {
@@ -120,9 +118,7 @@ const TemperatureGauge = memo(function TemperatureGauge({
   };
 
   // Build gradient that shows colors ONLY up to current temperature
-  // This creates the "reveal" effect - you only see colors you've reached
   const getBarGradient = () => {
-    // Color stops at threshold positions (as % of full scale)
     const stops = [
       { pos: 0, color: 'var(--accent-tertiary)' },
       { pos: thresholdPositions.cold, color: 'var(--accent-tertiary)' },
@@ -136,10 +132,7 @@ const TemperatureGauge = memo(function TemperatureGauge({
       { pos: 100, color: 'var(--accent-danger)' },
     ];
     
-    // Convert to gradient string - positions are relative to BAR width, not container
-    // So we scale them: if bar is at 50%, a stop at 60% of scale becomes 120% of bar (not visible)
     const scaledStops = stops.map(s => {
-      // Scale position relative to current bar width
       const scaledPos = percentage > 0 ? (s.pos / percentage) * 100 : 0;
       return `${s.color} ${Math.min(scaledPos, 100)}%`;
     });
@@ -147,7 +140,6 @@ const TemperatureGauge = memo(function TemperatureGauge({
     return `linear-gradient(to right, ${scaledStops.join(', ')})`;
   };
 
-  // Dimmed background showing full scale
   const scaleGradient = `linear-gradient(to right,
     var(--accent-tertiary) 0%,
     var(--accent-tertiary) ${thresholdPositions.cold}%,
@@ -163,33 +155,27 @@ const TemperatureGauge = memo(function TemperatureGauge({
 
   return (
     <div className="space-y-1">
-      {/* Label row with status pill and temp */}
       <div className="flex justify-between items-center">
         <span className="text-xs text-text-muted uppercase tracking-wide">{label}</span>
         <div className="flex items-center gap-1.5">
-          {/* Status pill - sized to match text height */}
           <span className={clsx(
             'px-1.5 text-[9px] font-semibold rounded-full border leading-[14px]',
             status.bg, status.text_color, status.border
           )}>
             {status.text}
           </span>
-          {/* Temperature value - always white */}
           <span className="text-sm font-semibold tabular-nums text-text-primary">
             {value.toFixed(1)}°
           </span>
         </div>
       </div>
       
-      {/* Compact bar gauge */}
       <div className="relative h-2.5 bg-white/5 rounded-full overflow-hidden">
-        {/* Full gradient background (dimmed) */}
         <div 
           className="absolute inset-0 opacity-15 rounded-full"
           style={{ background: scaleGradient }}
         />
         
-        {/* Active bar */}
         <div 
           className="absolute inset-y-0 left-0 rounded-full transition-all duration-300 ease-out"
           style={{ 
@@ -198,7 +184,6 @@ const TemperatureGauge = memo(function TemperatureGauge({
           }}
         />
         
-        {/* Tick marks at thresholds */}
         <div className="absolute inset-0 flex items-center pointer-events-none">
           {[TEMP_THRESHOLDS.normal, TEMP_THRESHOLDS.warm, TEMP_THRESHOLDS.hot].map((threshold) => {
             const pos = ((threshold - min) / (max - min)) * 100;
@@ -218,12 +203,11 @@ const TemperatureGauge = memo(function TemperatureGauge({
 });
 
 // Chart colors
-const CPU_COLOR = '#60A5FA'; // Blue
-const MEMORY_COLOR = '#F9D26F'; // Amber/Yellow
+const CPU_COLOR = '#60A5FA';
+const MEMORY_COLOR = '#F9D26F';
 
 // 20-minute window in milliseconds
 const WINDOW_MS = 20 * 60 * 1000;
-// Number of slots in the 20-minute window (at 3s polling = 400 slots)
 const NUM_SLOTS = Math.floor(WINDOW_MS / POLLING_INTERVALS.system);
 
 /** Custom legend component */
@@ -268,25 +252,16 @@ function ResourcesTooltip({ active, payload, label }: { active?: boolean; payloa
   );
 }
 
-/** 
- * Build chart data array with fixed NUM_SLOTS positions.
- * Data is right-aligned (newest on right), with nulls padding the left.
- * This approach preserves data even after idle periods.
- */
 function buildChartData(
   data: ResourceDataPoint[]
 ): Array<{ slot: number; time: string; cpu: number | null; memory: number | null }> {
-  // Create fixed-size array with nulls
   const slots: Array<{ slot: number; time: string; cpu: number | null; memory: number | null }> = [];
   
-  // Calculate how many empty slots to prepend (right-align the data)
   const emptySlots = Math.max(0, NUM_SLOTS - data.length);
   
-  // Fill empty slots on the left with placeholder times
   const now = Date.now();
   const slotDuration = POLLING_INTERVALS.system;
   for (let i = 0; i < emptySlots; i++) {
-    // Calculate what time this slot would represent if we had data
     const slotTime = now - (NUM_SLOTS - i) * slotDuration;
     const timeStr = new Date(slotTime).toLocaleTimeString([], {
       hour: '2-digit',
@@ -296,13 +271,12 @@ function buildChartData(
     slots.push({ slot: i, time: timeStr, cpu: null, memory: null });
   }
   
-  // Add actual data points (they go on the right side)
-  const dataToShow = data.slice(-NUM_SLOTS); // Take most recent if somehow more than NUM_SLOTS
+  const dataToShow = data.slice(-NUM_SLOTS);
   for (let i = 0; i < dataToShow.length; i++) {
     const point = dataToShow[i];
     slots.push({
       slot: emptySlots + i,
-      time: point.time.slice(0, 5), // HH:MM only for display
+      time: point.time.slice(0, 5),
       cpu: point.cpu,
       memory: point.memory,
     });
@@ -317,10 +291,8 @@ const SystemResourcesChart = memo(function SystemResourcesChart({
 }: { 
   data: ResourceDataPoint[];
 }) {
-  // Build chart data with fixed slots, data right-aligned
   const chartData = buildChartData(data);
   
-  // Show X-axis ticks at 5-minute intervals (every ~100 slots at 3s polling)
   const tickInterval = Math.floor(NUM_SLOTS / 4);
 
   if (data.length === 0) {
@@ -397,17 +369,15 @@ const SystemResourcesChart = memo(function SystemResourcesChart({
   );
 });
 
-export default function SystemStatsPage() {
+export default function System() {
   const [stats, setStats] = useState<HardwareStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   
-  // Use global store for resource history (persists across page navigation)
   const resourceHistory = useResourceHistory();
   const addResourceDataPoint = useAddResourceDataPoint();
 
-  // Memoized fetch function that also accumulates history
   const fetchStats = useCallback(async () => {
     try {
       const response = await api.getHardwareStats();
@@ -415,7 +385,6 @@ export default function SystemStatsPage() {
         setStats(response.data);
         setError(null);
         
-        // Add data point to global store (handles deduplication internally)
         addResourceDataPoint(
           response.data.cpu.usage_percent,
           response.data.memory.usage_percent,
@@ -441,8 +410,6 @@ export default function SystemStatsPage() {
     };
     void doFetch();
     
-    // Use Web Worker for background-resistant polling
-    // Workers aren't throttled when the tab is in the background
     if (typeof Worker !== 'undefined') {
       const workerCode = `
         const interval = ${POLLING_INTERVALS.system};
@@ -454,7 +421,6 @@ export default function SystemStatsPage() {
         if (mounted) void fetchStats();
       };
     } else {
-      // Fallback for environments without Worker support
       const interval = setInterval(fetchStats, POLLING_INTERVALS.system);
       return () => {
         mounted = false;
@@ -551,7 +517,7 @@ export default function SystemStatsPage() {
             </div>
           </div>
 
-          {/* Disk Usage - 12 cols mobile, 6 cols md */}
+          {/* Disk Usage */}
           <div className="col-span-full md:col-span-6 glass-card card-padding">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-accent-success/20 flex items-center justify-center">
@@ -579,7 +545,7 @@ export default function SystemStatsPage() {
             </div>
           </div>
 
-          {/* Temperature - 12 cols mobile, 6 cols md */}
+          {/* Temperature */}
           <div className="col-span-full md:col-span-6 glass-card card-padding">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-accent-secondary/20 flex items-center justify-center">
@@ -592,7 +558,6 @@ export default function SystemStatsPage() {
             </div>
             {stats.temperatures && Object.keys(stats.temperatures).length > 0 ? (
               <div className="space-y-2.5">
-                {/* Show CPU thermal as primary gauge */}
                 {stats.temperatures.cpu_thermal !== undefined && (
                   <TemperatureGauge 
                     value={stats.temperatures.cpu_thermal} 
@@ -601,7 +566,6 @@ export default function SystemStatsPage() {
                     max={100} 
                   />
                 )}
-                {/* Show other temps */}
                 {Object.entries(stats.temperatures)
                   .filter(([key]) => key !== 'cpu_thermal')
                   .slice(0, 3)

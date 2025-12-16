@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useStats, useStatsError, useFlashReceived } from '@/lib/stores/useStore';
 import { useDebounce } from '@/lib/hooks/useDebounce';

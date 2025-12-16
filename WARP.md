@@ -8,13 +8,13 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 
 **Philosophy**: We install pyMC_Repeater exactly as upstream intends, then layer our dashboard on top. Our manage.sh honors upstream's installation flow and paths.
 
-- **Next.js Dashboard** - Real-time monitoring of packets, neighbors, stats, and radio config
+- **Vite + React Dashboard** - Real-time monitoring of packets, neighbors, stats, and radio config
 - **manage.sh Installer** - TUI that installs upstream pyMC_Repeater + our dashboard overlay
-- **Static Export** - Dashboard served directly by pyMC_Repeater's CherryPy backend (no Node.js server needed in production)
+- **True SPA** - Single index.html served by CherryPy; React Router handles all client-side routing
 
 ## Tech Stack
 
-- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4
+- **Frontend**: Vite 6, React 18, React Router 7, TypeScript, Tailwind CSS 4
 - **State Management**: Zustand
 - **Charts**: Recharts
 - **Maps**: Leaflet / react-leaflet
@@ -27,7 +27,7 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 pymc_console/
 ├── .github/workflows/     # GitHub Actions CI/CD
 │   └── build-ui.yml       # Automated build & release workflow
-├── frontend/              # Next.js dashboard (static export)
+├── frontend/              # Vite + React SPA dashboard
 │   ├── src/               # Source code
 │   ├── out/               # Build output (gitignored)
 │   └── dist/              # Release artifacts (gitignored)
@@ -45,9 +45,10 @@ pymc_console/
 # Frontend development (from frontend/)
 cd frontend
 npm install           # Install dependencies
-npm run dev           # Start dev server at http://localhost:3000
+npm run dev           # Start Vite dev server at http://localhost:5173
 npm run build         # Production build → frontend/out/
 npm run build:static  # Build + package for release → frontend/dist/
+npm run preview       # Preview production build locally
 npm run lint          # Run ESLint
 
 # Installer (run as root on target Pi)
@@ -60,7 +61,9 @@ sudo ./manage.sh upgrade    # Upgrade existing installation
 
 ### Deployment Model
 
-The dashboard is a **static export** (`output: 'export'` in next.config.ts).
+The dashboard is a **true Single Page Application (SPA)** built with Vite. A single `index.html` is served for all routes, and React Router handles client-side navigation.
+
+**Why SPA?** Upstream CherryPy's `default()` method already returns `index.html` for all unknown routes - this is exactly what an SPA needs. No backend patches required for routing.
 
 **Release-based deployment** (production):
 1. GitHub Actions builds on push to main/dev
@@ -69,9 +72,9 @@ The dashboard is a **static export** (`output: 'export'` in next.config.ts).
 4. pyMC_Repeater's CherryPy server serves the dashboard at port 8000
 
 **Local development**:
-1. `npm run build` generates static files in `frontend/out/`
-2. `npm run build:static` also packages to `frontend/dist/`
-3. Test locally with `npx serve out`
+1. `npm run dev` starts Vite dev server with HMR at http://localhost:5173
+2. `npm run build` generates static files in `frontend/out/`
+3. `npm run preview` serves the production build locally
 
 ### Installation Flow (Mirrors Upstream)
 
@@ -87,6 +90,8 @@ The installer follows the same flow as upstream's `manage.sh`:
 
 This mirrors upstream exactly, making patches easy to submit as PRs. Upstream's Vue.js dashboard remains intact at `/opt/pymc_repeater/repeater/web/html/` as a backup.
 
+**Why no static file serving patch?** Upstream's `default()` method returns `index.html` for all unknown routes. Our SPA works natively with this behavior - React Router handles `/packets`, `/logs`, etc. client-side.
+
 ### Directory Structure
 
 **Development/Clone directories (user's home):**
@@ -97,7 +102,7 @@ This mirrors upstream exactly, making patches easy to submit as PRs. Upstream's 
 - `/opt/pymc_repeater/` - pyMC_Repeater installation (matches upstream)
 - `/opt/pymc_repeater/repeater/web/html/` - Upstream Vue.js dashboard (preserved)
 - `/opt/pymc_console/` - Our files (radio presets, dashboard, etc.)
-- `/opt/pymc_console/web/html/` - Our Next.js dashboard
+- `/opt/pymc_console/web/html/` - Our React SPA dashboard
 - `/etc/pymc_repeater/config.yaml` - Radio and repeater configuration
   - `web.web_path` points to our dashboard location
 - `/var/log/pymc_repeater/` - Log files
@@ -108,14 +113,17 @@ This mirrors upstream exactly, making patches easy to submit as PRs. Upstream's 
 
 ```
 src/
-├── app/                    # Next.js App Router pages
-│   ├── page.tsx           # Dashboard home
-│   ├── packets/page.tsx   # Packet history & filtering
-│   ├── neighbors/page.tsx # Neighbor map & list
-│   ├── statistics/page.tsx # Charts & metrics
-│   ├── logs/page.tsx      # System logs
-│   ├── settings/page.tsx  # Radio configuration
-│   └── system/page.tsx    # Hardware stats
+├── main.tsx               # React entry point (BrowserRouter setup)
+├── App.tsx                # Routes configuration + RootLayout
+├── index.css              # Global styles (Tailwind)
+├── pages/                 # Page components (one per route)
+│   ├── Dashboard.tsx      # / - Home dashboard
+│   ├── Packets.tsx        # /packets - Packet history & filtering
+│   ├── Neighbors.tsx      # /neighbors - Neighbor map & list
+│   ├── Statistics.tsx     # /statistics - Charts & metrics
+│   ├── System.tsx         # /system - Hardware stats
+│   ├── Logs.tsx           # /logs - System logs
+│   └── Settings.tsx       # /settings - Radio configuration
 ├── components/
 │   ├── charts/            # AirtimeGauge, PacketTypesChart, TrafficStackedChart, NeighborPolarChart
 │   ├── controls/          # ControlPanel (mode/duty cycle)
@@ -137,7 +145,7 @@ src/
 
 ### Key Patterns
 
-**API Client** (`src/lib/api.ts`): All backend communication through typed functions. Base URL from `NEXT_PUBLIC_API_URL` env var (empty string = same-origin for static deployment).
+**API Client** (`src/lib/api.ts`): All backend communication through typed functions. Base URL from `VITE_API_URL` env var (empty string = same-origin for static deployment).
 
 **Client-Side Computation**: Some stats computed client-side from raw packets:
 - `getBucketedStats()` - Time-bucketed packet counts for charts
@@ -190,15 +198,19 @@ The main installer script provides a TUI (whiptail/dialog) for:
 - `install_backend_service()` - Copies upstream's service file from clone
 - `install_static_frontend()` - Downloads dashboard from GitHub Releases to `/opt/pymc_console/web/html/` and configures `web.web_path`
 - `configure_radio_terminal()` - Radio preset selection
-- `patch_static_file_serving()` - Applies Nginx-style try_files behavior for static HTML files
 - `patch_api_endpoints()` - Applies radio config API patch to target directory
+- `patch_logging_section()` - Ensures logging config section exists
+- `patch_log_level_api()` - Adds log level toggle API endpoint
 
 ### Upstream Patches (PR Candidates)
 
 These patches are applied during install and should be submitted as PRs to pyMC_Repeater:
 
-1. **patch_static_file_serving** - Adds Nginx-style `try_files` to CherryPy's `default()` method: tries `$uri.html` before falling back to `index.html`. Also adds `/images/` static directory. Upstream already supports `/_next/` via conditional config.
-2. **patch_api_endpoints** - Adds `/api/update_radio_config` POST endpoint for web-based radio configuration
+1. **patch_api_endpoints** - Adds `/api/update_radio_config` POST endpoint for web-based radio configuration
+2. **patch_logging_section** - Ensures `config['logging']` exists before setting level from `--log-level` arg
+3. **patch_log_level_api** - Adds `/api/set_log_level` POST endpoint for web-based log level toggle
+
+**Removed patches (v0.4.0):** `patch_static_file_serving` was removed during the SPA migration. Upstream's `default()` method already returns `index.html` for unknown routes, which is exactly what a true SPA needs.
 
 ### Important: DEBUG Log Level Workaround
 
@@ -212,9 +224,9 @@ The installer uses system Python with `--break-system-packages --ignore-installe
 
 **Frontend API URL**: For development, set in `frontend/.env.local`:
 ```env
-NEXT_PUBLIC_API_URL=http://192.168.1.100:8000  # Remote repeater
+VITE_API_URL=http://192.168.1.100:8000  # Remote repeater
 ```
-For production (static export served by backend), leave empty or omit.
+For production (SPA served by backend), leave empty or omit.
 
 **Path alias**: Use `@/` to import from `src/`:
 ```typescript
@@ -236,14 +248,14 @@ Packet and stats types in `src/types/api.ts`. Notable constants:
 ```bash
 cd frontend
 npm install
-npm run dev  # Develop at http://localhost:3000
+npm run dev  # Develop at http://localhost:5173 (Vite HMR)
 ```
 
 **Build and test locally:**
 ```bash
 cd frontend
 npm run build
-npx serve out  # Test static export at localhost:3000
+npm run preview  # Preview production build locally
 ```
 
 **Deploy to Pi (existing installation):**

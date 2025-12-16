@@ -763,8 +763,7 @@ do_install() {
     
     # Apply patches to /opt/pymc_repeater (the installed location, not the clone)
     print_info "Patching installed files..."
-    patch_static_file_serving "$INSTALL_DIR"     # PATCH 1: Static file serving (try_files)
-    patch_api_endpoints "$INSTALL_DIR"           # PATCH 2: Radio config API endpoint
+    patch_api_endpoints "$INSTALL_DIR"           # PATCH 1: Radio config API endpoint
     patch_logging_section "$INSTALL_DIR"         # PATCH 3: Ensure logging section exists
     patch_log_level_api "$INSTALL_DIR"           # PATCH 4: Log level toggle API
     
@@ -982,10 +981,9 @@ do_upgrade() {
     
     # Apply patches to /opt/pymc_repeater (the installed location)
     print_info "Patching installed files..."
-    patch_static_file_serving "$INSTALL_DIR"     # PATCH 1: Static file serving (try_files)
-    patch_api_endpoints "$INSTALL_DIR"           # PATCH 2: Radio config API endpoint
-    patch_logging_section "$INSTALL_DIR"         # PATCH 3: Ensure logging section exists
-    patch_log_level_api "$INSTALL_DIR"           # PATCH 4: Log level toggle API
+    patch_api_endpoints "$INSTALL_DIR"           # PATCH 1: Radio config API endpoint
+    patch_logging_section "$INSTALL_DIR"         # PATCH 2: Ensure logging section exists
+    patch_log_level_api "$INSTALL_DIR"           # PATCH 3: Log level toggle API
     
     # Ensure --log-level DEBUG is in service file (RX timing fix)
     if [ -f /etc/systemd/system/pymc-repeater.service ]; then
@@ -1978,26 +1976,24 @@ run_upstream_installer() {
 #
 # PATCH REGISTRY:
 # ---------------
-# 1. patch_static_file_serving (http_server.py)
-#    - Adds Nginx-style try_files behavior (try $uri.html before index.html)
-#    - Adds /images static directory for dashboard backgrounds
-#    - Upstream already supports /_next/ via conditional config
-#    - PR Status: Pending
-#
-# 2. patch_api_endpoints (api_endpoints.py)
+# 1. patch_api_endpoints (api_endpoints.py)
 #    - Adds POST /api/update_radio_config endpoint
 #    - Allows web UI to update radio settings and save to config.yaml
 #    - PR Status: Pending
 #
-# 3. patch_logging_section (main.py)
+# 2. patch_logging_section (main.py)
 #    - Ensures config['logging'] exists before setting level from --log-level
 #    - Prevents KeyError when config.yaml lacks 'logging' section (affects DEBUG arg)
 #    - PR Status: Pending
 #
-# 4. patch_log_level_api (api_endpoints.py)
+# 3. patch_log_level_api (api_endpoints.py)
 #    - Adds POST /api/set_log_level endpoint
 #    - Allows web UI to toggle log level (INFO/DEBUG) and restart service
 #    - PR Status: Pending
+#
+# NOTE: patch_static_file_serving was removed in v0.4.0 (SPA migration).
+# Upstream's default() method already returns index.html for all unknown routes,
+# which is exactly what a true SPA needs. React Router handles client-side routing.
 #
 # NOTE: GPIO patches (Fix A-D) were removed after discovery that the real issue
 # was a race condition in pymc_core's interrupt initialization. Adding --log-level
@@ -2011,140 +2007,7 @@ run_upstream_installer() {
 # ============================================================================
 
 # ------------------------------------------------------------------------------
-# PATCH 1: Static File Serving Enhancement
-# ------------------------------------------------------------------------------
-# File: repeater/web/http_server.py
-# Purpose: Enable Nginx-style try_files behavior for static site generators
-# Changes:
-#   - default() method: Try $uri.html before falling back to index.html
-#   - Add /images static directory for dashboard background images
-# Note: Upstream already supports /_next/ directory via conditional config
-# ------------------------------------------------------------------------------
-patch_static_file_serving() {
-    local target_dir="${1:-$CLONE_DIR}"
-    local http_server="$target_dir/repeater/web/http_server.py"
-    
-    if [ ! -f "$http_server" ]; then
-        print_warning "http_server.py not found, skipping patch"
-        return 0
-    fi
-    
-    # Check if already patched (look for html_file which is unique to our patch)
-    if grep -q 'html_file = os.path.join' "$http_server" 2>/dev/null; then
-        print_info "Static file serving already configured"
-        return 0
-    fi
-    
-    # Use Python to apply the patch reliably
-    python3 << PATCHEOF
-import re
-import os
-import sys
-
-http_server_path = "$http_server"
-
-with open(http_server_path, 'r') as f:
-    content = f.read()
-
-# 1. Patch the default() method to try URI.html before index.html (Nginx-style try_files)
-# This allows serving packets.html for /packets, logs.html for /logs, etc.
-old_default = '''    @cherrypy.expose
-    def default(self, *args, **kwargs):
-        """Handle client-side routing - serve index.html for all non-API routes."""
-        # Handle OPTIONS requests for any path
-        if cherrypy.request.method == "OPTIONS":
-            return ""
-        
-        # Let API routes pass through
-        if args and args[0] == 'api':
-            raise cherrypy.NotFound()
-        
-        # For all other routes, serve the Vue.js app (client-side routing)
-        return self.index()'''
-
-new_default = '''    @cherrypy.expose
-    def default(self, *args, **kwargs):
-        """Handle static file serving with try_files behavior.
-        
-        Mimics Nginx try_files: tries URI.html before falling back to index.html.
-        This supports static site generators (Next.js, Vue, etc.) that output
-        separate HTML files per route (e.g., packets.html, logs.html).
-        """
-        # Handle OPTIONS requests for any path
-        if cherrypy.request.method == "OPTIONS":
-            return ""
-        
-        # Let API routes pass through
-        if args and args[0] == 'api':
-            raise cherrypy.NotFound()
-        
-        # Try URI.html first (e.g., /packets -> packets.html)
-        if args:
-            html_file = os.path.join(self.html_dir, f"{args[0]}.html")
-            if os.path.isfile(html_file):
-                try:
-                    with open(html_file, 'r', encoding='utf-8') as f:
-                        return f.read()
-                except Exception as e:
-                    logger.error(f"Error serving {html_file}: {e}")
-        
-        # Fallback to index.html for SPA routing
-        return self.index()'''
-
-if old_default in content:
-    content = content.replace(old_default, new_default)
-else:
-    # Try alternate pattern (in case of slight variations)
-    print("Warning: Could not find exact default() pattern, trying alternate")
-
-# 2. Add images_dir variable after existing dir definitions
-if 'images_dir = os.path.join' not in content:
-    # Find where assets_dir or next_dir is defined and add images_dir after
-    if 'next_dir = os.path.join' in content:
-        content = content.replace(
-            'next_dir = os.path.join(html_dir, "_next")',
-            'next_dir = os.path.join(html_dir, "_next")\n            images_dir = os.path.join(html_dir, "images")'
-        )
-    elif 'assets_dir = os.path.join' in content:
-        content = content.replace(
-            'assets_dir = os.path.join(html_dir, "assets")',
-            'assets_dir = os.path.join(html_dir, "assets")\n            images_dir = os.path.join(html_dir, "images")'
-        )
-
-# 3. Add /images static directory config if not present
-if '"/images":' not in content and '"/favicon.ico":' in content:
-    images_config = '''# Images directory for dashboard backgrounds
-                "/images": {
-                    "tools.staticdir.on": True,
-                    "tools.staticdir.dir": images_dir,
-                },
-                "/favicon.ico": {'''
-    content = content.replace('"/favicon.ico": {', images_config)
-
-# 4. Add CORS for /images if CORS section exists
-if '"/images"' in content and 'config["/favicon.ico"]["cors.expose.on"]' in content:
-    if 'config["/images"]' not in content:
-        content = content.replace(
-            'config["/favicon.ico"]["cors.expose.on"] = True',
-            'config["/images"]["cors.expose.on"] = True\n                config["/favicon.ico"]["cors.expose.on"] = True'
-        )
-
-with open(http_server_path, 'w') as f:
-    f.write(content)
-
-print("Patch applied successfully")
-PATCHEOF
-    
-    # Verify patch was applied
-    if grep -q 'html_file = os.path.join' "$http_server" 2>/dev/null; then
-        print_success "Patched http_server.py for static file serving"
-    else
-        print_warning "Patch may not have applied correctly"
-    fi
-}
-
-# ------------------------------------------------------------------------------
-# PATCH 2: Radio Configuration API Endpoint
+# PATCH 1: Radio Configuration API Endpoint
 # ------------------------------------------------------------------------------
 # File: repeater/web/api_endpoints.py
 # Purpose: Allow web UI to update radio settings without SSH/CLI
@@ -2297,7 +2160,7 @@ PATCHEOF
 }
 
 # ------------------------------------------------------------------------------
-# PATCH 4: Log Level API Endpoint
+# PATCH 3: Log Level API Endpoint
 # ------------------------------------------------------------------------------
 # File: repeater/web/api_endpoints.py
 # Purpose: Allow web UI to toggle log level (INFO/DEBUG) without SSH
@@ -2419,7 +2282,7 @@ PATCHEOF
 }
 
 # ------------------------------------------------------------------------------
-# PATCH 3: Ensure logging section exists before setting level (main.py)
+# PATCH 2: Ensure logging section exists before setting level (main.py)
 # ------------------------------------------------------------------------------
 patch_logging_section() {
     local target_dir="${1:-$CLONE_DIR}"

@@ -1,11 +1,9 @@
-'use client';
-
 import { memo, useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { usePackets, usePacketsLoading, useLiveMode, useFetchPackets, useFlashAdvert } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { Radio, Circle, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
-import Link from 'next/link';
 import { formatTime } from '@/lib/format';
 import { POLLING_INTERVALS } from '@/lib/constants';
 import {
@@ -129,7 +127,7 @@ export function RecentPackets() {
             </div>
           )}
           <Link 
-            href="/packets"
+            to="/packets"
             className="pill-subtle"
           >
             View all <ArrowRight className="w-3 h-3" />

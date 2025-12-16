@@ -1,5 +1,3 @@
-'use client';
-
 import { useStore } from '@/lib/stores/useStore';
 import { Users, Signal, Radio, MapPin, Repeat } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
@@ -16,7 +14,7 @@ function getSignalColor(snr?: number): string {
   return 'bg-[var(--signal-critical)]';
 }
 
-export default function NeighborsPage() {
+export default function Neighbors() {
   const { stats } = useStore();
   const neighbors = stats?.neighbors ?? {};
   const neighborEntries = Object.entries(neighbors);

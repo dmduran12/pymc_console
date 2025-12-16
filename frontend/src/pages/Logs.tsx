@@ -1,5 +1,3 @@
-'use client';
-
 import { memo, useState, useCallback, useEffect } from 'react';
 import { useLogs, useLogsLoading, useLiveMode, useFetchLogs, useSetLiveMode } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
@@ -33,13 +31,11 @@ const LogRow = memo(function LogRow({ log }: { log: LogEntry }) {
 
 /** Log level toggle component */
 function LogLevelToggle() {
-  // Infer current level from logs (DEBUG logs only appear when debug is enabled)
   const logs = useLogs();
   const [selectedLevel, setSelectedLevel] = useState<LogLevel>('INFO');
   const [isChanging, setIsChanging] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  // Infer log level from presence of DEBUG logs
   useEffect(() => {
     if (logs.length > 0) {
       const hasDebugLogs = logs.some(log => log.level === 'DEBUG');
@@ -58,7 +54,6 @@ function LogLevelToggle() {
       if (response.success && response.data) {
         setSelectedLevel(newLevel);
         setStatusMessage(response.data.message);
-        // Clear message after 5 seconds (service takes ~3s to restart)
         setTimeout(() => setStatusMessage(null), 5000);
       } else {
         setStatusMessage(response.error || 'Failed to change log level');
@@ -117,7 +112,7 @@ function LogLevelToggle() {
   );
 }
 
-export default function LogsPage() {
+export default function Logs() {
   const logs = useLogs();
   const logsLoading = useLogsLoading();
   const liveMode = useLiveMode();

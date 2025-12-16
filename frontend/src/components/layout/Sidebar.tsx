@@ -1,8 +1,5 @@
-'use client';
-
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Radio, 
@@ -41,7 +38,7 @@ const navigation = [
 const CONTROLS_EXPANDED_KEY = 'pymc-controls-expanded';
 
 export function Sidebar() {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { stats, fetchStats, setMode, setDutyCycle, sendAdvert } = useStore();
   const [isOpen, setIsOpen] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(true);
@@ -108,7 +105,7 @@ export function Sidebar() {
         return (
           <Link
             key={item.name}
-            href={item.href}
+            to={item.href}
             onClick={() => setIsOpen(false)}
             className={clsx(
               'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150',

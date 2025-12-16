@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pyMC Repeater Dashboard</title>
+    <meta name="description" content="LoRa Mesh Network Repeater Monitoring Dashboard" />
+    
+    <!-- Fonts: Inter (display) and JetBrains Mono (data) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    
+    <!-- Theme initialization - prevent flash -->
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('pymc-background');
+          var themeMap = { amber: 'amber', grey: 'grey', black: 'black', flora: 'flora' };
+          if (stored && themeMap[stored]) {
+            document.documentElement.setAttribute('data-theme', themeMap[stored]);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    
+    <style>
+      :root {
+        --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+        --font-data: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

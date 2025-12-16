@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useStats } from '@/lib/stores/useStore';
@@ -15,14 +13,14 @@ import { NeighborPolarChart } from '@/components/charts/NeighborPolarChart';
 import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 
-export default function StatisticsPage() {
+export default function Statistics() {
   const stats = useStats();
   const [bucketedStats, setBucketedStats] = useState<BucketedStats | null>(null);
   const [packetTypeData, setPacketTypeData] = useState<GraphData | null>(null);
   const [noiseFloorHistory, setNoiseFloorHistory] = useState<NoiseFloorHistoryItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
+  const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
 
   // Debounce time range changes to prevent rapid API calls when clicking quickly
   const debouncedRange = useDebounce(selectedRange, 150);

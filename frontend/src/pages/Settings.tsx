@@ -1,8 +1,6 @@
-'use client';
-
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useStore } from '@/lib/stores/useStore';
-import { Settings, Radio, Gauge, Antenna, MapPin, Pencil, Check, X, ChevronDown, Loader2 } from 'lucide-react';
+import { Settings as SettingsIcon, Radio, Gauge, Antenna, MapPin, Pencil, Check, X, ChevronDown, Loader2 } from 'lucide-react';
 import { formatFrequency, formatBandwidth } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { updateRadioConfig } from '@/lib/api';
@@ -31,21 +29,18 @@ const CODING_RATES = [
   { value: 8, label: '4/8' },
 ];
 
-export default function SettingsPage() {
+export default function Settings() {
   const { stats, setMode, setDutyCycle, fetchStats } = useStore();
 
   const radioConfig = stats?.config?.radio;
   const repeaterConfig = stats?.config?.repeater;
   const dutyCycleConfig = stats?.config?.duty_cycle;
 
-  // Match homepage node name resolution
   const nodeName = stats?.node_name || stats?.config?.node_name || 'Unknown Node';
 
-  // Read current values from config (where backend stores them)
   const currentMode = repeaterConfig?.mode ?? 'forward';
   const dutyCycleEnabled = dutyCycleConfig?.enforcement_enabled ?? false;
 
-  // Radio config edit mode
   const [isEditing, setIsEditing] = useState(false);
   const [formFrequency, setFormFrequency] = useState<string>('');
   const [formBandwidth, setFormBandwidth] = useState<number>(62.5);
@@ -56,7 +51,6 @@ export default function SettingsPage() {
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
   const radioCardRef = useRef<HTMLDivElement>(null);
 
-  // Keep form in sync with radioConfig (fixes 0.000 display after save)
   useEffect(() => {
     if (radioConfig && isEditing) {
       setFormFrequency((radioConfig.frequency / 1_000_000).toFixed(3));
@@ -67,7 +61,6 @@ export default function SettingsPage() {
     }
   }, [radioConfig, isEditing]);
 
-  // Detect if form has changes from current config
   const hasChanges = useMemo(() => {
     if (!radioConfig || !isEditing) return false;
     const currentFreqMhz = radioConfig.frequency / 1_000_000;
@@ -82,11 +75,9 @@ export default function SettingsPage() {
     );
   }, [radioConfig, isEditing, formFrequency, formBandwidth, formSF, formCR, formTxPower]);
 
-  // Cancel editing helper - reset form to current config values
   const cancelEditing = useCallback(() => {
     setIsEditing(false);
     setSaveResult(null);
-    // Reset form to current config values
     if (radioConfig) {
       setFormFrequency((radioConfig.frequency / 1_000_000).toFixed(3));
       setFormBandwidth(radioConfig.bandwidth / 1000);
@@ -96,7 +87,6 @@ export default function SettingsPage() {
     }
   }, [radioConfig]);
 
-  // Click outside to cancel editing - use mouseup to avoid race with click that started edit
   useEffect(() => {
     if (!isEditing) return;
     
@@ -106,7 +96,6 @@ export default function SettingsPage() {
       }
     };
     
-    // Use mouseup instead of mousedown to avoid race condition
     document.addEventListener('mouseup', handleClickOutside);
     
     return () => {
@@ -114,7 +103,6 @@ export default function SettingsPage() {
     };
   }, [isEditing, cancelEditing]);
 
-  // Initialize form from current config when entering edit mode
   const startEditing = () => {
     if (radioConfig) {
       setFormFrequency((radioConfig.frequency / 1_000_000).toFixed(3));
@@ -127,7 +115,6 @@ export default function SettingsPage() {
     setIsEditing(true);
   };
 
-  // Handle save
   const handleSave = async () => {
     setIsSaving(true);
     setSaveResult(null);
@@ -135,7 +122,6 @@ export default function SettingsPage() {
     try {
       const config: Record<string, number | string> = {};
       
-      // Only include changed values
       const newFreqMhz = parseFloat(formFrequency);
       const currentFreqMhz = radioConfig ? radioConfig.frequency / 1_000_000 : 0;
       if (Math.abs(newFreqMhz - currentFreqMhz) > 0.0001) {
@@ -175,9 +161,7 @@ export default function SettingsPage() {
           success: true, 
           message: `Updated: ${applied}${liveNote}` 
         });
-        // Refresh stats to show new values
         fetchStats();
-        // Exit edit mode on success
         setTimeout(() => {
           setIsEditing(false);
           setSaveResult(null);
@@ -197,14 +181,14 @@ export default function SettingsPage() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Settings className="w-6 h-6 text-accent-primary flex-shrink-0" />
+          <SettingsIcon className="w-6 h-6 text-accent-primary flex-shrink-0" />
           Settings
         </h1>
         <BackgroundSelector />
       </div>
 
       <div className="grid-12">
-        {/* Operating Mode - 12 cols mobile, 6 cols md */}
+        {/* Operating Mode */}
         <div className="col-span-full md:col-span-6 glass-card card-padding">
           <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
             <Radio className="w-5 h-5 text-accent-primary" />
@@ -245,7 +229,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Duty Cycle - 12 cols mobile, 6 cols md */}
+        {/* Duty Cycle */}
         <div className="col-span-full md:col-span-6 glass-card card-padding">
           <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
             <Gauge className="w-5 h-5 text-accent-primary" />
@@ -286,7 +270,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Radio Configuration - 12 cols mobile, 6 cols md */}
+        {/* Radio Configuration */}
         <div ref={radioCardRef} className="col-span-full md:col-span-6 glass-card card-padding">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-text-primary flex items-center gap-2">
@@ -294,10 +278,8 @@ export default function SettingsPage() {
               Radio Configuration
             </h2>
             <div className="flex items-center gap-1">
-              {/* Edit/Cancel/Save buttons */}
               {radioConfig && (
                 isEditing ? (
-                  // Editing mode: show Cancel (X) and Save (Check) buttons
                   <>
                     <button
                       onClick={cancelEditing}
@@ -333,7 +315,6 @@ export default function SettingsPage() {
                     </button>
                   </>
                 ) : (
-                  // View mode: show Edit (Pencil) button
                   <button
                     onClick={startEditing}
                     className="p-2 rounded-lg transition-colors text-text-muted hover:text-text-primary hover:bg-bg-subtle"
@@ -346,7 +327,6 @@ export default function SettingsPage() {
             </div>
           </div>
           
-          {/* Status message - below header for visibility */}
           {saveResult && (
             <div className={clsx(
               'text-xs mb-3 px-2 py-1.5 rounded-md',
@@ -360,9 +340,7 @@ export default function SettingsPage() {
           
           {radioConfig ? (
             isEditing ? (
-              /* Edit Mode - same grid structure as read-only */
               <div className="grid grid-cols-2 gap-4">
-                  {/* Frequency */}
                   <div>
                     <label className="text-sm text-text-muted block mb-1">Frequency (MHz)</label>
                     <input
@@ -376,7 +354,6 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {/* TX Power */}
                   <div>
                     <label className="text-sm text-text-muted block mb-1">TX Power (dBm)</label>
                     <input
@@ -389,7 +366,6 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {/* Bandwidth */}
                   <div>
                     <label className="text-sm text-text-muted block mb-1">Bandwidth</label>
                     <div className="relative">
@@ -408,7 +384,6 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Spreading Factor */}
                   <div>
                     <label className="text-sm text-text-muted block mb-1">Spreading Factor</label>
                     <div className="relative">
@@ -427,7 +402,6 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Coding Rate */}
                   <div>
                     <label className="text-sm text-text-muted block mb-1">Coding Rate</label>
                     <div className="relative">
@@ -446,7 +420,6 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Preamble (read-only) */}
                   <div>
                     <label className="text-sm text-text-muted block mb-1">Preamble</label>
                     <p className="text-text-primary font-medium h-[38px] flex items-center">
@@ -455,7 +428,6 @@ export default function SettingsPage() {
                   </div>
               </div>
             ) : (
-            /* Read-only Mode - match edit mode heights */
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-text-muted block mb-1">Frequency</label>
@@ -500,7 +472,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Location - 12 cols mobile, 6 cols md */}
+        {/* Location */}
         <div className="col-span-full md:col-span-6 glass-card card-padding">
           <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
             <MapPin className="w-5 h-5 text-accent-primary" />
@@ -540,7 +512,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Node Information - full width (copied from homepage) */}
+        {/* Node Information */}
         <div className="col-span-full glass-card card-padding">
           <h2 className="type-subheading text-text-primary mb-4 flex items-center gap-2">
             <Radio className="w-5 h-5 text-accent-primary" />

@@ -1,14 +1,15 @@
 {
   "name": "pymc_console",
-  "version": "0.3.1",
-  "description": "Next.js Dashboard for pyMC_Repeater",
+  "version": "0.4.0",
+  "description": "Vite + React Dashboard for pyMC_Repeater",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build --webpack",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
     "build:static": "npm run build && npm run package",
     "package": "rm -rf dist && mkdir -p dist && cp -r out/* dist/",
-    "export": "npm run build",
+    "preview": "vite preview",
     "lint": "eslint"
   },
   "dependencies": {
@@ -16,21 +17,22 @@
     "clsx": "^2.1.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.559.0",
-    "next": "16.0.8",
-    "react": "19.2.1",
-    "react-dom": "19.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.1.1",
     "recharts": "^3.5.1",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9",
-    "eslint-config-next": "16.0.8",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^6.0.5"
   }
 }
