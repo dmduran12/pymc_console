@@ -30,12 +30,12 @@ import { POLLING_INTERVALS } from '@/lib/constants';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Packets', href: '/packets/', icon: Radio },
-  { name: 'Neighbors', href: '/neighbors/', icon: Users },
-  { name: 'Statistics', href: '/statistics/', icon: BarChart3 },
-  { name: 'System', href: '/system/', icon: Cpu },
-  { name: 'Logs', href: '/logs/', icon: FileText },
-  { name: 'Settings', href: '/settings/', icon: Settings },
+  { name: 'Packets', href: '/packets', icon: Radio },
+  { name: 'Neighbors', href: '/neighbors', icon: Users },
+  { name: 'Statistics', href: '/statistics', icon: BarChart3 },
+  { name: 'System', href: '/system', icon: Cpu },
+  { name: 'Logs', href: '/logs', icon: FileText },
+  { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
 const CONTROLS_EXPANDED_KEY = 'pymc-controls-expanded';

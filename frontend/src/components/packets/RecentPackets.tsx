@@ -129,7 +129,7 @@ export function RecentPackets() {
             </div>
           )}
           <Link 
-            href="/packets/"
+            href="/packets"
             className="pill-subtle"
           >
             View all <ArrowRight className="w-3 h-3" />
