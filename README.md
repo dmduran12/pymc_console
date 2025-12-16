@@ -2,14 +2,48 @@
 
 A modern dashboard for monitoring and managing your [MeshCore](https://meshcore.co.uk/) LoRa mesh network repeater.
 
+Built on top of [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console adds a Next.js dashboard that makes it easy to monitor your mesh network from any browser.
+
 ## Features
 
-- **Real-time Monitoring** — Live packet counts, forwarding stats, and network activity
-- **Traffic Analysis** — Time-bucketed charts showing received, forwarded, and dropped packets  
-- **Neighbor Map** — Geographic visualization of mesh network neighbors
-- **Radio Configuration** — Adjust frequency, spreading factor, bandwidth, and TX power
-- **TX Delay Calculator** — Smart recommendations for optimal tx_delay settings
-- **System Stats** — CPU, memory, disk, and temperature monitoring
+### Dashboard Home
+The main dashboard provides an at-a-glance view of your repeater's activity:
+
+- **Received Packets** — Hero chart showing packets received over your selected time window (20m to 7d). The large number shows total packets in the period, with an hourly rate below.
+- **Forwarded** — Packets your repeater has retransmitted to extend network coverage. A healthy repeater forwards most of what it receives.
+- **Dropped** — Packets that were filtered (duplicates, out-of-range, etc.). Some drops are normal—duplicates mean the mesh is working.
+- **TX Delay Calculator** — Analyzes your duplicate rate and TX utilization to recommend optimal `tx_delay_factor` and `direct_tx_delay_factor` settings. If the "Adjust" badge appears, consider updating your config.
+- **Uptime** — Time since last service restart.
+
+Use the time range selector (20m, 1h, 3h, 12h, 24h, 3d, 7d) to adjust all dashboard stats and charts to your desired window.
+
+### Statistics Page
+Deeper analytics for network performance:
+
+- **Traffic Flow Chart** — Stacked area chart showing received/forwarded/dropped packets over time. The right Y-axis shows estimated RX airtime utilization percentage. Max and Mean RX Util are displayed in the header.
+- **Link Quality Polar Chart** — Visualizes neighbor signal quality by direction. Neighbors are plotted by their bearing from your location, with bar length indicating SNR quality.
+- **Packet Types Treemap** — Distribution of packet types (ADVERT, TXT_MSG, ACK, REQ, etc.) as a proportional treemap.
+- **Noise Floor Heatmap** — Historical noise floor readings to identify RF interference patterns.
+
+### Neighbors Page
+- **Interactive Map** — OpenStreetMap view showing your repeater and all known neighbors with coordinates. Click markers for details.
+- **Neighbor List** — Sortable table with name, last seen time, RSSI, SNR, and whether they're zero-hop (direct) or relayed.
+
+### Packets Page
+- **Packet History** — Searchable, filterable list of all packets. Filter by type, route, or time range.
+- **Packet Details** — Click any packet to see full details: hash, source/destination, path, payload, signal info, and duplicate history.
+
+### Settings Page
+- **Operating Mode** — Toggle between Forward (active repeating) and Monitor (receive-only) modes.
+- **Duty Cycle** — Enable/disable duty cycle enforcement for regulatory compliance.
+- **Radio Configuration** — Live-edit frequency, TX power, spreading factor, bandwidth, and coding rate. Changes can be applied without restart.
+
+### System Page
+- **Hardware Stats** — Real-time CPU usage, memory, disk space, and temperature (on supported hardware).
+- **Load Averages** — 1/5/15 minute load averages.
+
+### Logs Page
+- **Live Logs** — Stream of recent log entries from the repeater daemon. Useful for debugging RX/TX issues.
 
 ## Quick Start
 
@@ -195,8 +229,12 @@ NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
 
 MIT — See [LICENSE](LICENSE)
 
-## Credits
+## Credits & Acknowledgments
 
-- [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) — Mesh repeater daemon
-- [pymc_core](https://github.com/rightup/pyMC_core) — LoRa mesh protocol library
-- [MeshCore](https://meshcore.co.uk/) — The MeshCore project
+This project wouldn't exist without the work of [RightUp](https://github.com/rightup):
+
+- **[pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)** — The core mesh repeater daemon that handles all LoRa communication, packet routing, and mesh protocol logic. pyMC Console is essentially a dashboard layer on top of this excellent project.
+- **[pymc_core](https://github.com/rightup/pyMC_core)** — The underlying LoRa mesh protocol library.
+
+Also thanks to:
+- **[MeshCore](https://meshcore.co.uk/)** — The MeshCore project and community.
