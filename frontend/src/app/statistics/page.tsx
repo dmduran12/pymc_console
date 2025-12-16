@@ -10,7 +10,7 @@ import type { BucketedStats, UtilizationStats, NoiseFloorHistoryItem } from '@/l
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
-import { TrafficStackedChart } from '@/components/charts/TrafficStackedChart';
+import { TrafficStackedChart, useMaxRxUtil } from '@/components/charts/TrafficStackedChart';
 import { NeighborPolarChart } from '@/components/charts/NeighborPolarChart';
 import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
@@ -152,6 +152,9 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
   }, [noiseFloorHistory]);
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
+  
+  // Get max RX util for the current time period
+  const maxRxUtil = useMaxRxUtil(utilizationStats?.bins);
 
   return (
     <div className="section-gap">
@@ -182,12 +185,19 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
         <>
           {/* Row: Traffic Flow (2/3) + Link Quality (1/3) */}
           <div className="grid-12">
-            {/* Traffic Flow - Stacked Bar Chart with Airtime Overlay */}
+            {/* Traffic Flow - Stacked Area Chart */}
             <div className="col-span-full lg:col-span-8 glass-card card-padding">
               <div className="flex items-center gap-2 mb-6">
                 <TrendingUp className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Traffic Flow</h2>
-                <span className="pill-tag ml-auto">{currentRange.label}</span>
+                <div className="ml-auto flex items-center gap-3">
+                  {maxRxUtil > 0 && (
+                    <span className="type-data-xs text-text-muted">
+                      Max RX Util <span className="text-text-secondary tabular-nums font-medium">{maxRxUtil.toFixed(1)}%</span>
+                    </span>
+                  )}
+                  <span className="pill-tag">{currentRange.label}</span>
+                </div>
               </div>
               {bucketedStats?.received && bucketedStats.received.length > 0 ? (
                 <TrafficStackedChart

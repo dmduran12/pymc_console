@@ -4,7 +4,6 @@ import { memo, useMemo } from 'react';
 import {
   ComposedChart,
   Area,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -15,7 +14,7 @@ import {
 import type { BucketData, UtilizationBin } from '@/lib/api';
 import { useChartColors, useMetricColors } from '@/lib/hooks/useThemeColors';
 
-interface TrafficStackedChartProps {
+export interface TrafficStackedChartProps {
   received: BucketData[];
   forwarded: BucketData[];
   dropped: BucketData[];
@@ -28,39 +27,21 @@ interface TrafficStackedChartProps {
   rxUtilization?: number;
 }
 
-// Legend order: RX Util, Received, Forwarded, Dropped
-const LEGEND_ORDER = ['RX Util', 'Received', 'Forwarded', 'Dropped'];
-
-// Simple moving average window (number of periods) - high value for very smooth curve
-const SMA_WINDOW = 24;
-
-/** Apply simple moving average - averages the previous N periods */
-function simpleMovingAverage(data: number[], window: number): number[] {
-  if (data.length === 0) return [];
-  const result: number[] = [];
-  
-  for (let i = 0; i < data.length; i++) {
-    // Average from (i - window + 1) to i, clamped to valid indices
-    const start = Math.max(0, i - window + 1);
-    let sum = 0;
-    for (let j = start; j <= i; j++) {
-      sum += data[j];
-    }
-    result.push(sum / (i - start + 1));
-  }
-  return result;
-}
+// Legend order: Received, Forwarded, Dropped
+const LEGEND_ORDER = ['Received', 'Forwarded', 'Dropped'];
 
 // Custom legend component - left justified with specific order
 function TrafficLegend({ payload }: { payload?: Array<{ value: string; color: string }> }) {
   if (!payload) return null;
   
-  // Sort by LEGEND_ORDER
-  const sorted = [...payload].sort((a, b) => {
-    const aIdx = LEGEND_ORDER.indexOf(a.value);
-    const bIdx = LEGEND_ORDER.indexOf(b.value);
-    return aIdx - bIdx;
-  });
+  // Sort by LEGEND_ORDER, filter to only include our traffic series
+  const sorted = [...payload]
+    .filter(p => LEGEND_ORDER.includes(p.value))
+    .sort((a, b) => {
+      const aIdx = LEGEND_ORDER.indexOf(a.value);
+      const bIdx = LEGEND_ORDER.indexOf(b.value);
+      return aIdx - bIdx;
+    });
   
   return (
     <div className="flex items-center gap-4 justify-start pl-8 text-xs font-mono">
@@ -78,12 +59,11 @@ function TrafficLegend({ payload }: { payload?: Array<{ value: string; color: st
 }
 
 /**
- * Stacked bar chart showing traffic flow with airtime utilization overlay
- * Left Y-axis: packet counts (bars)
- * Right Y-axis: airtime utilization % (stepped lines)
+ * Stacked area chart showing traffic flow
+ * Left Y-axis: packet counts (stacked areas)
+ * Right Y-axis: RX airtime utilization % scaled to packet peaks
  * 
- * Utilization data now comes from backend /api/utilization endpoint with proper
- * LoRa airtime calculations. Falls back to estimation if utilizationBins not provided.
+ * Returns maxRxUtil via the exported hook for display in parent header
  */
 function TrafficStackedChartComponent({
   received,
@@ -99,29 +79,22 @@ function TrafficStackedChartComponent({
   const metricColors = useMetricColors();
   
   // Derived colors from theme
-  const RX_UTIL_COLOR = '#F9D26F'; // Yellow/amber for RX util
   const RECEIVED_COLOR = metricColors.received; // Green
   const FORWARDED_COLOR = metricColors.forwarded; // Blue
   const DROPPED_COLOR = chartColors.chart5; // Theme accent
   
-  // Transform bucket data for composite chart
-  // RX utilization is scaled to correlate with packet counts on left Y-axis
-  const { chartData, maxPackets, maxRxUtil } = useMemo(() => {
-    if (!received || received.length === 0) return { chartData: [], maxPackets: 0, maxRxUtil: 0 };
+  // Transform bucket data for chart
+  // Right Y-axis shows RX util % scaled so max util aligns with max packet peaks
+  const { chartData, maxRxUtil } = useMemo(() => {
+    if (!received || received.length === 0) return { chartData: [], maxRxUtil: 0 };
 
     // Build a lookup map from utilization bins by timestamp
-    // Backend sends 't' as bin start timestamp in milliseconds
     const getUtilForTimestamp = (ts: number): { txUtil: number; rxUtil: number } => {
       if (!utilizationBins || utilizationBins.length === 0) {
-        // Fallback to legacy estimation when no utilization data
         return { txUtil: 0, rxUtil: 0 };
       }
       
-      // ts is in seconds, bins have 't' in milliseconds
       const tsMs = ts * 1000;
-      
-      // Find the utilization bin closest to this timestamp
-      // Bins are sorted by time, find the one where our timestamp falls within
       let bestBin = null;
       let bestDiff = Infinity;
       for (const bin of utilizationBins) {
@@ -132,7 +105,7 @@ function TrafficStackedChartComponent({
         }
       }
       
-      if (bestBin && bestDiff < 120000) { // within 2 minutes
+      if (bestBin && bestDiff < 120000) {
         return {
           txUtil: bestBin.tx_util_pct,
           rxUtil: bestBin.rx_util_decoded_pct,
@@ -141,24 +114,23 @@ function TrafficStackedChartComponent({
       return { txUtil: 0, rxUtil: 0 };
     };
 
-    // Legacy estimation fallback values
+    // Legacy estimation fallback
     const totalReceived = received.reduce((sum, b) => sum + b.count, 0);
     const totalTransmitted = transmitted?.reduce((sum, b) => sum + b.count, 0) ?? 
                              forwarded.reduce((sum, b) => sum + b.count, 0);
 
-    // First pass: collect raw data
+    // Collect raw data and track max RX util
+    let maxRxUtilRaw = 0;
     const rawData = received.map((bucket, i) => {
-      // 24-hour time format
       const time = new Date(bucket.start * 1000).toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
       });
       
-      // Get utilization from real API data or fall back to estimation
       let util = getUtilForTimestamp(bucket.start);
       
-      // If no real data and we have fallback values, use legacy estimation
+      // Fallback estimation if no real data
       if (util.txUtil === 0 && util.rxUtil === 0 && (txUtilization > 0 || rxUtilization > 0)) {
         const rxRatio = totalReceived > 0 ? bucket.count / totalReceived : 0;
         const txCount = transmitted?.[i]?.count ?? forwarded[i]?.count ?? 0;
@@ -169,40 +141,24 @@ function TrafficStackedChartComponent({
         };
       }
       
+      if (util.rxUtil > maxRxUtilRaw) maxRxUtilRaw = util.rxUtil;
+      
       return {
         time,
-        timestamp: bucket.start,
         received: bucket.count,
         forwarded: forwarded[i]?.count ?? 0,
         dropped: dropped[i]?.count ?? 0,
-        txUtil: util.txUtil,
         rxUtil: util.rxUtil,
       };
     });
     
-    // Apply simple moving average to smooth utilization lines
-    const txUtilValues = rawData.map(d => d.txUtil);
-    const rxUtilValues = rawData.map(d => d.rxUtil);
-    const smoothedTx = simpleMovingAverage(txUtilValues, SMA_WINDOW);
-    const smoothedRx = simpleMovingAverage(rxUtilValues, SMA_WINDOW);
+    // Max stacked packet count determines the scale relationship
+    const maxStackedPackets = Math.max(...rawData.map(d => d.received + d.forwarded + d.dropped), 1);
     
-    // Calculate max stacked packet count and max RX util for scaling
-    const maxStackedPackets = Math.max(...rawData.map(d => d.received + d.forwarded + d.dropped));
-    const maxRxUtil = Math.max(...smoothedRx, 1); // min 1 to avoid div by zero
+    // Max RX util for the period (for display in header)
+    const maxRxUtil = Math.max(maxRxUtilRaw, 0.1); // min 0.1 to avoid display issues
     
-    // Scale factor: maps RX util percentage to packet count domain
-    // When RX util is at max, the line should reach the top of the packet bars
-    const scaleFactor = maxStackedPackets / maxRxUtil;
-    
-    const data = rawData.map((d, i) => ({
-      ...d,
-      txUtil: smoothedTx[i],
-      rxUtil: smoothedRx[i],
-      // Scaled version for plotting on left Y-axis
-      rxUtilScaled: smoothedRx[i] * scaleFactor,
-    }));
-    
-    return { chartData: data, maxPackets: maxStackedPackets, maxRxUtil };
+    return { chartData: rawData, maxRxUtil, maxStackedPackets };
   }, [received, forwarded, dropped, transmitted, utilizationBins, txUtilization, rxUtilization]);
 
   if (chartData.length === 0) {
@@ -213,33 +169,29 @@ function TrafficStackedChartComponent({
     );
   }
 
-  // Custom tooltip for composite chart
+  // Custom tooltip - only show packet counts
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
     if (!active || !payload || payload.length === 0) return null;
     
+    // Filter to only traffic series
+    const trafficEntries = payload.filter(p => LEGEND_ORDER.includes(p.name));
+    
     return (
       <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
         <div className="font-medium text-text-primary mb-1">{label}</div>
-        {payload.map((entry, i) => {
-          // Format utilization as percentage, packet counts as integers
-          const displayValue = entry.name.includes('Util') 
-            ? `${entry.value.toFixed(1)}%` 
-            : entry.value;
-          
-          return (
-            <div key={i} className="flex items-center gap-2">
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: entry.color }}
-              />
-              <span className="text-text-muted">{entry.name}:</span>
-              <span className="text-text-primary tabular-nums">
-                {displayValue}
-              </span>
-            </div>
-          );
-        })}
+        {trafficEntries.map((entry, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-text-muted">{entry.name}:</span>
+            <span className="text-text-primary tabular-nums">
+              {entry.value}
+            </span>
+          </div>
+        ))}
       </div>
     );
   };
@@ -248,12 +200,6 @@ function TrafficStackedChartComponent({
     <div className="h-80">
       <ResponsiveContainer width="100%" height={320}>
         <ComposedChart data={chartData}>
-          <defs>
-            <linearGradient id="rxUtilGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={RX_UTIL_COLOR} stopOpacity={0.4} />
-              <stop offset="95%" stopColor={RX_UTIL_COLOR} stopOpacity={0.05} />
-            </linearGradient>
-          </defs>
           <CartesianGrid
             strokeDasharray="3 3"
             stroke="rgba(255,255,255,0.06)"
@@ -276,7 +222,7 @@ function TrafficStackedChartComponent({
             dx={-8}
             width={32}
           />
-          {/* Right Y-axis for RX utilization % - scaled to match the line position */}
+          {/* Right Y-axis for RX utilization % - scaled so max util aligns with max packet peaks */}
           <YAxis
             yAxisId="right"
             orientation="right"
@@ -284,29 +230,14 @@ function TrafficStackedChartComponent({
             tickLine={false}
             tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}
             dx={8}
-            width={40}
-            domain={[0, maxRxUtil > 0 ? maxRxUtil : 1]}
+            width={44}
+            domain={[0, maxRxUtil]}
             tickFormatter={(v) => `${v.toFixed(1)}%`}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend content={<TrafficLegend />} />
           
-          {/* RX Utilization area - rendered FIRST so it's behind the traffic bars */}
-          <Area
-            yAxisId="right"
-            type="monotoneX"
-            dataKey="rxUtil"
-            name="RX Util"
-            stroke={RX_UTIL_COLOR}
-            strokeWidth={1}
-            fill="url(#rxUtilGradient)"
-            fillOpacity={1}
-            dot={false}
-            isAnimationActive={false}
-            baseValue={0}
-          />
-          
-          {/* Stacked stepped areas for traffic - 100% opacity to fully cover RX util */}
+          {/* Stacked stepped areas for traffic */}
           <Area
             yAxisId="left"
             type="stepAfter"
@@ -315,7 +246,7 @@ function TrafficStackedChartComponent({
             stackId="traffic"
             fill={DROPPED_COLOR}
             stroke="none"
-            fillOpacity={1}
+            fillOpacity={0.9}
             isAnimationActive={false}
           />
           <Area
@@ -326,7 +257,7 @@ function TrafficStackedChartComponent({
             stackId="traffic"
             fill={FORWARDED_COLOR}
             stroke="none"
-            fillOpacity={1}
+            fillOpacity={0.9}
             isAnimationActive={false}
           />
           <Area
@@ -337,7 +268,7 @@ function TrafficStackedChartComponent({
             stackId="traffic"
             fill={RECEIVED_COLOR}
             stroke="none"
-            fillOpacity={1}
+            fillOpacity={0.9}
             isAnimationActive={false}
           />
         </ComposedChart>
@@ -347,3 +278,14 @@ function TrafficStackedChartComponent({
 }
 
 export const TrafficStackedChart = memo(TrafficStackedChartComponent);
+
+/**
+ * Hook to calculate max RX util for a given set of utilization bins
+ * Use this in the parent component to display the max value in the header
+ */
+export function useMaxRxUtil(utilizationBins?: UtilizationBin[]): number {
+  return useMemo(() => {
+    if (!utilizationBins || utilizationBins.length === 0) return 0;
+    return Math.max(...utilizationBins.map(b => b.rx_util_decoded_pct), 0);
+  }, [utilizationBins]);
+}
