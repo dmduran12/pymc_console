@@ -219,7 +219,6 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
                   received={bucketedStats.received}
                   forwarded={bucketedStats.forwarded}
                   dropped={bucketedStats.dropped}
-                  utilizationBins={utilizationStats?.bins}
                   bucketDurationSeconds={bucketedStats.bucket_duration_seconds}
                   spreadingFactor={spreadingFactor}
                   bandwidthKhz={bandwidthKhz}

@@ -18,9 +18,6 @@ export interface TrafficStackedChartProps {
   received: BucketData[];
   forwarded: BucketData[];
   dropped: BucketData[];
-  transmitted?: BucketData[];
-  /** Airtime utilization bins from /api/utilization */
-  utilizationBins?: UtilizationBin[];
   /** Bucket duration in seconds (from getBucketedStats) */
   bucketDurationSeconds?: number;
   /** Spreading factor from radio config */
@@ -86,7 +83,6 @@ function TrafficStackedChartComponent({
   received,
   forwarded,
   dropped,
-  utilizationBins,
   bucketDurationSeconds = 60,
   spreadingFactor = DEFAULT_SF,
   bandwidthKhz = DEFAULT_BW_KHZ,
@@ -110,34 +106,13 @@ function TrafficStackedChartComponent({
   const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
   
   // Transform bucket data for chart with RX util calculation
-  const { chartData, maxRxUtil, meanRxUtil } = useMemo(() => {
-    if (!received || received.length === 0) return { chartData: [], maxRxUtil: 0, meanRxUtil: 0 };
-
-    // Try to use utilization bins if available and matching
-    const getUtilFromBins = (ts: number): number | null => {
-      if (!utilizationBins || utilizationBins.length === 0) return null;
-      
-      const tsMs = ts * 1000;
-      let bestBin = null;
-      let bestDiff = Infinity;
-      for (const bin of utilizationBins) {
-        const diff = Math.abs(bin.t - tsMs);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          bestBin = bin;
-        }
-      }
-      
-      // Only use if within reasonable time window (half the bucket duration)
-      if (bestBin && bestDiff < (bucketDurationSeconds * 500)) {
-        return bestBin.rx_util_decoded_pct;
-      }
-      return null;
-    };
+  // Always calculate from packet counts for accuracy
+  const { chartData, maxRxUtil } = useMemo(() => {
+    if (!received || received.length === 0 || maxAirtimePerBucketMs <= 0) {
+      return { chartData: [], maxRxUtil: 0 };
+    }
 
     let maxRxUtilRaw = 0;
-    let sumRxUtil = 0;
-    let utilCount = 0;
     
     const rawData = received.map((bucket, i) => {
       const time = new Date(bucket.start * 1000).toLocaleTimeString([], {
@@ -146,23 +121,14 @@ function TrafficStackedChartComponent({
         hour12: false,
       });
       
-      // Total packets in this bucket (received + forwarded counts as RX activity)
+      // Calculate RX utilization from packet count and radio parameters
+      // RX airtime = packets * airtime_per_packet
+      // Utilization % = (RX airtime / bucket duration) * 100
       const rxPackets = bucket.count;
-      
-      // Try to get util from bins first, otherwise calculate from packet count
-      let rxUtil = getUtilFromBins(bucket.start);
-      
-      if (rxUtil === null) {
-        // Calculate RX utilization from packet count and radio parameters
-        // RX airtime = packets * airtime_per_packet
-        // Utilization % = (RX airtime / bucket duration) * 100
-        const rxAirtimeMs = rxPackets * airtimePerPacketMs;
-        rxUtil = (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
-      }
+      const rxAirtimeMs = rxPackets * airtimePerPacketMs;
+      const rxUtil = (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
       
       if (rxUtil > maxRxUtilRaw) maxRxUtilRaw = rxUtil;
-      sumRxUtil += rxUtil;
-      utilCount++;
       
       return {
         time,
@@ -173,11 +139,8 @@ function TrafficStackedChartComponent({
       };
     });
     
-    const maxRxUtil = maxRxUtilRaw;
-    const meanRxUtil = utilCount > 0 ? sumRxUtil / utilCount : 0;
-    
-    return { chartData: rawData, maxRxUtil, meanRxUtil };
-  }, [received, forwarded, dropped, utilizationBins, bucketDurationSeconds, airtimePerPacketMs, maxAirtimePerBucketMs]);
+    return { chartData: rawData, maxRxUtil: maxRxUtilRaw };
+  }, [received, forwarded, dropped, airtimePerPacketMs, maxAirtimePerBucketMs]);
 
   if (chartData.length === 0) {
     return (
@@ -304,27 +267,19 @@ export interface RxUtilStats {
 }
 
 /**
- * Hook to calculate RX util stats from utilization bins or bucket data
- * Falls back to calculating from packet counts if bins not available
+ * Hook to calculate RX util stats from bucket data using radio config
+ * Always calculates from packet counts for accuracy and consistency
  */
 export function useRxUtilStats(
-  utilizationBins?: UtilizationBin[],
+  _utilizationBins?: UtilizationBin[], // Kept for API compatibility but not used
   received?: BucketData[],
   bucketDurationSeconds = 60,
   spreadingFactor = DEFAULT_SF,
   bandwidthKhz = DEFAULT_BW_KHZ
 ): RxUtilStats {
   return useMemo(() => {
-    // First try: use utilization bins directly
-    if (utilizationBins && utilizationBins.length > 0) {
-      const utils = utilizationBins.map(b => b.rx_util_decoded_pct);
-      const max = Math.max(...utils, 0);
-      const mean = utils.reduce((a, b) => a + b, 0) / utils.length;
-      return { max, mean };
-    }
-    
-    // Fallback: calculate from received bucket data
-    if (received && received.length > 0) {
+    // Calculate from received bucket data using radio config
+    if (received && received.length > 0 && bucketDurationSeconds > 0) {
       const airtimePerPacketMs = estimateAirtimeMs(DEFAULT_PKT_LEN, spreadingFactor, bandwidthKhz);
       const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
       
@@ -334,10 +289,10 @@ export function useRxUtilStats(
       });
       
       const max = Math.max(...utils, 0);
-      const mean = utils.reduce((a, b) => a + b, 0) / utils.length;
+      const mean = utils.length > 0 ? utils.reduce((a, b) => a + b, 0) / utils.length : 0;
       return { max, mean };
     }
     
     return { max: 0, mean: 0 };
-  }, [utilizationBins, received, bucketDurationSeconds, spreadingFactor, bandwidthKhz]);
+  }, [received, bucketDurationSeconds, spreadingFactor, bandwidthKhz]);
 }
