@@ -155,7 +155,9 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
   
   // Get radio config for utilization calculation
   const spreadingFactor = stats?.config?.radio?.spreading_factor ?? 8;
-  const bandwidthKhz = stats?.config?.radio?.bandwidth ?? 125;
+  // API returns bandwidth in Hz (e.g., 125000), convert to kHz for airtime calc
+  const bandwidthHz = stats?.config?.radio?.bandwidth ?? 125000;
+  const bandwidthKhz = bandwidthHz >= 1000 ? bandwidthHz / 1000 : bandwidthHz;
   
   // Calculate RX util stats directly from bucket data
   const rxUtilStats = useMemo(() => {
