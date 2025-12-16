@@ -5,11 +5,9 @@ const nextConfig: NextConfig = {
   // No Node.js runtime needed - backend serves these files directly
   output: 'export',
   
-  // For static export, we need trailing slashes for proper routing
-  trailingSlash: true,
-  
-  // Base path can be configured if serving from subdirectory
-  // basePath: '/dashboard',
+  // SPA mode: all routes serve the same index.html, client-side routing handles navigation
+  // This works with upstream CherryPy's default() fallback without any patches
+  // trailingSlash is NOT set - we want clean URLs like /packets not /packets/
   
   // Silence Next 16 warning when using a webpack() config
   turbopack: {},

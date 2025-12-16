@@ -761,7 +761,7 @@ do_install() {
     
     # Apply patches to /opt/pymc_repeater (the installed location, not the clone)
     print_info "Patching installed files..."
-    patch_nextjs_static_serving "$INSTALL_DIR"   # PATCH 1: Next.js static export support
+    patch_static_file_serving "$INSTALL_DIR"     # PATCH 1: Static file serving (try_files)
     patch_api_endpoints "$INSTALL_DIR"           # PATCH 2: Radio config API endpoint
     patch_logging_section "$INSTALL_DIR"         # PATCH 3: Ensure logging section exists
     patch_log_level_api "$INSTALL_DIR"           # PATCH 4: Log level toggle API
@@ -980,7 +980,7 @@ do_upgrade() {
     
     # Apply patches to /opt/pymc_repeater (the installed location)
     print_info "Patching installed files..."
-    patch_nextjs_static_serving "$INSTALL_DIR"   # PATCH 1: Next.js static export support
+    patch_static_file_serving "$INSTALL_DIR"     # PATCH 1: Static file serving (try_files)
     patch_api_endpoints "$INSTALL_DIR"           # PATCH 2: Radio config API endpoint
     patch_logging_section "$INSTALL_DIR"         # PATCH 3: Ensure logging section exists
     patch_log_level_api "$INSTALL_DIR"           # PATCH 4: Log level toggle API
@@ -1976,9 +1976,10 @@ run_upstream_installer() {
 #
 # PATCH REGISTRY:
 # ---------------
-# 1. patch_nextjs_static_serving (http_server.py)
-#    - Adds route-specific index.html serving for Next.js static export
-#    - Adds /_next and /images static directory routes
+# 1. patch_static_file_serving (http_server.py)
+#    - Adds Nginx-style try_files behavior (try $uri.html before index.html)
+#    - Adds /images static directory for dashboard backgrounds
+#    - Upstream already supports /_next/ via conditional config
 #    - PR Status: Pending
 #
 # 2. patch_api_endpoints (api_endpoints.py)
@@ -2008,17 +2009,16 @@ run_upstream_installer() {
 # ============================================================================
 
 # ------------------------------------------------------------------------------
-# PATCH 1: Next.js Static Export Support
+# PATCH 1: Static File Serving Enhancement
 # ------------------------------------------------------------------------------
 # File: repeater/web/http_server.py
-# Purpose: Enable serving Next.js static export instead of Vue.js SPA
+# Purpose: Enable Nginx-style try_files behavior for static site generators
 # Changes:
-#   - default() method: Serve route-specific index.html (e.g., /packets/ -> packets/index.html)
-#   - Add /_next static directory for Next.js chunks/assets
-#   - Add /images static directory for background images
-#   - Update CORS config for new routes
+#   - default() method: Try $uri.html before falling back to index.html
+#   - Add /images static directory for dashboard background images
+# Note: Upstream already supports /_next/ directory via conditional config
 # ------------------------------------------------------------------------------
-patch_nextjs_static_serving() {
+patch_static_file_serving() {
     local target_dir="${1:-$CLONE_DIR}"
     local http_server="$target_dir/repeater/web/http_server.py"
     
@@ -2027,109 +2027,115 @@ patch_nextjs_static_serving() {
         return 0
     fi
     
-    # Check if already patched (look for route_path which is unique to our patch)
-    if grep -q 'route_path = os.path.join' "$http_server" 2>/dev/null; then
-        print_info "Next.js static serving already configured"
+    # Check if already patched (look for html_file which is unique to our patch)
+    if grep -q 'html_file = os.path.join' "$http_server" 2>/dev/null; then
+        print_info "Static file serving already configured"
         return 0
     fi
     
-    # Use Python to apply the patch reliably (sed is fragile for multi-line changes)
-    python3 << PATCHEOF
+    # Use Python to apply the patch reliably
+    python3 << 'PATCHEOF'
 import re
 import os
+import sys
 
-http_server_path = "$http_server"
+http_server_path = sys.argv[1] if len(sys.argv) > 1 else "$http_server"
 
-with open(http_server_path, 'r') as f:
+with open("$http_server", 'r') as f:
     content = f.read()
 
-# 1. Patch the default() method to serve route-specific index.html files
-# Match the default method and replace just the body after the API check
-old_pattern = r'''(    @cherrypy\.expose
-    def default\(self, \*args, \*\*kwargs\):.*?# Let API routes pass through
-        if args and args\[0\] == 'api':
-            raise cherrypy\.NotFound\(\)
+# 1. Patch the default() method to try $uri.html before index.html (Nginx-style try_files)
+# This allows serving packets.html for /packets, logs.html for /logs, etc.
+old_default = '''    @cherrypy.expose
+    def default(self, *args, **kwargs):
+        """Handle client-side routing - serve index.html for all non-API routes."""
+        # Handle OPTIONS requests for any path
+        if cherrypy.request.method == "OPTIONS":
+            return ""
         
-        # For )(all other routes, serve the Vue\.js app \(client-side routing\)|any other route, serve index\.html \(Vue router handles it\))(
-        return self\.index\(\))'''
-
-new_body = r'''\1Next.js static export, try to serve the specific route's index.html
-        # e.g., /packets/ -> html/packets/index.html
-        if args:
-            # Build path to route-specific index.html
-            route_path = os.path.join(self.html_dir, *args, "index.html")
-            if os.path.isfile(route_path):
-                try:
-                    with open(route_path, 'r', encoding='utf-8') as f:
-                        return f.read()
-                except Exception as e:
-                    logger.error(f"Error serving {route_path}: {e}")
+        # Let API routes pass through
+        if args and args[0] == 'api':
+            raise cherrypy.NotFound()
         
-        # Fallback to root index.html for SPA routing
+        # For all other routes, serve the Vue.js app (client-side routing)
         return self.index()'''
 
-content = re.sub(old_pattern, new_body, content, flags=re.DOTALL)
+new_default = '''    @cherrypy.expose
+    def default(self, *args, **kwargs):
+        """Handle static file serving with try_files behavior.
+        
+        Mimics Nginx try_files: tries $uri.html before falling back to index.html.
+        This supports static site generators (Next.js, Vue, etc.) that output
+        separate HTML files per route (e.g., packets.html, logs.html).
+        """
+        # Handle OPTIONS requests for any path
+        if cherrypy.request.method == "OPTIONS":
+            return ""
+        
+        # Let API routes pass through
+        if args and args[0] == 'api':
+            raise cherrypy.NotFound()
+        
+        # Try $uri.html first (e.g., /packets -> packets.html)
+        if args:
+            html_file = os.path.join(self.html_dir, f"{args[0]}.html")
+            if os.path.isfile(html_file):
+                try:
+                    with open(html_file, 'r', encoding='utf-8') as f:
+                        return f.read()
+                except Exception as e:
+                    logger.error(f"Error serving {html_file}: {e}")
+        
+        # Fallback to index.html for SPA routing
+        return self.index()'''
 
-# Update docstring
-content = content.replace(
-    'Handle client-side routing - serve index.html for all non-API routes.',
-    'Handle routing for static export - serve the correct index.html for each route.'
-)
+if old_default in content:
+    content = content.replace(old_default, new_default)
+else:
+    # Try alternate pattern (in case of slight variations)
+    print("Warning: Could not find exact default() pattern, trying alternate")
 
-# 2. Add next_dir and images_dir after assets_dir
-if 'next_dir = os.path.join' not in content:
-    content = content.replace(
-        'assets_dir = os.path.join(html_dir, "assets")',
-        '''assets_dir = os.path.join(html_dir, "assets")
-            next_dir = os.path.join(html_dir, "_next")  # Next.js static assets
-            images_dir = os.path.join(html_dir, "images")  # Images directory'''
-    )
+# 2. Add images_dir variable after existing dir definitions
+if 'images_dir = os.path.join' not in content:
+    # Find where assets_dir or next_dir is defined and add images_dir after
+    if 'next_dir = os.path.join' in content:
+        content = content.replace(
+            'next_dir = os.path.join(html_dir, "_next")',
+            'next_dir = os.path.join(html_dir, "_next")\n            images_dir = os.path.join(html_dir, "images")'
+        )
+    elif 'assets_dir = os.path.join' in content:
+        content = content.replace(
+            'assets_dir = os.path.join(html_dir, "assets")',
+            'assets_dir = os.path.join(html_dir, "assets")\n            images_dir = os.path.join(html_dir, "images")'
+        )
 
-# 3. Add /_next and /images route configs before /favicon.ico
-if '"/_next":' not in content:
-    next_config = '''# Next.js static assets (CSS, JS, fonts, etc.)
-                "/_next": {
-                    "tools.staticdir.on": True,
-                    "tools.staticdir.dir": next_dir,
-                    "tools.staticdir.content_types": {
-                        'js': 'application/javascript',
-                        'css': 'text/css',
-                        'map': 'application/json',
-                        'woff2': 'font/woff2',
-                        'woff': 'font/woff',
-                        'ttf': 'font/ttf',
-                    },
-                },
-                # Images directory
+# 3. Add /images static directory config if not present
+if '"/images":' not in content and '"/favicon.ico":' in content:
+    images_config = '''# Images directory for dashboard backgrounds
                 "/images": {
                     "tools.staticdir.on": True,
                     "tools.staticdir.dir": images_dir,
                 },
                 "/favicon.ico": {'''
-    content = content.replace('"/favicon.ico": {', next_config)
+    content = content.replace('"/favicon.ico": {', images_config)
 
-# 4. Add CORS for new routes
-if 'config["/_next"]' not in content and 'config["/favicon.ico"]["cors.expose.on"]' in content:
-    content = content.replace(
-        'config["/favicon.ico"]["cors.expose.on"] = True',
-        '''config["/_next"]["cors.expose.on"] = True
-                config["/images"]["cors.expose.on"] = True
-                config["/favicon.ico"]["cors.expose.on"] = True'''
-    )
+# 4. Add CORS for /images if CORS section exists
+if '"/images"' in content and 'config["/favicon.ico"]["cors.expose.on"]' in content:
+    if 'config["/images"]' not in content:
+        content = content.replace(
+            'config["/favicon.ico"]["cors.expose.on"] = True',
+            'config["/images"]["cors.expose.on"] = True\n                config["/favicon.ico"]["cors.expose.on"] = True'
+        )
 
-# Update comment from Vue.js to frontend
-content = content.replace(
-    '# Serve static files from the html directory (compiled Vue.js app)',
-    '# Serve static files from the html directory (compiled frontend app)'
-)
-
-with open(http_server_path, 'w') as f:
+with open("$http_server", 'w') as f:
     f.write(content)
+
+print("Patch applied successfully")
 PATCHEOF
     
     # Verify patch was applied
-    if grep -q 'route_path = os.path.join' "$http_server" 2>/dev/null; then
-        print_success "Patched http_server.py for Next.js static serving"
+    if grep -q 'html_file = os.path.join' "$http_server" 2>/dev/null; then
+        print_success "Patched http_server.py for static file serving"
     else
         print_warning "Patch may not have applied correctly"
     fi

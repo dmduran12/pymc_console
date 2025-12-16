@@ -186,14 +186,14 @@ The main installer script provides a TUI (whiptail/dialog) for:
 - `install_backend_service()` - Copies upstream's service file from clone
 - `install_static_frontend()` - Downloads dashboard from GitHub Releases to pyMC_Repeater's web directory
 - `configure_radio_terminal()` - Radio preset selection
-- `patch_nextjs_static_serving()` - Applies Next.js serving patch to target directory
+- `patch_static_file_serving()` - Applies Nginx-style try_files behavior for static HTML files
 - `patch_api_endpoints()` - Applies radio config API patch to target directory
 
 ### Upstream Patches (PR Candidates)
 
 These patches are applied during install and should be submitted as PRs to pyMC_Repeater:
 
-1. **patch_nextjs_static_serving** - Modifies `http_server.py` to serve Next.js static export (route-specific index.html files, `/_next` assets)
+1. **patch_static_file_serving** - Adds Nginx-style `try_files` to CherryPy's `default()` method: tries `$uri.html` before falling back to `index.html`. Also adds `/images/` static directory. Upstream already supports `/_next/` via conditional config.
 2. **patch_api_endpoints** - Adds `/api/update_radio_config` POST endpoint for web-based radio configuration
 
 ### Important: DEBUG Log Level Workaround
