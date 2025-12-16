@@ -95,10 +95,24 @@ export default function Dashboard() {
 
   // Derived values
   const uptime = stats?.uptime_seconds ? formatUptime(stats.uptime_seconds) : '0m';
-  const rxPerHour = stats?.rx_per_hour ?? 0;
-  const fwdPerHour = stats?.forwarded_per_hour ?? 0;
   const currentRange = DASHBOARD_TIME_RANGES[selectedRange];
   const nodeName = stats?.node_name || stats?.config?.node_name || 'Unknown Node';
+  
+  // Calculate totals from bucketed data (time-range specific)
+  const bucketTotals = useMemo(() => {
+    const received = bucketedStats?.received?.reduce((sum, b) => sum + b.count, 0) ?? 0;
+    const forwarded = bucketedStats?.forwarded?.reduce((sum, b) => sum + b.count, 0) ?? 0;
+    const dropped = bucketedStats?.dropped?.reduce((sum, b) => sum + b.count, 0) ?? 0;
+    const transmitted = bucketedStats?.transmitted?.reduce((sum, b) => sum + b.count, 0) ?? 0;
+    
+    // Calculate hourly rate from the time range
+    const timeRangeMinutes = bucketedStats?.time_range_minutes ?? currentRange.minutes;
+    const hours = timeRangeMinutes / 60;
+    const rxPerHour = hours > 0 ? Math.round(received / hours) : 0;
+    const fwdPerHour = hours > 0 ? Math.round(forwarded / hours) : 0;
+    
+    return { received, forwarded, dropped, transmitted, rxPerHour, fwdPerHour };
+  }, [bucketedStats, currentRange.minutes]);
 
   if (statsError) {
     return (
@@ -139,10 +153,10 @@ export default function Dashboard() {
               <span className="pill-tag">{currentRange.label}</span>
             </div>
             <div className="type-hero" style={{ color: METRIC_COLORS.received }}>
-              {(stats?.rx_count ?? 0).toLocaleString()}
+              {bucketTotals.received.toLocaleString()}
             </div>
             <div className="type-body-sm text-text-muted mt-1">
-              {rxPerHour}/hr average
+              {bucketTotals.rxPerHour}/hr rate
             </div>
           </div>
         </div>
@@ -207,8 +221,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
           title="FORWARDED"
-          value={stats?.forwarded_count ?? 0}
-          subtitle={`${fwdPerHour}/hr average`}
+          value={bucketTotals.forwarded}
+          subtitle={`${bucketTotals.fwdPerHour}/hr rate`}
           color="forwarded"
           buckets={bucketedStats?.forwarded}
           timeRangeLabel={currentRange.label}
@@ -224,7 +238,7 @@ export default function Dashboard() {
         />
         <StatsCard
           title="DROPPED"
-          value={stats?.dropped_count ?? 0}
+          value={bucketTotals.dropped}
           subtitle="Filtered or duplicate"
           color="dropped"
           buckets={bucketedStats?.dropped}
