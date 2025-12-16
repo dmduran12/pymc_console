@@ -164,7 +164,19 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
     const received = bucketedStats?.received;
     const bucketDurationSeconds = bucketedStats?.bucket_duration_seconds ?? 0;
     
+    // DEBUG: Log all inputs
+    console.log('[RxUtil Debug]', {
+      hasReceived: !!received,
+      receivedLength: received?.length,
+      bucketDurationSeconds,
+      spreadingFactor,
+      bandwidthKhz,
+      firstBucketCount: received?.[0]?.count,
+      sampleCounts: received?.slice(0, 5).map(b => b.count),
+    });
+    
     if (!received || received.length === 0 || bucketDurationSeconds <= 0) {
+      console.log('[RxUtil Debug] Early return - missing data');
       return { max: 0, mean: 0 };
     }
     
@@ -187,6 +199,14 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
     
     const max = Math.max(...utils, 0);
     const mean = utils.reduce((a, b) => a + b, 0) / utils.length;
+    
+    console.log('[RxUtil Debug] Calculated:', {
+      airtimePerPacketMs,
+      maxAirtimePerBucketMs,
+      sampleUtils: utils.slice(0, 5),
+      max,
+      mean,
+    });
     
     return { max, mean };
   }, [bucketedStats?.received, bucketedStats?.bucket_duration_seconds, spreadingFactor, bandwidthKhz]);
