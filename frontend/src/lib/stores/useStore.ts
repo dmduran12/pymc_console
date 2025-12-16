@@ -22,8 +22,8 @@ function loadResourceHistory(): ResourceDataPoint[] {
     if (stored) {
       return JSON.parse(stored) as ResourceDataPoint[];
     }
-  } catch (e) {
-    console.warn('Failed to load resource history from localStorage:', e);
+  } catch {
+    // Ignore localStorage errors (e.g., in SSR or incognito)
   }
   return [];
 }
@@ -36,8 +36,8 @@ function loadLastResourceFetch(): number {
     if (stored) {
       return parseInt(stored, 10) || 0;
     }
-  } catch (e) {
-    // Ignore
+  } catch {
+    // Ignore localStorage errors
   }
   return 0;
 }
@@ -48,8 +48,8 @@ function saveResourceHistory(history: ResourceDataPoint[], lastFetch: number): v
   try {
     localStorage.setItem(RESOURCE_HISTORY_KEY, JSON.stringify(history));
     localStorage.setItem(RESOURCE_LAST_FETCH_KEY, lastFetch.toString());
-  } catch (e) {
-    console.warn('Failed to save resource history to localStorage:', e);
+  } catch {
+    // Ignore localStorage errors (e.g., in SSR or incognito)
   }
 }
 
@@ -170,7 +170,7 @@ const store = create<StoreState>((set, get) => ({
     try {
       const response = await api.getLogs();
       set({ logs: response.logs, logsLoading: false });
-    } catch (error) {
+    } catch {
       set({ logsLoading: false });
     }
   },

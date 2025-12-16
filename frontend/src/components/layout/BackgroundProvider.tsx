@@ -14,12 +14,12 @@ export function BackgroundProvider() {
 const [brightness, setBrightness] = useState(80);
 
   useEffect(() => {
-    // Load initial brightness
+    // Load initial brightness (use queueMicrotask to avoid sync setState in effect)
     const stored = localStorage.getItem(BRIGHTNESS_KEY);
     if (stored) {
       const val = parseInt(stored, 10);
       if (!isNaN(val) && val >= 0 && val <= 100) {
-        setBrightness(val);
+        queueMicrotask(() => setBrightness(val));
       }
     }
 

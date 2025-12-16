@@ -1,12 +1,11 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { Gauge, Radio } from 'lucide-react';
+import { Gauge } from 'lucide-react';
 import clsx from 'clsx';
 
 interface AirtimeGaugeProps {
   utilizationPercent: number;
-  maxAirtimePercent: number;
   currentAirtimeMs: number;
   maxAirtimeMs: number;
   enforcementEnabled: boolean;
@@ -18,7 +17,6 @@ interface AirtimeGaugeProps {
  */
 function AirtimeGaugeComponent({
   utilizationPercent,
-  maxAirtimePercent,
   currentAirtimeMs,
   maxAirtimeMs,
   enforcementEnabled,

@@ -232,7 +232,6 @@ export default function PacketsPage() {
                     <PacketRow
                       key={packetId}
                       packet={packet}
-                      index={index}
                       onClick={setSelectedPacket}
                       isFlashing={isAdvert && flashingAdvertId === packetId}
                     />

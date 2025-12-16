@@ -74,6 +74,33 @@ function TrafficLegend({ payload }: { payload?: Array<{ value: string; color: st
   );
 }
 
+// Custom tooltip - only show packet counts
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function TrafficTooltip({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) {
+  if (!active || !payload || payload.length === 0) return null;
+  
+  // Filter to only traffic series
+  const trafficEntries = payload.filter(p => LEGEND_ORDER.includes(p.name));
+  
+  return (
+    <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
+      <div className="font-medium text-text-primary mb-1">{label}</div>
+      {trafficEntries.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="text-text-muted">{entry.name}:</span>
+          <span className="text-text-primary tabular-nums">
+            {entry.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Stacked area chart showing traffic flow
  * Left Y-axis: packet counts (stacked areas)
@@ -150,33 +177,6 @@ function TrafficStackedChartComponent({
     );
   }
 
-  // Custom tooltip - only show packet counts
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    
-    // Filter to only traffic series
-    const trafficEntries = payload.filter(p => LEGEND_ORDER.includes(p.name));
-    
-    return (
-      <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
-        <div className="font-medium text-text-primary mb-1">{label}</div>
-        {trafficEntries.map((entry, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="text-text-muted">{entry.name}:</span>
-            <span className="text-text-primary tabular-nums">
-              {entry.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
   return (
     <div className="h-80">
       <ResponsiveContainer width="100%" height={320}>
@@ -215,7 +215,7 @@ function TrafficStackedChartComponent({
             domain={[0, maxRxUtil]}
             tickFormatter={(v) => `${v.toFixed(1)}%`}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<TrafficTooltip />} />
           <Legend content={<TrafficLegend />} />
           
           {/* Stacked stepped areas for traffic */}

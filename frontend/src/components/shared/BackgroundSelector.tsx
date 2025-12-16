@@ -32,19 +32,21 @@ const [brightness, setBrightness] = useState(80); // 0-100, default 80%
 
   // Load preference from localStorage on mount
   useEffect(() => {
-    setMounted(true);
+    // Use queueMicrotask to avoid sync setState in effect
+    queueMicrotask(() => setMounted(true));
+    
     const stored = localStorage.getItem(STORAGE_KEY) as BackgroundId | null;
     const storedBrightness = localStorage.getItem(BRIGHTNESS_KEY);
     
     if (storedBrightness) {
       const val = parseInt(storedBrightness, 10);
       if (!isNaN(val) && val >= 0 && val <= 100) {
-        setBrightness(val);
+        queueMicrotask(() => setBrightness(val));
       }
     }
     
     if (stored && BACKGROUNDS.some(bg => bg.id === stored)) {
-      setSelected(stored);
+      queueMicrotask(() => setSelected(stored));
       // Apply theme on initial load
       const bg = BACKGROUNDS.find(b => b.id === stored);
       if (bg?.theme) {
@@ -217,10 +219,10 @@ export function useBackground() {
   const [backgroundSrc, setBackgroundSrc] = useState('/images/bg.jpg');
 
   useEffect(() => {
-    // Load initial value
+    // Load initial value (use queueMicrotask to avoid sync setState in effect)
     const stored = localStorage.getItem(STORAGE_KEY) as BackgroundId | null;
     const bg = BACKGROUNDS.find(b => b.id === stored) || BACKGROUNDS[0];
-    setBackgroundSrc(bg.src);
+    queueMicrotask(() => setBackgroundSrc(bg.src));
 
     // Listen for changes
     const handleChange = (e: CustomEvent<BackgroundId>) => {

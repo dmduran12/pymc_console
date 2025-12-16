@@ -48,13 +48,8 @@ function LogLevelToggle() {
   }, [logs]);
 
   const handleToggle = useCallback(async (newLevel: LogLevel) => {
-    console.log('handleToggle called:', { newLevel, selectedLevel, isChanging });
-    if (newLevel === selectedLevel || isChanging) {
-      console.log('Early return - same level or changing');
-      return;
-    }
+    if (newLevel === selectedLevel || isChanging) return;
     
-    console.log('Making API call...');
     setIsChanging(true);
     setStatusMessage(null);
     

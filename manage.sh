@@ -995,17 +995,10 @@ do_upgrade() {
         fi
     fi
     
-    # Update our Next.js dashboard (overlays upstream's frontend)
-    if [ -d "$SCRIPT_DIR/frontend/out" ]; then
-        local target_dir="$INSTALL_DIR/repeater/web/html"
-        rm -rf "$target_dir" 2>/dev/null || true
-        mkdir -p "$target_dir"
-        cp -r "$SCRIPT_DIR/frontend/out/"* "$target_dir/"
-        chown -R "$SERVICE_USER:$SERVICE_USER" "$target_dir" 2>/dev/null || true
-        print_success "Dashboard updated"
-    else
-        print_warning "Frontend build not found - dashboard not updated"
-    fi
+    # Update dashboard from GitHub Releases
+    install_static_frontend || {
+        print_warning "Dashboard update failed - service will continue with existing UI"
+    }
     
     # =========================================================================
     # Step 5: Restart service with patches
@@ -2516,43 +2509,96 @@ install_backend_service() {
     fi
 }
 
-# Install pre-built static frontend files
+# GitHub repository for UI releases
+UI_REPO="dmduran12/pymc_console"
+UI_RELEASE_URL="https://github.com/${UI_REPO}/releases"
+
+# Download and install dashboard from GitHub Releases
 # Replaces pyMC_Repeater's built-in Vue dashboard with our Next.js dashboard
 # Backend's CherryPy server serves static files from repeater/web/html/
 install_static_frontend() {
-    local static_src="$SCRIPT_DIR/frontend/out"
+    local version="${1:-latest}"
     local target_dir="$INSTALL_DIR/repeater/web/html"
+    local temp_file="/tmp/pymc-ui-$$.tar.gz"
+    local download_url
     
-    # Check if pre-built static files exist
-    if [ ! -d "$static_src" ]; then
-        print_error "Static frontend files not found at $static_src"
-        print_info "Build the frontend first: cd frontend && npm run build"
+    # Construct download URL
+    if [ "$version" = "latest" ]; then
+        download_url="${UI_RELEASE_URL}/latest/download/pymc-ui-latest.tar.gz"
+    else
+        download_url="${UI_RELEASE_URL}/download/${version}/pymc-ui-${version}.tar.gz"
+    fi
+    
+    print_info "Downloading dashboard ($version)..."
+    
+    # Download with wget (fallback to curl)
+    if command -v wget &> /dev/null; then
+        if ! wget -q --show-progress -O "$temp_file" "$download_url" 2>/dev/null; then
+            # Retry without progress for non-interactive
+            if ! wget -q -O "$temp_file" "$download_url"; then
+                print_error "Failed to download dashboard from $download_url"
+                print_info "Check your internet connection or try a specific version"
+                rm -f "$temp_file"
+                return 1
+            fi
+        fi
+    elif command -v curl &> /dev/null; then
+        if ! curl -sL -o "$temp_file" "$download_url"; then
+            print_error "Failed to download dashboard from $download_url"
+            rm -f "$temp_file"
+            return 1
+        fi
+    else
+        print_error "Neither wget nor curl found - cannot download dashboard"
         return 1
     fi
     
-    # Backup existing Vue dashboard if present
+    # Verify download (check file exists and has content)
+    if [ ! -s "$temp_file" ]; then
+        print_error "Downloaded file is empty - release may not exist"
+        print_info "Available releases: ${UI_RELEASE_URL}"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Backup existing Vue dashboard if present (first time only)
     if [ -d "$target_dir" ]; then
         local backup_dir="${target_dir}.vue-backup"
         if [ ! -d "$backup_dir" ]; then
             mv "$target_dir" "$backup_dir"
-            print_info "Backed up original Vue dashboard to ${backup_dir##*/}"
+            print_info "Backed up original Vue dashboard"
         else
             rm -rf "$target_dir"
         fi
     fi
     
-    # Copy our Next.js static build to backend's html directory
+    # Extract to target directory
     mkdir -p "$target_dir"
-    cp -r "$static_src/"* "$target_dir/"
-    print_success "Dashboard installed ($(du -sh "$target_dir" | cut -f1))"
+    if ! tar -xzf "$temp_file" -C "$target_dir" 2>/dev/null; then
+        print_error "Failed to extract dashboard archive"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Clean up
+    rm -f "$temp_file"
     
     # Set permissions
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$target_dir"
-    print_success "Permissions set"
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$target_dir" 2>/dev/null || true
     
+    local size=$(du -sh "$target_dir" 2>/dev/null | cut -f1 || echo "unknown")
+    print_success "Dashboard installed ($size)"
     print_info "Dashboard will be served at http://<ip>:8000/"
     
     return 0
+}
+
+# Get available UI versions from GitHub
+get_ui_versions() {
+    local releases
+    releases=$(curl -s "https://api.github.com/repos/${UI_REPO}/releases" 2>/dev/null | 
+               grep -oP '"tag_name":\s*"\K[^"]+' | head -10)
+    echo "$releases"
 }
 
 merge_config() {

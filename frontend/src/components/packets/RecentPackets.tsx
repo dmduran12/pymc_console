@@ -19,12 +19,10 @@ import type { Packet } from '@/types/api';
 /** Memoized recent packet row */
 const RecentPacketRow = memo(function RecentPacketRow({ 
   packet, 
-  index,
   isNew = false,
   isAdvert = false,
 }: { 
   packet: Packet; 
-  index: number;
   isNew?: boolean;
   isAdvert?: boolean;
 }) {
@@ -159,7 +157,6 @@ export function RecentPackets() {
               <RecentPacketRow
                 key={packetId}
                 packet={packet}
-                index={index}
                 isNew={flashingAdvertId === packetId}
                 isAdvert={isAdvert}
               />

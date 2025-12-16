@@ -170,10 +170,13 @@ function NeighborPolarChartComponent({
     }
     
     if (newBlinks.length > 0) {
-      setBlinkingHashes(prev => {
-        const next = new Set(prev);
-        newBlinks.forEach(h => next.add(h));
-        return next;
+      // Use queueMicrotask to avoid synchronous setState in effect
+      queueMicrotask(() => {
+        setBlinkingHashes(prev => {
+          const next = new Set(prev);
+          newBlinks.forEach(h => next.add(h));
+          return next;
+        });
       });
       
       // Clear blink after animation

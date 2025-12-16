@@ -51,7 +51,8 @@ export function Sidebar() {
   useEffect(() => {
     const stored = localStorage.getItem(CONTROLS_EXPANDED_KEY);
     if (stored !== null) {
-      setControlsExpanded(stored === 'true');
+      // Use queueMicrotask to avoid sync setState in effect
+      queueMicrotask(() => setControlsExpanded(stored === 'true'));
     }
   }, []);
 
@@ -66,7 +67,7 @@ export function Sidebar() {
 
   // Close drawer on route change
   useEffect(() => {
-    setIsOpen(false);
+    queueMicrotask(() => setIsOpen(false));
   }, [pathname]);
 
   // Lock body scroll when drawer is open
@@ -99,8 +100,8 @@ export function Sidebar() {
     setDutyCycle(!dutyCycleEnabled);
   };
 
-  // Navigation items
-  const NavItems = () => (
+  // Navigation items renderer
+  const renderNavItems = () => (
     <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
       {navigation.map((item) => {
         const isActive = pathname === item.href;
@@ -124,8 +125,8 @@ export function Sidebar() {
     </nav>
   );
 
-  // Skeuomorphic Control Panel
-  const ControlPanel = ({ compact = false }: { compact?: boolean }) => (
+  // Skeuomorphic Control Panel renderer
+  const renderControlPanel = () => (
     <div className="px-3 py-3">
       {/* Panel Header - collapsible */}
       <button
@@ -214,8 +215,8 @@ export function Sidebar() {
     </div>
   );
 
-  // Status panel (bottom of sidebar)
-  const StatusPanel = () => (
+  // Status panel renderer (bottom of sidebar)
+  const renderStatusPanel = () => (
     <div className="mt-auto border-t border-white/5">
       {/* Live status & version */}
       <div className="px-4 py-3 flex items-center justify-between">
@@ -342,9 +343,9 @@ export function Sidebar() {
           </div>
         </div>
 
-        <NavItems />
-        <ControlPanel compact />
-        <StatusPanel />
+        {renderNavItems()}
+        {renderControlPanel()}
+        {renderStatusPanel()}
       </aside>
 
       {/* ═══════════════════════════════════════════════════════════════════
@@ -363,9 +364,9 @@ export function Sidebar() {
           </div>
         </div>
 
-        <NavItems />
-        <ControlPanel />
-        <StatusPanel />
+        {renderNavItems()}
+        {renderControlPanel()}
+        {renderStatusPanel()}
       </aside>
     </>
   );

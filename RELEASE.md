@@ -16,7 +16,7 @@ Complete guide for developers to create and publish new releases of the pyMC UI.
 For experienced developers, here's the TL;DR:
 
 ```bash
-cd pymc_alt-ui/frontend
+cd pymc_console/frontend
 
 # 1. Update version (creates git tag automatically if configured)
 npm version patch
@@ -85,7 +85,7 @@ Use [Semantic Versioning](https://semver.org/):
 
 Navigate to the frontend directory:
 ```bash
-cd pymc_alt-ui/frontend
+cd pymc_console/frontend
 ```
 
 Run the appropriate npm version command:
@@ -150,7 +150,7 @@ Once the workflow completes:
 If you need to build locally without creating a release:
 
 ```bash
-cd pymc_alt-ui/frontend
+cd pymc_console/frontend
 
 # Install dependencies (first time only)
 npm install
@@ -262,13 +262,13 @@ Once a release is published, end users can deploy it:
 
 ```bash
 # Download latest release
-wget https://github.com/rightup/pymc_alt-ui/releases/download/v0.1.2/pymc-ui-v0.1.2.tar.gz
+wget https://github.com/dmduran12/pymc_console/releases/download/v0.2.0/pymc-ui-v0.2.0.tar.gz
 
-# Extract to static files directory
-tar -xzf pymc-ui-v0.1.2.tar.gz -C /var/www/pymc-ui/
+# Extract to pyMC_Repeater's web directory
+tar -xzf pymc-ui-v0.2.0.tar.gz -C /opt/pymc_repeater/repeater/web/html/
 
 # Or use zip
-unzip pymc-ui-v0.1.2.zip -d /var/www/pymc-ui/
+unzip pymc-ui-v0.2.0.zip -d /opt/pymc_repeater/repeater/web/html/
 ```
 
 ### Configure Backend
@@ -300,7 +300,7 @@ git tag v0.1.2
 git push origin v0.1.2
 
 # Check GitHub Actions status
-# Visit: https://github.com/rightup/pymc_alt-ui/actions
+# Visit: https://github.com/dmduran12/pymc_console/actions
 ```
 
 ---

@@ -14,7 +14,6 @@ import {
 
 interface PacketRowProps {
   packet: Packet;
-  index: number;
   onClick: (packet: Packet) => void;
   isFlashing?: boolean;
 }
@@ -23,7 +22,7 @@ interface PacketRowProps {
  * Table row component for packet list
  * Memoized to prevent unnecessary re-renders
  */
-function PacketRowComponent({ packet, index, onClick, isFlashing = false }: PacketRowProps) {
+function PacketRowComponent({ packet, onClick, isFlashing = false }: PacketRowProps) {
   // Handle both API formats: {type, route} and {payload_type, route_type}
   const payloadTypeName =
     packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);

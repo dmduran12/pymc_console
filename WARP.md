@@ -25,10 +25,15 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 
 ```
 pymc_console/
+├── .github/workflows/     # GitHub Actions CI/CD
+│   └── build-ui.yml       # Automated build & release workflow
 ├── frontend/              # Next.js dashboard (static export)
 │   ├── src/               # Source code
-│   └── out/               # Built static files (committed to git)
+│   ├── out/               # Build output (gitignored)
+│   └── dist/              # Release artifacts (gitignored)
 ├── manage.sh              # Main installer/manager script (TUI)
+├── RELEASE.md             # Release process documentation
+├── INSTALL.md             # Standalone UI installation guide
 ├── README.md              # User documentation
 ├── WARP.md                # Developer documentation
 └── LICENSE
@@ -39,10 +44,11 @@ pymc_console/
 ```bash
 # Frontend development (from frontend/)
 cd frontend
-npm install        # Install dependencies
-npm run dev        # Start dev server at http://localhost:3000
-npm run build      # Production build → frontend/out/ (static export)
-npm run lint       # Run ESLint
+npm install           # Install dependencies
+npm run dev           # Start dev server at http://localhost:3000
+npm run build         # Production build → frontend/out/
+npm run build:static  # Build + package for release → frontend/dist/
+npm run lint          # Run ESLint
 
 # Installer (run as root on target Pi)
 sudo ./manage.sh            # TUI menu
@@ -54,11 +60,18 @@ sudo ./manage.sh upgrade    # Upgrade existing installation
 
 ### Deployment Model
 
-The dashboard is a **static export** (`output: 'export'` in next.config.ts). After `npm run build`:
-1. Static HTML/JS/CSS is generated in `frontend/out/`
-2. `manage.sh` copies these to pyMC_Repeater's `repeater/web/html/` directory
-3. pyMC_Repeater's CherryPy server serves the dashboard at port 8000
-4. No separate frontend server needed in production
+The dashboard is a **static export** (`output: 'export'` in next.config.ts).
+
+**Release-based deployment** (production):
+1. GitHub Actions builds on push to main/dev
+2. Version tags (e.g., `v0.2.0`) trigger GitHub Releases with `.tar.gz` and `.zip` archives
+3. `manage.sh install/upgrade` downloads from GitHub Releases
+4. pyMC_Repeater's CherryPy server serves the dashboard at port 8000
+
+**Local development**:
+1. `npm run build` generates static files in `frontend/out/`
+2. `npm run build:static` also packages to `frontend/dist/`
+3. Test locally with `npx serve out`
 
 ### Installation Flow (Mirrors Upstream)
 
@@ -171,7 +184,7 @@ The main installer script provides a TUI (whiptail/dialog) for:
 - `do_install()` - Clones pyMC_Repeater to sibling dir, applies patches, copies to `/opt`, installs pip packages, overlays dashboard
 - `do_upgrade()` - Updates clone, re-applies patches, syncs to `/opt`, reinstalls packages
 - `install_backend_service()` - Copies upstream's service file from clone
-- `install_static_frontend()` - Copies built Next.js files to pyMC_Repeater's web directory
+- `install_static_frontend()` - Downloads dashboard from GitHub Releases to pyMC_Repeater's web directory
 - `configure_radio_terminal()` - Radio preset selection
 - `patch_nextjs_static_serving()` - Applies Next.js serving patch to target directory
 - `patch_api_endpoints()` - Applies radio config API patch to target directory
@@ -213,43 +226,25 @@ Packet and stats types in `src/types/api.ts`. Notable constants:
 - `PAYLOAD_TYPES` - Maps packet type numbers to names (REQ, RESPONSE, TXT_MSG, ACK, ADVERT, etc.)
 - `ROUTE_TYPES` - Maps route types (UNKNOWN, DIRECT, FLOOD, TRANSPORT, T_FLOOD, T_DIRECT)
 
-## Docker Services (Optional)
-
-For local development or optional monitoring stack:
-
-- `backend` (8000) - pyMC_Repeater API
-- `frontend` (3000) - Next.js dev server
-- `prometheus` (9090) - Metrics collection
-- `grafana` (3002) - Visualization (admin/admin)
-
-```bash
-docker-compose up -d prometheus grafana  # Monitoring only
-```
-
 ## Common Tasks
 
-**Development workflow (IMPORTANT):**
-After making frontend changes, you MUST rebuild the static export before pushing:
+**Development workflow:**
 ```bash
 cd frontend
-npm run build      # Rebuilds frontend/out/ with latest changes
-cd ..
-git add -A
-git commit -m "your message"
-git push
+npm install
+npm run dev  # Develop at http://localhost:3000
 ```
-The `frontend/out/` directory is committed to git and deployed to the Pi. Without rebuilding, your changes won't take effect.
 
-**Build and test static export locally:**
+**Build and test locally:**
 ```bash
 cd frontend
 npm run build
-npx serve out  # Serve at localhost:3000
+npx serve out  # Test static export at localhost:3000
 ```
 
-**Deploy to remote Pi:**
+**Deploy to Pi (existing installation):**
 ```bash
-# On Pi:
+# On Pi - downloads latest release from GitHub:
 sudo ./manage.sh upgrade
 ```
 
@@ -258,3 +253,26 @@ sudo ./manage.sh upgrade
 sudo systemctl status pymc-repeater
 sudo journalctl -u pymc-repeater -f  # Live logs
 ```
+
+## Release Process
+
+See [RELEASE.md](RELEASE.md) for detailed instructions.
+
+**Quick release:**
+```bash
+cd frontend
+npm version patch  # or minor/major
+git push origin main
+git push origin --tags
+```
+
+**What happens automatically:**
+1. GitHub Actions builds on every push to main/dev
+2. Version tags (`v*`) trigger GitHub Releases
+3. Release includes `pymc-ui-vX.Y.Z.tar.gz` and `.zip` archives
+4. `manage.sh` downloads from releases during install/upgrade
+
+**Versioning:**
+- `patch` (0.1.1 → 0.1.2): Bug fixes
+- `minor` (0.1.2 → 0.2.0): New features
+- `major` (0.2.0 → 1.0.0): Breaking changes

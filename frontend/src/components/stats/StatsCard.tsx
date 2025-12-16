@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, ReactNode } from 'react';
-import clsx from 'clsx';
 import type { BucketData } from '@/lib/api';
 
 // Semantic color system for dashboard metrics

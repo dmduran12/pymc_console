@@ -1,49 +1,39 @@
 # pyMC Console
 
-A modern dashboard for monitoring and managing your [MeshCore](https://meshcore.co.uk/) LoRa mesh network repeater.
+A modern dashboard for monitoring and managing your [MeshCore](https://meshcore.co.uk/) LoRa mesh repeater.
 
-Built on top of [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console adds a Next.js dashboard that makes it easy to monitor your mesh network from any browser.
+Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console adds an intuitive web interface for monitoring your mesh network.
 
 ## Features
 
-### Dashboard Home
-The main dashboard provides an at-a-glance view of your repeater's activity:
+### Dashboard
+- **Live packet metrics** — Received, forwarded, dropped packets with sparkline charts
+- **TX Delay Calculator** — Recommends optimal delay settings based on duplicate rate
+- **Time range selector** — View stats from 20 minutes to 7 days
+- **Recent packets** — Live feed of incoming traffic
 
-- **Received Packets** — Hero chart showing packets received over your selected time window (20m to 7d). The large number shows total packets in the period, with an hourly rate below.
-- **Forwarded** — Packets your repeater has retransmitted to extend network coverage. A healthy repeater forwards most of what it receives.
-- **Dropped** — Packets that were filtered (duplicates, out-of-range, etc.). Some drops are normal—duplicates mean the mesh is working.
-- **TX Delay Calculator** — Analyzes your duplicate rate and TX utilization to recommend optimal `tx_delay_factor` and `direct_tx_delay_factor` settings. If the "Adjust" badge appears, consider updating your config.
-- **Uptime** — Time since last service restart.
+### Statistics
+- **Traffic flow chart** — Stacked area showing RX/forwarded/dropped over time
+- **Link quality polar** — Neighbor signal strength by compass bearing
+- **Packet types treemap** — Distribution of ADVERT, TXT_MSG, ACK, etc.
+- **Noise floor heatmap** — RF interference patterns over time
 
-Use the time range selector (20m, 1h, 3h, 12h, 24h, 3d, 7d) to adjust all dashboard stats and charts to your desired window.
+### Neighbors
+- **Interactive map** — OpenStreetMap view with neighbor positions
+- **Neighbor list** — RSSI, SNR, last seen, direct vs relayed
 
-### Statistics Page
-Deeper analytics for network performance:
+### Packets
+- **Searchable history** — Filter by type, route, time range
+- **Packet details** — Hash, path, payload, signal info, duplicates
 
-- **Traffic Flow Chart** — Stacked area chart showing received/forwarded/dropped packets over time. The right Y-axis shows estimated RX airtime utilization percentage. Max and Mean RX Util are displayed in the header.
-- **Link Quality Polar Chart** — Visualizes neighbor signal quality by direction. Neighbors are plotted by their bearing from your location, with bar length indicating SNR quality.
-- **Packet Types Treemap** — Distribution of packet types (ADVERT, TXT_MSG, ACK, REQ, etc.) as a proportional treemap.
-- **Noise Floor Heatmap** — Historical noise floor readings to identify RF interference patterns.
+### Settings
+- **Mode toggle** — Forward (repeating) or Monitor (RX only)
+- **Duty cycle** — Enable/disable enforcement
+- **Radio config** — Live frequency, power, SF, bandwidth changes
 
-### Neighbors Page
-- **Interactive Map** — OpenStreetMap view showing your repeater and all known neighbors with coordinates. Click markers for details.
-- **Neighbor List** — Sortable table with name, last seen time, RSSI, SNR, and whether they're zero-hop (direct) or relayed.
-
-### Packets Page
-- **Packet History** — Searchable, filterable list of all packets. Filter by type, route, or time range.
-- **Packet Details** — Click any packet to see full details: hash, source/destination, path, payload, signal info, and duplicate history.
-
-### Settings Page
-- **Operating Mode** — Toggle between Forward (active repeating) and Monitor (receive-only) modes.
-- **Duty Cycle** — Enable/disable duty cycle enforcement for regulatory compliance.
-- **Radio Configuration** — Live-edit frequency, TX power, spreading factor, bandwidth, and coding rate. Changes can be applied without restart.
-
-### System Page
-- **Hardware Stats** — Real-time CPU usage, memory, disk space, and temperature (on supported hardware).
-- **Load Averages** — 1/5/15 minute load averages.
-
-### Logs Page
-- **Live Logs** — Stream of recent log entries from the repeater daemon. Useful for debugging RX/TX issues.
+### System & Logs
+- **Hardware stats** — CPU, memory, disk, temperature
+- **Live logs** — Stream from repeater daemon
 
 ## Quick Start
 
@@ -93,14 +83,12 @@ After installation, run `sudo bash manage.sh` to access the management menu:
 
 ### Menu Options
 
-| Option | Description |
-|--------|-------------|
-| **Start/Stop/Restart** | Control the repeater service |
-| **View Logs** | Live log output from the repeater |
-| **Configure Radio** | Set frequency, power, bandwidth, SF via preset selection |
-| **Configure GPIO** | Set up SPI bus and GPIO pins for your LoRa module |
-| **Upgrade** | Pull latest updates and reinstall |
-| **Uninstall** | Remove the installation completely |
+- **Start/Stop/Restart** — Control the repeater service
+- **View Logs** — Live log output from the repeater
+- **Configure Radio** — Set frequency, power, bandwidth, SF via preset selection
+- **Configure GPIO** — Set up SPI bus and GPIO pins for your LoRa module
+- **Upgrade** — Pull latest updates and reinstall
+- **Uninstall** — Remove the installation completely
 
 ## Accessing the Dashboard
 
@@ -210,9 +198,7 @@ Select **Uninstall** from the menu. This removes:
 
 ## Development
 
-See [WARP.md](WARP.md) for development setup and architecture details.
-
-### Local Frontend Development
+See [WARP.md](WARP.md) for architecture and development details.
 
 ```bash
 cd frontend
@@ -220,21 +206,28 @@ npm install
 npm run dev  # http://localhost:3000
 ```
 
-Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` to point to your Pi:
+Point to your Pi by setting `NEXT_PUBLIC_API_URL=http://<pi-ip>:8000` in `frontend/.env.local`.
+
+### Creating a Release
+
+See [RELEASE.md](RELEASE.md) for the full release guide.
+
+```bash
+cd frontend
+npm version patch  # or minor/major
+git push origin main --tags
 ```
-NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
-```
+
+GitHub Actions will automatically build and publish the release.
 
 ## License
 
 MIT — See [LICENSE](LICENSE)
 
-## Credits & Acknowledgments
+## Credits
 
-This project wouldn't exist without the work of [RightUp](https://github.com/rightup):
+Built on the excellent work of [RightUp](https://github.com/rightup):
 
-- **[pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)** — The core mesh repeater daemon that handles all LoRa communication, packet routing, and mesh protocol logic. pyMC Console is essentially a dashboard layer on top of this excellent project.
-- **[pymc_core](https://github.com/rightup/pyMC_core)** — The underlying LoRa mesh protocol library.
-
-Also thanks to:
-- **[MeshCore](https://meshcore.co.uk/)** — The MeshCore project and community.
+- **[pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)** — The core repeater daemon handling LoRa communication and mesh routing
+- **[pymc_core](https://github.com/rightup/pyMC_core)** — The underlying mesh protocol library
+- **[MeshCore](https://meshcore.co.uk/)** — The MeshCore project and community

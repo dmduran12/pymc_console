@@ -1,7 +1,7 @@
 'use client';
 
 import { useStore } from '@/lib/stores/useStore';
-import { Users, Signal, Clock, Radio, MapPin, Repeat } from 'lucide-react';
+import { Users, Signal, Radio, MapPin, Repeat } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import NeighborMapWrapper from '@/components/neighbors/NeighborMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';

@@ -6,7 +6,7 @@ import { useStats } from '@/lib/stores/useStore';
 import { BarChart3, TrendingUp, PieChart, Radio, Compass } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { GraphData } from '@/types/api';
-import type { BucketedStats, UtilizationStats, NoiseFloorHistoryItem } from '@/lib/api';
+import type { BucketedStats, NoiseFloorHistoryItem } from '@/lib/api';
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
@@ -18,7 +18,6 @@ import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 export default function StatisticsPage() {
   const stats = useStats();
   const [bucketedStats, setBucketedStats] = useState<BucketedStats | null>(null);
-  const [utilizationStats, setUtilizationStats] = useState<UtilizationStats | null>(null);
   const [packetTypeData, setPacketTypeData] = useState<GraphData | null>(null);
   const [noiseFloorHistory, setNoiseFloorHistory] = useState<NoiseFloorHistoryItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -37,18 +36,14 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
         // Calculate bucket count based on time range (aim for ~60 buckets)
         const bucketCount = Math.min(120, Math.max(30, Math.floor(timeRangeMinutes / 2)));
         
-        const [bucketedRes, utilizationRes, packetTypeRes, noiseFloorRes] = await Promise.all([
+        const [bucketedRes, packetTypeRes, noiseFloorRes] = await Promise.all([
           api.getBucketedStats(timeRangeMinutes, bucketCount),
-          api.getUtilizationStats(timeRange),
           api.getPacketTypeGraphData(timeRange),
           api.getNoiseFloorHistory(timeRange),
         ]);
 
         if (bucketedRes.success && bucketedRes.data) {
           setBucketedStats(bucketedRes.data);
-        }
-        if (utilizationRes.success && utilizationRes.data) {
-          setUtilizationStats(utilizationRes.data);
         }
         if (packetTypeRes.success && packetTypeRes.data) {
           setPacketTypeData(packetTypeRes.data);
@@ -79,25 +74,13 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
     }
   }, [timeRange]);
 
-  const pollUtilization = useCallback(async () => {
-    try {
-      const res = await api.getUtilizationStats(timeRange);
-      if (res.success && res.data) setUtilizationStats(res.data);
-    } catch (_) {
-      // ignore polling errors
-    }
-  }, [timeRange]);
-
-  // Derive common chart polling interval using same cadence
-  const chartPollMs = utilizationPollMs;
-
   // Poll bucketed stats (received/forwarded/dropped/transmitted)
   const pollBucketed = useCallback(async () => {
     try {
       const bucketCount = Math.min(120, Math.max(30, Math.floor(timeRangeMinutes / 2)));
       const res = await api.getBucketedStats(timeRangeMinutes, bucketCount);
       if (res.success && res.data) setBucketedStats(res.data);
-    } catch (_) {
+    } catch {
       // ignore polling errors
     }
   }, [timeRangeMinutes]);
@@ -107,7 +90,7 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
     try {
       const res = await api.getPacketTypeGraphData(timeRange);
       if (res.success && res.data) setPacketTypeData(res.data);
-    } catch (_) {
+    } catch {
       // ignore polling errors
     }
   }, [timeRange]);
@@ -117,16 +100,15 @@ const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
     try {
       const res = await api.getNoiseFloorHistory(timeRange);
       if (res.success && res.data?.history) setNoiseFloorHistory(res.data.history);
-    } catch (_) {
+    } catch {
       // ignore polling errors
     }
   }, [timeRange]);
 
   // Start polling (skip initial since initial fetch already happened)
-  usePolling(pollUtilization, chartPollMs, true, true);
-  usePolling(pollBucketed, chartPollMs, true, true);
-  usePolling(pollPacketTypes, chartPollMs, true, true);
-  usePolling(pollNoiseFloor, chartPollMs, true, true);
+  usePolling(pollBucketed, utilizationPollMs, true, true);
+  usePolling(pollPacketTypes, utilizationPollMs, true, true);
+  usePolling(pollNoiseFloor, utilizationPollMs, true, true);
 
   // Aggregate series data for packet types - memoized
   const packetTypePieData = useMemo(() => {
