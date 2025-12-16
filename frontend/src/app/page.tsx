@@ -214,7 +214,14 @@ export default function Dashboard() {
           timeRangeLabel={currentRange.label}
           icon={<ArrowUpRight className="w-4 h-4" />}
         />
-        <TxDelayCard stats={stats} />
+        <TxDelayCard 
+          stats={stats}
+          receivedBuckets={bucketedStats?.received}
+          droppedBuckets={bucketedStats?.dropped}
+          forwardedBuckets={bucketedStats?.forwarded}
+          bucketDurationSeconds={bucketedStats?.bucket_duration_seconds}
+          timeRangeLabel={currentRange.label}
+        />
         <StatsCard
           title="DROPPED"
           value={stats?.dropped_count ?? 0}
