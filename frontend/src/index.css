@@ -423,6 +423,22 @@ button:hover,
   transition-duration: 0s;
 }
 
+/* Ensure all interactive elements are clickable on touch devices */
+a,
+button,
+[role="button"],
+input,
+select,
+textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ensure links and buttons have proper cursor and are clickable */
+a, button {
+  cursor: pointer;
+}
+
 body {
   background: var(--bg-body);
   color: var(--text-secondary);
