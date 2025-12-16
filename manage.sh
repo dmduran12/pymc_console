@@ -2034,17 +2034,17 @@ patch_static_file_serving() {
     fi
     
     # Use Python to apply the patch reliably
-    python3 << 'PATCHEOF'
+    python3 << PATCHEOF
 import re
 import os
 import sys
 
-http_server_path = sys.argv[1] if len(sys.argv) > 1 else "$http_server"
+http_server_path = "$http_server"
 
-with open("$http_server", 'r') as f:
+with open(http_server_path, 'r') as f:
     content = f.read()
 
-# 1. Patch the default() method to try $uri.html before index.html (Nginx-style try_files)
+# 1. Patch the default() method to try URI.html before index.html (Nginx-style try_files)
 # This allows serving packets.html for /packets, logs.html for /logs, etc.
 old_default = '''    @cherrypy.expose
     def default(self, *args, **kwargs):
@@ -2064,7 +2064,7 @@ new_default = '''    @cherrypy.expose
     def default(self, *args, **kwargs):
         """Handle static file serving with try_files behavior.
         
-        Mimics Nginx try_files: tries $uri.html before falling back to index.html.
+        Mimics Nginx try_files: tries URI.html before falling back to index.html.
         This supports static site generators (Next.js, Vue, etc.) that output
         separate HTML files per route (e.g., packets.html, logs.html).
         """
@@ -2076,7 +2076,7 @@ new_default = '''    @cherrypy.expose
         if args and args[0] == 'api':
             raise cherrypy.NotFound()
         
-        # Try $uri.html first (e.g., /packets -> packets.html)
+        # Try URI.html first (e.g., /packets -> packets.html)
         if args:
             html_file = os.path.join(self.html_dir, f"{args[0]}.html")
             if os.path.isfile(html_file):
@@ -2127,7 +2127,7 @@ if '"/images"' in content and 'config["/favicon.ico"]["cors.expose.on"]' in cont
             'config["/images"]["cors.expose.on"] = True\n                config["/favicon.ico"]["cors.expose.on"] = True'
         )
 
-with open("$http_server", 'w') as f:
+with open(http_server_path, 'w') as f:
     f.write(content)
 
 print("Patch applied successfully")
