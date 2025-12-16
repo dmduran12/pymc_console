@@ -8,7 +8,7 @@
 # 3. This script clones pyMC_Repeater as a sibling directory (e.g., ~/pyMC_Repeater)
 # 4. Applies patches to the clone, then copies files to /opt/pymc_repeater
 # 5. Installs Python packages from the clone directory
-# 6. Overlays our Next.js dashboard to the installation
+# 6. Overlays our React dashboard to the installation
 #
 # This matches upstream's flow where manage.sh runs from within a cloned repo
 # and copies files to /opt. This makes it easier to:
@@ -32,7 +32,7 @@ CLONE_DIR="$(dirname "$SCRIPT_DIR")/pyMC_Repeater"
 # Installation paths (where files are deployed - matches upstream)
 # INSTALL_DIR: Where pyMC_Repeater is installed (matches upstream standard)
 # CONSOLE_DIR: Where pymc_console stores its files (radio presets, dashboard, etc.)
-# UI_DIR: Where our Next.js dashboard is installed (separate from upstream Vue.js)
+# UI_DIR: Where our React dashboard is installed (separate from upstream Vue.js)
 INSTALL_DIR="/opt/pymc_repeater"
 CONSOLE_DIR="/opt/pymc_console"
 UI_DIR="/opt/pymc_console/web/html"
@@ -503,7 +503,7 @@ print_banner() {
     clear
     echo ""
     echo -e "${BOLD}${CYAN}pyMC Console Installer${NC}"
-    echo -e "${DIM}Next.js Dashboard + LoRa Mesh Network Repeater${NC}"
+    echo -e "${DIM}React Dashboard + LoRa Mesh Network Repeater${NC}"
     echo ""
 }
 
@@ -672,7 +672,7 @@ do_install() {
     fi
     
     # Welcome screen
-    $DIALOG --backtitle "pyMC Console Management" --title "Welcome" --msgbox "\nWelcome to pyMC Console Setup\n\nThis will install:\n- pyMC Repeater (LoRa mesh repeater)\n- pyMC Console (Next.js dashboard)\n\nBranch: $branch\nClone: $CLONE_DIR\nInstall: $INSTALL_DIR\n\nPress OK to continue..." 18 70
+    $DIALOG --backtitle "pyMC Console Management" --title "Welcome" --msgbox "\nWelcome to pyMC Console Setup\n\nThis will install:\n- pyMC Repeater (LoRa mesh repeater)\n- pyMC Console (React dashboard)\n\nBranch: $branch\nClone: $CLONE_DIR\nInstall: $INSTALL_DIR\n\nPress OK to continue..." 18 70
     
     # SPI Check (Raspberry Pi)
     check_spi
@@ -786,7 +786,7 @@ do_install() {
         print_success "Copied radio-presets.json"
     fi
     
-    # Install our Next.js dashboard (overlays upstream's Vue.js frontend)
+    # Install our React dashboard (overlays upstream's Vue.js frontend)
     install_static_frontend || {
         print_error "Frontend installation failed"
         return 1
@@ -1901,7 +1901,7 @@ install_yq_silent() {
 # 1. Clone/update pyMC_Repeater to a sibling directory
 # 2. Run upstream's manage.sh (install/upgrade) in foreground - user sees TUI
 # 3. Apply our patches to the installed files (/opt/pymc_repeater)
-# 4. Overlay our Next.js dashboard
+# 4. Overlay our React dashboard
 # 5. Run our radio configuration
 #
 # Note: Upstream's radio config script is temporarily renamed during install

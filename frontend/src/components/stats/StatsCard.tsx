@@ -1,4 +1,4 @@
-'use client';
+
 
 import { useMemo, ReactNode } from 'react';
 import type { BucketData } from '@/lib/api';

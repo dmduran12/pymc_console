@@ -1,4 +1,4 @@
-'use client';
+
 
 import { useState, useEffect } from 'react';
 import { useStore, useFlashAdvert } from '@/lib/stores/useStore';

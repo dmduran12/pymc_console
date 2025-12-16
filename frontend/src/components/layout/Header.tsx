@@ -1,4 +1,4 @@
-'use client';
+
 
 import { useStore } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';

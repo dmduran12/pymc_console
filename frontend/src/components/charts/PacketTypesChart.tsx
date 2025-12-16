@@ -1,4 +1,4 @@
-'use client';
+
 
 import { useState, memo, useMemo, useCallback, useRef } from 'react';
 import { Treemap, ResponsiveContainer } from 'recharts';

@@ -5,7 +5,8 @@ __pycache__/
 *.pyc
 
 # Build outputs
-frontend/.next/
+frontend/out/
+frontend/dist/
 frontend/tsconfig.tsbuildinfo
 *.egg-info/
 dist/

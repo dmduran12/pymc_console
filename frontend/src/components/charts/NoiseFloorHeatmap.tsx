@@ -1,4 +1,4 @@
-'use client';
+
 
 import { useMemo, memo } from 'react';
 import { useChartColors } from '@/lib/hooks/useThemeColors';

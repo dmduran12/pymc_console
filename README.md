@@ -58,7 +58,7 @@ The installer automatically:
 - Installs all required system dependencies (git, curl, whiptail, Python packages)
 - Clones and configures [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)
 - Sets up the systemd service for automatic startup
-- Deploys the Next.js dashboard
+- Deploys the React dashboard
 - Creates the configuration file at `/etc/pymc_repeater/config.yaml`
 
 ## Using the Installer Menu
@@ -203,10 +203,10 @@ See [WARP.md](WARP.md) for architecture and development details.
 ```bash
 cd frontend
 npm install
-npm run dev  # http://localhost:3000
+npm run dev  # http://localhost:5173
 ```
 
-Point to your Pi by setting `NEXT_PUBLIC_API_URL=http://<pi-ip>:8000` in `frontend/.env.local`.
+Point to your Pi by setting `VITE_API_URL=http://<pi-ip>:8000` in `frontend/.env.local`.
 
 ### Creating a Release
 

@@ -163,7 +163,7 @@ The output will be in `frontend/dist/` directory.
 
 ### What the Build Does
 
-1. `next build` - Compiles Next.js app to static HTML/CSS/JS
+1. `vite build` - Compiles React app to static HTML/CSS/JS
 2. Outputs to `frontend/out/`
 3. Copies `out/` contents to `frontend/dist/`
 

@@ -1,4 +1,4 @@
-'use client';
+
 
 import { useState, useEffect } from 'react';
 import { useBackground } from '@/components/shared/BackgroundSelector';

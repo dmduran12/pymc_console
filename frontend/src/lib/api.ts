@@ -11,7 +11,7 @@ import type {
 } from '@/types/api';
 
 // Empty string = same-origin (relative URLs work when served from pyMC_Repeater)
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;

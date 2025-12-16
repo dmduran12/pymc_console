@@ -1,4 +1,4 @@
-'use client';
+
 
 import { memo, useMemo, useState, useEffect, useRef } from 'react';
 import { Compass } from 'lucide-react';

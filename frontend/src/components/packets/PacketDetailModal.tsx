@@ -1,4 +1,4 @@
-'use client';
+
 
 import { memo } from 'react';
 import { X } from 'lucide-react';
