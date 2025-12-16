@@ -82,9 +82,10 @@ The installer follows the same flow as upstream's `manage.sh`:
 4. Patches are applied to the clone
 5. Files are copied from clone to `/opt/pymc_repeater`
 6. Python packages installed from clone directory
-7. Dashboard overlaid to `/opt/pymc_repeater/repeater/web/html/`
+7. Dashboard installed to `/opt/pymc_console/web/html/` (separate from upstream Vue.js)
+8. `web.web_path` configured in config.yaml to point to our dashboard
 
-This mirrors upstream exactly, making patches easy to submit as PRs.
+This mirrors upstream exactly, making patches easy to submit as PRs. Upstream's Vue.js dashboard remains intact at `/opt/pymc_repeater/repeater/web/html/` as a backup.
 
 ### Directory Structure
 
@@ -94,8 +95,11 @@ This mirrors upstream exactly, making patches easy to submit as PRs.
 
 **Installation directories (on target device):**
 - `/opt/pymc_repeater/` - pyMC_Repeater installation (matches upstream)
-- `/opt/pymc_console/` - Our files (radio presets, etc.)
+- `/opt/pymc_repeater/repeater/web/html/` - Upstream Vue.js dashboard (preserved)
+- `/opt/pymc_console/` - Our files (radio presets, dashboard, etc.)
+- `/opt/pymc_console/web/html/` - Our Next.js dashboard
 - `/etc/pymc_repeater/config.yaml` - Radio and repeater configuration
+  - `web.web_path` points to our dashboard location
 - `/var/log/pymc_repeater/` - Log files
 - Systemd service: `pymc-repeater.service` (upstream's file)
 - Python packages installed system-wide (via `pip --break-system-packages --ignore-installed`)
@@ -184,7 +188,7 @@ The main installer script provides a TUI (whiptail/dialog) for:
 - `do_install()` - Clones pyMC_Repeater to sibling dir, applies patches, copies to `/opt`, installs pip packages, overlays dashboard
 - `do_upgrade()` - Updates clone, re-applies patches, syncs to `/opt`, reinstalls packages
 - `install_backend_service()` - Copies upstream's service file from clone
-- `install_static_frontend()` - Downloads dashboard from GitHub Releases to pyMC_Repeater's web directory
+- `install_static_frontend()` - Downloads dashboard from GitHub Releases to `/opt/pymc_console/web/html/` and configures `web.web_path`
 - `configure_radio_terminal()` - Radio preset selection
 - `patch_static_file_serving()` - Applies Nginx-style try_files behavior for static HTML files
 - `patch_api_endpoints()` - Applies radio config API patch to target directory

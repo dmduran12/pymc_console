@@ -31,9 +31,11 @@ CLONE_DIR="$(dirname "$SCRIPT_DIR")/pyMC_Repeater"
 
 # Installation paths (where files are deployed - matches upstream)
 # INSTALL_DIR: Where pyMC_Repeater is installed (matches upstream standard)
-# CONSOLE_DIR: Where pymc_console stores its files (radio presets, etc.)
+# CONSOLE_DIR: Where pymc_console stores its files (radio presets, dashboard, etc.)
+# UI_DIR: Where our Next.js dashboard is installed (separate from upstream Vue.js)
 INSTALL_DIR="/opt/pymc_repeater"
 CONSOLE_DIR="/opt/pymc_console"
+UI_DIR="/opt/pymc_console/web/html"
 CONFIG_DIR="/etc/pymc_repeater"
 LOG_DIR="/var/log/pymc_repeater"
 SERVICE_USER="repeater"
@@ -2520,11 +2522,12 @@ UI_REPO="dmduran12/pymc_console"
 UI_RELEASE_URL="https://github.com/${UI_REPO}/releases"
 
 # Download and install dashboard from GitHub Releases
-# Replaces pyMC_Repeater's built-in Vue dashboard with our Next.js dashboard
-# Backend's CherryPy server serves static files from repeater/web/html/
+# Installs to separate directory (UI_DIR) instead of overwriting upstream Vue.js
+# Configures web.web_path in config.yaml to point to our dashboard
 install_static_frontend() {
     local version="${1:-latest}"
-    local target_dir="$INSTALL_DIR/repeater/web/html"
+    local target_dir="$UI_DIR"
+    local config_file="$CONFIG_DIR/config.yaml"
     local temp_file="/tmp/pymc-ui-$$.tar.gz"
     local download_url
     
@@ -2567,33 +2570,48 @@ install_static_frontend() {
         return 1
     fi
     
-    # Backup existing Vue dashboard if present (first time only)
+    # Remove existing dashboard if present (clean upgrade)
     if [ -d "$target_dir" ]; then
-        local backup_dir="${target_dir}.vue-backup"
-        if [ ! -d "$backup_dir" ]; then
-            mv "$target_dir" "$backup_dir"
-            print_info "Backed up original Vue dashboard"
-        else
-            rm -rf "$target_dir"
-        fi
+        rm -rf "$target_dir"
     fi
     
-    # Extract to target directory
+    # Create parent directories
+    mkdir -p "$(dirname "$target_dir")"
     mkdir -p "$target_dir"
+    
+    # Extract to target directory
     if ! tar -xzf "$temp_file" -C "$target_dir" 2>/dev/null; then
         print_error "Failed to extract dashboard archive"
         rm -f "$temp_file"
         return 1
     fi
     
-    # Clean up
+    # Clean up temp file
     rm -f "$temp_file"
     
     # Set permissions
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$target_dir" 2>/dev/null || true
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$CONSOLE_DIR" 2>/dev/null || true
+    
+    # Configure CherryPy to serve our dashboard instead of built-in Vue.js
+    # This sets web.web_path in config.yaml
+    if [ -f "$config_file" ] && command -v yq &> /dev/null; then
+        # Ensure web section exists
+        if ! yq eval '.web' "$config_file" 2>/dev/null | grep -q -v "null"; then
+            yq -i '.web = {}' "$config_file" 2>/dev/null || true
+        fi
+        # Set web_path to our dashboard location
+        yq -i ".web.web_path = \"$target_dir\"" "$config_file" 2>/dev/null || {
+            print_warning "Could not set web_path in config - manual configuration may be required"
+        }
+        print_success "Configured web_path: $target_dir"
+    else
+        print_warning "Could not configure web_path - yq not available or config missing"
+        print_info "Manually set web.web_path in $config_file to: $target_dir"
+    fi
     
     local size=$(du -sh "$target_dir" 2>/dev/null | cut -f1 || echo "unknown")
     print_success "Dashboard installed ($size)"
+    print_info "Upstream Vue.js preserved at: $INSTALL_DIR/repeater/web/html/"
     print_info "Dashboard will be served at http://<ip>:8000/"
     
     return 0
