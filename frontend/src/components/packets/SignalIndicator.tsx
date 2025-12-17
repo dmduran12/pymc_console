@@ -63,7 +63,13 @@ function SignalIndicatorComponent({ rssi, snr, compact = false, showValues = tru
 
   if (compact) {
     return (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-end gap-1.5">
+        {/* RSSI value first (left), then bars (right) */}
+        {showValues && (
+          <span className="text-[10px] font-mono text-text-secondary">
+            {rssi}
+          </span>
+        )}
         {/* Slim signal bars */}
         <div className="flex items-end gap-[2px] h-3">
           {Array.from({ length: barCount }).map((_, i) => (
@@ -77,17 +83,25 @@ function SignalIndicatorComponent({ rssi, snr, compact = false, showValues = tru
             />
           ))}
         </div>
-        {showValues && (
-          <span className={clsx('text-[10px] font-mono', getSignalColor(level))}>
-            {rssi}
-          </span>
-        )}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center justify-end gap-2">
+      {/* RSSI value first (left), then bars (right) */}
+      {showValues && (
+        <div className="flex flex-col items-end">
+          <span className="text-xs font-mono text-text-secondary leading-tight">
+            {rssi} dBm
+          </span>
+          {snr !== undefined && (
+            <span className="text-[10px] font-mono text-text-muted leading-tight">
+              {snr.toFixed(1)} dB
+            </span>
+          )}
+        </div>
+      )}
       {/* Signal bars - refined */}
       <div className="flex items-end gap-[2px] h-3.5">
         {Array.from({ length: barCount }).map((_, i) => (
@@ -101,19 +115,6 @@ function SignalIndicatorComponent({ rssi, snr, compact = false, showValues = tru
           />
         ))}
       </div>
-      
-      {showValues && (
-        <div className="flex flex-col">
-          <span className={clsx('text-xs font-mono leading-tight', getSignalColor(level))}>
-            {rssi} dBm
-          </span>
-          {snr !== undefined && (
-            <span className="text-[10px] font-mono text-text-muted leading-tight">
-              {snr.toFixed(1)} dB
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

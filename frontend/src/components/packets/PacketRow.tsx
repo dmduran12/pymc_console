@@ -67,8 +67,8 @@ function PacketTableRow({ packet, onClick, isFlashing = false }: PacketRowProps)
           <span className="text-xs text-text-muted">—</span>
         )}
       </td>
-      {/* Signal - rightmost */}
-      <td className="py-2.5 px-3">
+      {/* Signal - rightmost, right-aligned */}
+      <td className="py-2.5 px-3 pr-4 text-right">
         <SignalIndicator rssi={packet.rssi} snr={packet.snr} compact showValues />
       </td>
     </tr>
@@ -125,7 +125,9 @@ function PacketCardRow({ packet, onClick, isFlashing = false }: PacketRowProps) 
         </div>
         
         {/* Signal - rightmost (same as desktop) */}
-        <SignalIndicator rssi={packet.rssi} compact showValues />
+        <div className="flex-shrink-0">
+          <SignalIndicator rssi={packet.rssi} compact showValues />
+        </div>
       </div>
     </div>
   );
