@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -20,7 +20,7 @@ import {
   Sliders
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useStore } from '@/lib/stores/useStore';
+import { useStore, usePrefetchForRoute } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { formatUptime } from '@/lib/format';
 import { POLLING_INTERVALS } from '@/lib/constants';
@@ -40,9 +40,37 @@ const CONTROLS_EXPANDED_KEY = 'pymc-controls-expanded';
 export function Sidebar() {
   const { pathname } = useLocation();
   const { stats, fetchStats, setMode, setDutyCycle, sendAdvert } = useStore();
+  const prefetchForRoute = usePrefetchForRoute();
   const [isOpen, setIsOpen] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(true);
   const [sending, setSending] = useState(false);
+  
+  // Track hover timeout for prefetch debounce
+  const prefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // Prefetch data when hovering over nav items (with 100ms debounce)
+  const handleNavHover = useCallback((route: string) => {
+    // Don't prefetch if already on this route
+    if (route === pathname) return;
+    
+    // Clear any existing timeout
+    if (prefetchTimeoutRef.current) {
+      clearTimeout(prefetchTimeoutRef.current);
+    }
+    
+    // Debounce prefetch by 100ms to avoid unnecessary requests on quick mouse movements
+    prefetchTimeoutRef.current = setTimeout(() => {
+      prefetchForRoute(route);
+    }, 100);
+  }, [pathname, prefetchForRoute]);
+  
+  const handleNavLeave = useCallback(() => {
+    // Cancel pending prefetch on mouse leave
+    if (prefetchTimeoutRef.current) {
+      clearTimeout(prefetchTimeoutRef.current);
+      prefetchTimeoutRef.current = null;
+    }
+  }, []);
 
   // Load controls expanded state from localStorage on mount
   useEffect(() => {
@@ -107,6 +135,8 @@ export function Sidebar() {
             key={item.name}
             to={item.to}
             onClick={() => setIsOpen(false)}
+            onMouseEnter={() => handleNavHover(item.to)}
+            onMouseLeave={handleNavLeave}
             className={clsx(
               'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 min-h-[44px]',
               isActive

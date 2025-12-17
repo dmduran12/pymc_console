@@ -5,6 +5,7 @@ import { FileText, Circle, RefreshCw, Bug, Info, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import { getLogLevelColor, POLLING_INTERVALS } from '@/lib/constants';
 import { setLogLevel, type LogLevel } from '@/lib/api';
+import { LogsSkeleton } from '@/components/shared/Skeleton';
 import type { LogEntry } from '@/types/api';
 
 /** Memoized log row to prevent re-renders when other logs update */
@@ -157,9 +158,7 @@ export default function Logs() {
       <div className="glass-card p-4">
         <div className="space-y-2 max-h-[calc(100vh-250px)] overflow-y-auto font-mono text-sm">
           {logsLoading && logs.length === 0 ? (
-            <div className="text-center py-12 text-text-muted">
-              Loading logs...
-            </div>
+            <LogsSkeleton count={10} />
           ) : logs.length === 0 ? (
             <div className="text-center py-12 text-text-muted">
               No logs available

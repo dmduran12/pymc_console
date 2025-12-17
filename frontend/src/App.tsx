@@ -1,7 +1,8 @@
 import { Routes, Route } from 'react-router-dom';
-import { Component, ReactNode } from 'react';
+import { Component, ReactNode, useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { BackgroundProvider } from '@/components/layout/BackgroundProvider';
+import { useInitializeApp } from '@/lib/stores/useStore';
 
 // Pages
 import Dashboard from '@/pages/Dashboard';
@@ -48,6 +49,13 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundary
 }
 
 export default function App() {
+  const initializeApp = useInitializeApp();
+  
+  // Initialize app data on mount (parallel fetch of stats + packets)
+  useEffect(() => {
+    initializeApp();
+  }, [initializeApp]);
+  
   return (
     <>
       {/* Dynamic background - controlled by BackgroundSelector */}
