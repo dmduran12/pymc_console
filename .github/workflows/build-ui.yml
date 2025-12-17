@@ -37,6 +37,13 @@ jobs:
       - name: Build static files
         run: npm run build:static
       
+      - name: Add version file to build
+        run: |
+          # Extract version from package.json and write to version file
+          VERSION=$(node -p "require('./package.json').version")
+          echo "$VERSION" > dist/VERSION
+          echo "Created VERSION file: $VERSION"
+      
       - name: Create versioned archive
         run: |
           cd dist
