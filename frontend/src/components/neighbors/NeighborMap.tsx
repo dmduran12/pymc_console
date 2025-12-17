@@ -1,7 +1,8 @@
 
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, useMap } from 'react-leaflet';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { NeighborInfo } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
@@ -112,10 +113,38 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
       ? allPositions[0] 
       : [51.505, -0.09]; // London as fallback
   
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+
+  // Toggle fullscreen
+  const toggleFullscreen = () => {
+    if (!mapContainerRef.current) return;
+    
+    if (!isFullscreen) {
+      if (mapContainerRef.current.requestFullscreen) {
+        mapContainerRef.current.requestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
   // No locations available
   if (allPositions.length === 0) {
     return (
-      <div className="glass-card h-[400px] flex items-center justify-center">
+      <div className="glass-card h-[500px] flex items-center justify-center">
         <div className="text-center text-white/50">
           <p className="text-lg mb-2">No Location Data Available</p>
           <p className="text-sm">
@@ -127,7 +156,11 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
   }
   
   return (
-    <div className="relative rounded-[1.125rem] overflow-hidden" style={{ height: '400px' }}>
+    <div 
+      ref={mapContainerRef}
+      className="relative rounded-[1.125rem] overflow-hidden" 
+      style={{ height: isFullscreen ? '100vh' : '500px' }}
+    >
       {/* Map container with glass card styling */}
       <div className="glass-card h-full relative">
         {/* Glass overlay effect on top of map */}
@@ -167,7 +200,7 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw straight lines to neighbors */}
+        {/* Draw straight lines to neighbors - rendered FIRST so they're behind markers */}
         {localNode && localNode.latitude && localNode.longitude && neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
@@ -179,38 +212,51 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
                 [neighbor.latitude, neighbor.longitude]
               ]}
               color={LINE_COLOR}
-              weight={1.2}
-              opacity={0.55}
+              weight={1.5}
+              opacity={0.4}
             />
           );
         })}
         
-        {/* Local node marker */}
+        {/* Local node marker - larger with skeuomorphic glow */}
         {localNode && localNode.latitude && localNode.longitude && (
-          <CircleMarker
-            center={[localNode.latitude, localNode.longitude]}
-            radius={10}
-            fillColor={SIGNAL_COLORS.localNode}
-            color="transparent"
-            weight={0}
-            opacity={1}
-            fillOpacity={0.9}
-          >
-            <Popup>
-              <div className="text-gray-900 text-sm">
-                <strong className="text-base">{localNode.name}</strong>
-                <br />
-                <span className="text-cyan-600 font-medium">This Node (Local)</span>
-                <br />
-                <span className="text-xs text-gray-500">
-                  {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
-                </span>
-              </div>
-            </Popup>
-          </CircleMarker>
+          <>
+            {/* Outer glow ring */}
+            <CircleMarker
+              center={[localNode.latitude, localNode.longitude]}
+              radius={18}
+              fillColor={SIGNAL_COLORS.localNode}
+              color="transparent"
+              weight={0}
+              opacity={1}
+              fillOpacity={0.15}
+            />
+            {/* Main marker */}
+            <CircleMarker
+              center={[localNode.latitude, localNode.longitude]}
+              radius={15}
+              fillColor={SIGNAL_COLORS.localNode}
+              color="rgba(255,255,255,0.4)"
+              weight={2}
+              opacity={1}
+              fillOpacity={0.9}
+            >
+              <Popup>
+                <div className="text-gray-900 text-sm">
+                  <strong className="text-base">{localNode.name}</strong>
+                  <br />
+                  <span className="text-cyan-600 font-medium">This Node (Local)</span>
+                  <br />
+                  <span className="text-xs text-gray-500">
+                    {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
+                  </span>
+                </div>
+              </Popup>
+            </CircleMarker>
+          </>
         )}
         
-        {/* Neighbor markers - colored by signal strength */}
+        {/* Neighbor markers - larger with skeuomorphic styling */}
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
@@ -218,44 +264,76 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           
           return (
-            <CircleMarker
-              key={hash}
-              center={[neighbor.latitude, neighbor.longitude]}
-              radius={8}
-              fillColor={color}
-              color="transparent"
-              weight={0}
-              opacity={1}
-              fillOpacity={0.9}
-            >
-              <Popup>
-                <div className="text-gray-900 text-sm min-w-[150px]">
-                  <strong className="text-base">{name}</strong>
-                  <div className="mt-1">
-                    <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
+            <span key={hash}>
+              {/* Outer glow ring */}
+              <CircleMarker
+                center={[neighbor.latitude, neighbor.longitude]}
+                radius={15}
+                fillColor={color}
+                color="transparent"
+                weight={0}
+                opacity={1}
+                fillOpacity={0.15}
+              />
+              {/* Main marker */}
+              <CircleMarker
+                center={[neighbor.latitude, neighbor.longitude]}
+                radius={12}
+                fillColor={color}
+                color="rgba(255,255,255,0.3)"
+                weight={2}
+                opacity={1}
+                fillOpacity={0.9}
+              >
+                <Popup>
+                  <div className="text-gray-900 text-sm min-w-[150px]">
+                    <strong className="text-base">{name}</strong>
+                    <div className="mt-1">
+                      <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
+                    </div>
+                    <hr className="my-2 border-gray-200" />
+                    {neighbor.rssi !== undefined && (
+                      <div>RSSI: <strong>{neighbor.rssi} dBm</strong></div>
+                    )}
+                    {neighbor.snr !== undefined && (
+                      <div>SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
+                    )}
+                    {neighbor.advert_count !== undefined && (
+                      <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-1">
+                      Last seen: {formatRelativeTime(neighbor.last_seen)}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
+                    </div>
                   </div>
-                  <hr className="my-2 border-gray-200" />
-                  {neighbor.rssi !== undefined && (
-                    <div>RSSI: <strong>{neighbor.rssi} dBm</strong></div>
-                  )}
-                  {neighbor.snr !== undefined && (
-                    <div>SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
-                  )}
-                  {neighbor.advert_count !== undefined && (
-                    <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
-                  )}
-                  <div className="text-xs text-gray-500 mt-1">
-                    Last seen: {formatRelativeTime(neighbor.last_seen)}
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
-                  </div>
-                </div>
-              </Popup>
-            </CircleMarker>
+                </Popup>
+              </CircleMarker>
+            </span>
           );
         })}
         </MapContainer>
+        
+        {/* Fullscreen button - top right, matching legend style */}
+        <button
+          onClick={toggleFullscreen}
+          className="absolute top-4 right-4 z-[600] p-2 transition-colors hover:bg-white/10"
+          style={{
+            background: 'rgba(20, 20, 22, 0.85)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            borderRadius: '0.75rem',
+            border: '1px solid rgba(140, 160, 200, 0.2)',
+          }}
+          title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        >
+          {isFullscreen ? (
+            <Minimize2 className="w-4 h-4 text-text-secondary" />
+          ) : (
+            <Maximize2 className="w-4 h-4 text-text-secondary" />
+          )}
+        </button>
         
         {/* Legend - inside the map card, bottom-left corner */}
         <div 
@@ -273,27 +351,27 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           <div className="text-text-secondary font-medium mb-1.5">Signal</div>
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, boxShadow: `0 0 6px ${SIGNAL_COLORS.excellent}40` }}></div>
               <span className="text-text-muted">≥5 dB</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, boxShadow: `0 0 6px ${SIGNAL_COLORS.good}40` }}></div>
               <span className="text-text-muted">0–5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, boxShadow: `0 0 6px ${SIGNAL_COLORS.fair}40` }}></div>
               <span className="text-text-muted">-5–0</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, boxShadow: `0 0 6px ${SIGNAL_COLORS.poor}40` }}></div>
               <span className="text-text-muted">-10–-5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, boxShadow: `0 0 6px ${SIGNAL_COLORS.critical}40` }}></div>
               <span className="text-text-muted">&lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, boxShadow: `0 0 6px ${SIGNAL_COLORS.localNode}40` }}></div>
               <span className="text-text-muted">Local</span>
             </div>
           </div>
