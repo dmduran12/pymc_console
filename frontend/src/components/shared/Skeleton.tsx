@@ -66,6 +66,9 @@ export function StatsCardSkeleton() {
   );
 }
 
+// Pre-computed heights for chart skeleton bars (stable across renders)
+const CHART_BAR_HEIGHTS = [45, 72, 33, 58, 80, 42, 65, 28, 55, 75, 38, 62];
+
 /** Skeleton for chart area */
 export function ChartSkeleton({ height = 'h-64' }: { height?: string }) {
   return (
@@ -78,11 +81,11 @@ export function ChartSkeleton({ height = 'h-64' }: { height?: string }) {
         </div>
         {/* Chart area */}
         <div className="flex-1 flex items-end gap-1 pb-4">
-          {Array.from({ length: 12 }).map((_, i) => (
+          {CHART_BAR_HEIGHTS.map((h, i) => (
             <Skeleton
               key={i}
               className="flex-1"
-              style={{ height: `${20 + Math.random() * 60}%` }}
+              style={{ height: `${h}%` }}
             />
           ))}
         </div>

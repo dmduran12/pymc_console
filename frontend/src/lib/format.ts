@@ -39,6 +39,20 @@ export function formatRelativeTime(timestamp: number): string {
 }
 
 /**
+ * Format timestamp to compact time ago (e.g., "2m", "1h", "3d")
+ * More compact than formatRelativeTime - no "ago" suffix
+ */
+export function formatTimeAgo(timestamp: number): string {
+  const now = Date.now() / 1000;
+  const diff = now - timestamp;
+
+  if (diff < 60) return `${Math.floor(diff)}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
+}
+
+/**
  * Format timestamp to locale string
  */
 export function formatTimestamp(timestamp: number): string {
