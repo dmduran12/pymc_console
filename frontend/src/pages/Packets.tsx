@@ -301,39 +301,19 @@ export default function Packets() {
       {/* Stats Summary */}
       <PacketStats packets={filteredPackets} />
 
-      {/* Mobile: Card list */}
-      <div className="sm:hidden space-y-2">
-        {loading && packets.length === 0 ? (
-          <div className="glass-card p-8 text-center text-text-muted">
-            Loading packets...
-          </div>
-        ) : filteredPackets.length === 0 ? (
-          <div className="glass-card p-8 text-center text-text-muted">
-            No packets found
-          </div>
-        ) : (
-          filteredPackets.map((packet, index) => {
-            const packetId = String(packet.id ?? packet.packet_hash ?? index);
-            const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
-            const isAdvert = typeName.toLowerCase().includes('advert');
-            return (
-              <PacketCard
-                key={packetId}
-                packet={packet}
-                onClick={setSelectedPacket}
-                isFlashing={isAdvert && flashingAdvertId === packetId}
-              />
-            );
-          })
-        )}
-        <div className="text-center text-xs text-text-muted py-2">
-          Showing {filteredPackets.length} of {packets.length} packets
+      {/* Packet List - Single glass-card with responsive layout */}
+      <div className="glass-card overflow-hidden">
+        {/* Mobile header */}
+        <div className="sm:hidden flex items-center gap-2 px-3 py-2 border-b border-border-subtle bg-bg-elevated/30">
+          <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider w-14">Dir</span>
+          <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider w-8">Time</span>
+          <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider w-10">Src</span>
+          <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex-1">Type</span>
+          <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider text-right">Signal</span>
         </div>
-      </div>
-
-      {/* Desktop: Table */}
-      <div className="hidden sm:block glass-card overflow-hidden">
-        <div className="overflow-x-auto">
+        
+        {/* Desktop header */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border-subtle bg-bg-elevated/30">
@@ -342,7 +322,7 @@ export default function Packets() {
                 <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Type</th>
                 <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Route</th>
                 <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Source</th>
-                <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Signal</th>
+                <th className="text-right py-2.5 px-3 pr-4 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Signal</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-subtle/30">
@@ -376,7 +356,36 @@ export default function Packets() {
             </tbody>
           </table>
         </div>
-        <div className="px-3 py-2.5 border-t border-border-subtle text-xs text-text-muted bg-bg-elevated/20">
+        
+        {/* Mobile list */}
+        <div className="sm:hidden divide-y divide-border-subtle/30">
+          {loading && packets.length === 0 ? (
+            <div className="p-8 text-center text-text-muted">
+              Loading packets...
+            </div>
+          ) : filteredPackets.length === 0 ? (
+            <div className="p-8 text-center text-text-muted">
+              No packets found
+            </div>
+          ) : (
+            filteredPackets.map((packet, index) => {
+              const packetId = String(packet.id ?? packet.packet_hash ?? index);
+              const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
+              const isAdvert = typeName.toLowerCase().includes('advert');
+              return (
+                <PacketCard
+                  key={packetId}
+                  packet={packet}
+                  onClick={setSelectedPacket}
+                  isFlashing={isAdvert && flashingAdvertId === packetId}
+                />
+              );
+            })
+          )}
+        </div>
+        
+        {/* Footer */}
+        <div className="px-3 py-2 border-t border-border-subtle text-xs text-text-muted bg-bg-elevated/20 sm:text-left text-center">
           Showing {filteredPackets.length} of {packets.length} packets
         </div>
       </div>
