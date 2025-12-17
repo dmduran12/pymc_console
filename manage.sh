@@ -514,6 +514,16 @@ print_completion() {
     echo -e "${GREEN}${BOLD}Installation Complete!${NC} ${CHECK}"
     echo ""
     
+    # Version summary
+    echo -e "${BOLD}Installed Versions:${NC}"
+    local repeater_ver=$(get_repeater_version)
+    local core_ver=$(get_core_version)
+    local console_ver=$(get_console_version)
+    echo -e "  ${DIM}pyMC Repeater:${NC} ${CYAN}v${repeater_ver}${NC}"
+    echo -e "  ${DIM}pyMC Core:${NC}     ${CYAN}v${core_ver}${NC}"
+    echo -e "  ${DIM}pyMC Console:${NC}  ${CYAN}${console_ver}${NC}"
+    echo ""
+    
     # Disk usage report
     echo -e "${BOLD}Disk Usage:${NC}"
     local install_size=$(du -sh "$REPEATER_DIR" 2>/dev/null | cut -f1 || echo "N/A")
@@ -613,9 +623,54 @@ backend_running() {
     systemctl is-active "$BACKEND_SERVICE" >/dev/null 2>&1
 }
 
+# Get pyMC Repeater version from installed pyproject.toml
 get_version() {
     if [ -f "$REPEATER_DIR/pyproject.toml" ]; then
         grep "^version" "$REPEATER_DIR/pyproject.toml" | cut -d'"' -f2 2>/dev/null || echo "unknown"
+    else
+        echo "not installed"
+    fi
+}
+
+# Get pyMC Repeater version (alias for clarity)
+get_repeater_version() {
+    get_version
+}
+
+# Get pymc_core version from installed pip package
+get_core_version() {
+    # Try to get version from pip
+    local version
+    version=$(pip3 show pymc_core 2>/dev/null | grep "^Version:" | awk '{print $2}')
+    if [ -n "$version" ]; then
+        echo "$version"
+    else
+        echo "unknown"
+    fi
+}
+
+# Get pyMC Console (UI) version from installed VERSION file or GitHub API
+get_console_version() {
+    local ui_dir="$UI_DIR"
+    
+    if [ -d "$ui_dir" ]; then
+        # First, try to read VERSION file (created during build)
+        if [ -f "$ui_dir/VERSION" ]; then
+            local ver=$(cat "$ui_dir/VERSION" 2>/dev/null | tr -d '[:space:]')
+            if [ -n "$ver" ]; then
+                echo "v$ver"
+                return 0
+            fi
+        fi
+        
+        # Fallback: check GitHub API for latest release
+        local latest_tag
+        latest_tag=$(curl -s --max-time 3 "https://api.github.com/repos/${UI_REPO}/releases/latest" 2>/dev/null | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
+        if [ -n "$latest_tag" ]; then
+            echo "$latest_tag"
+        else
+            echo "installed"
+        fi
     else
         echo "not installed"
     fi
@@ -1014,8 +1069,10 @@ do_upgrade() {
         print_warning "Service may need configuration"
     fi
     
-    # Show completion
-    local new_version=$(get_version)
+    # Show completion with version details
+    local new_repeater_ver=$(get_repeater_version)
+    local new_core_ver=$(get_core_version)
+    local new_console_ver=$(get_console_version)
     local ip_address=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
     
     echo ""
@@ -1023,7 +1080,11 @@ do_upgrade() {
     echo -e "${BOLD}${GREEN}  Upgrade Complete!${NC}"
     echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  ${CHECK} Version: ${DIM}$current_version${NC} → ${BOLD}$new_version${NC}"
+    echo -e "  ${BOLD}Versions:${NC}"
+    echo -e "  ${CHECK} pyMC Repeater: ${DIM}$current_version${NC} → ${CYAN}v${new_repeater_ver}${NC}"
+    echo -e "  ${CHECK} pyMC Core:     ${CYAN}v${new_core_ver}${NC}"
+    echo -e "  ${CHECK} pyMC Console:  ${CYAN}${new_console_ver}${NC}"
+    echo ""
     echo -e "  ${CHECK} Branch: ${BOLD}$branch${NC}"
     echo -e "  ${CHECK} Configuration preserved"
     echo -e "  ${CHECK} Dashboard: ${CYAN}http://$ip_address:8000${NC}"
