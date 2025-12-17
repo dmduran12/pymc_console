@@ -911,7 +911,10 @@ do_upgrade() {
         return 1
     fi
     
-    local current_version=$(get_version)
+    # Capture current versions BEFORE upgrade
+    local current_repeater_ver=$(get_repeater_version)
+    local current_core_ver=$(get_core_version)
+    local current_console_ver=$(get_console_version)
     
     # Get current branch from clone directory or default to dev
     local current_branch="dev"
@@ -920,10 +923,54 @@ do_upgrade() {
         current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "dev")
     fi
     
-    # Branch selection
-    local branch="${1:-}"
-    if [ -z "$branch" ]; then
-        branch=$($DIALOG --backtitle "pyMC Console Management" --title "Select Branch" --menu "\nCurrent branch: $current_branch\n\nSelect the branch to upgrade to:" 16 60 4 \
+    # Show current versions and upgrade type selection
+    local upgrade_type
+    upgrade_type=$($DIALOG --backtitle "pyMC Console Management" --title "Upgrade Options" --menu "
+ Current Installed Versions:
+ ─────────────────────────────────────
+   pyMC Repeater:  v${current_repeater_ver}
+   pyMC Core:      v${current_core_ver}
+   pyMC Console:   ${current_console_ver}
+ ─────────────────────────────────────
+
+ Select upgrade type:" 20 65 3 \
+        "full" "Full Upgrade (Repeater + Core + Console)" \
+        "console" "Console Only (Dashboard UI only)" \
+        "cancel" "Cancel" 3>&1 1>&2 2>&3)
+    
+    if [ -z "$upgrade_type" ] || [ "$upgrade_type" = "cancel" ]; then
+        return 0
+    fi
+    
+    local branch="$current_branch"
+    local skip_backend=false
+    
+    if [ "$upgrade_type" = "console" ]; then
+        # Console-only upgrade
+        skip_backend=true
+        
+        if ! ask_yes_no "Confirm Console Upgrade" "
+This will ONLY update the pyMC Console dashboard.
+
+pyMC Repeater and pyMC Core will NOT be modified.
+
+Current Console: ${current_console_ver}
+New Console:     Latest from GitHub
+
+Continue?"; then
+            return 0
+        fi
+    else
+        # Full upgrade - select branch
+        branch=$($DIALOG --backtitle "pyMC Console Management" --title "Select Branch" --menu "
+ Full upgrade will update:
+   • pyMC Repeater (backend)
+   • pyMC Core (mesh library)
+   • pyMC Console (dashboard)
+
+ Current branch: $current_branch
+
+ Select the branch for pyMC Repeater:" 18 60 4 \
             "dev" "Development branch (recommended)" \
             "main" "Stable release" \
             "keep" "Keep current branch ($current_branch)" \
@@ -941,24 +988,49 @@ do_upgrade() {
                 return 0
             fi
         fi
-    fi
-    
-    if ! ask_yes_no "Confirm Upgrade" "Current version: $current_version\nTarget branch: $branch\n\nThis will:\n- Update pyMC_Repeater to $branch\n- Update frontend dashboard\n- Preserve your configuration\n\nContinue?"; then
-        return 0
+        
+        if ! ask_yes_no "Confirm Full Upgrade" "
+This will update ALL components:
+
+  pyMC Repeater: v${current_repeater_ver} → $branch branch
+  pyMC Core:     v${current_core_ver} → (via pip)
+  pyMC Console:  ${current_console_ver} → Latest
+
+Your configuration will be preserved.
+
+Continue?"; then
+            return 0
+        fi
     fi
     
     # Print banner
     print_banner
-    echo -e "  ${DIM}Upgrading to branch: $branch${NC}"
-    echo -e "  ${DIM}Current version: $current_version${NC}"
-    echo -e "  ${DIM}Clone: $CLONE_DIR${NC}"
+    if [ "$skip_backend" = true ]; then
+        echo -e "  ${DIM}Upgrade type: Console Only${NC}"
+    else
+        echo -e "  ${DIM}Upgrade type: Full (Repeater + Core + Console)${NC}"
+        echo -e "  ${DIM}Target branch: $branch${NC}"
+    fi
+    echo ""
+    echo -e "  ${BOLD}Current Versions:${NC}"
+    echo -e "  ${DIM}pyMC Repeater:${NC} v${current_repeater_ver}"
+    echo -e "  ${DIM}pyMC Core:${NC}     v${current_core_ver}"
+    echo -e "  ${DIM}pyMC Console:${NC}  ${current_console_ver}"
     
-    local total_steps=5
+    local total_steps
+    if [ "$skip_backend" = true ]; then
+        total_steps=3
+    else
+        total_steps=5
+    fi
+    
+    local step_num=0
     
     # =========================================================================
-    # Step 1: Backup configuration
+    # Step 1: Backup configuration (both paths)
     # =========================================================================
-    print_step 1 $total_steps "Backing up configuration"
+    ((step_num++)) || true
+    print_step $step_num $total_steps "Backing up configuration"
     local backup_file="$CONFIG_DIR/config.yaml.backup.$(date +%Y%m%d_%H%M%S)"
     if [ -f "$CONFIG_DIR/config.yaml" ]; then
         cp "$CONFIG_DIR/config.yaml" "$backup_file"
@@ -968,9 +1040,55 @@ do_upgrade() {
     fi
     
     # =========================================================================
-    # Step 2: Update pyMC_Repeater clone
+    # CONSOLE-ONLY PATH: Skip backend, just update dashboard
     # =========================================================================
-    print_step 2 $total_steps "Updating pyMC_Repeater@$branch"
+    if [ "$skip_backend" = true ]; then
+        # Step 2: Update dashboard only
+        ((step_num++)) || true
+        print_step $step_num $total_steps "Updating pyMC Console dashboard"
+        install_static_frontend || {
+            print_error "Dashboard update failed"
+            return 1
+        }
+        
+        # Step 3: Restart service
+        ((step_num++)) || true
+        print_step $step_num $total_steps "Restarting service"
+        systemctl restart "$BACKEND_SERVICE" 2>/dev/null || true
+        sleep 2
+        if backend_running; then
+            print_success "Service running"
+        else
+            print_warning "Service may need configuration"
+        fi
+        
+        # Show completion (console only)
+        local new_console_ver=$(get_console_version)
+        local ip_address=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+        
+        echo ""
+        echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
+        echo -e "${BOLD}${GREEN}  Console Upgrade Complete!${NC}"
+        echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "  ${BOLD}Versions:${NC}"
+        echo -e "  ${DIM}pyMC Repeater:${NC} v${current_repeater_ver} ${DIM}(unchanged)${NC}"
+        echo -e "  ${DIM}pyMC Core:${NC}     v${current_core_ver} ${DIM}(unchanged)${NC}"
+        echo -e "  ${CHECK} pyMC Console:  ${DIM}${current_console_ver}${NC} → ${CYAN}${new_console_ver}${NC}"
+        echo ""
+        echo -e "  ${CHECK} Configuration preserved"
+        echo -e "  ${CHECK} Dashboard: ${CYAN}http://$ip_address:8000${NC}"
+        echo ""
+        return 0
+    fi
+    
+    # =========================================================================
+    # FULL UPGRADE PATH: Update Repeater, Core, and Console
+    # =========================================================================
+    
+    # Step 2: Update pyMC_Repeater clone
+    ((step_num++)) || true
+    print_step $step_num $total_steps "Updating pyMC_Repeater@$branch"
     
     # Mark directories as safe for git (running as root on user-owned dir)
     git config --global --add safe.directory "$CLONE_DIR" 2>/dev/null || true
@@ -1017,10 +1135,9 @@ do_upgrade() {
     echo -e "        Message: ${DIM}${git_msg}...${NC}"
     echo ""
     
-    # =========================================================================
-    # Step 3: Run upstream upgrade (via UPSTREAM INSTALLATION MANAGER)
-    # =========================================================================
-    print_step 3 $total_steps "Running pyMC_Repeater upgrade"
+    # Step 3: Run upstream upgrade (Repeater + Core via pip)
+    ((step_num++)) || true
+    print_step $step_num $total_steps "Running pyMC_Repeater upgrade (includes pyMC Core)"
     
     # This runs upstream's manage.sh upgrade with our fake dialog to bypass TUI
     # Upstream handles: stopping service, updating files, pip install, config merge, starting service
@@ -1029,10 +1146,9 @@ do_upgrade() {
         return 1
     }
     
-    # =========================================================================
     # Step 4: Apply patches and update dashboard
-    # =========================================================================
-    print_step 4 $total_steps "Applying pyMC Console patches & dashboard"
+    ((step_num++)) || true
+    print_step $step_num $total_steps "Applying pyMC Console patches & dashboard"
     
     # Apply patches to /opt/pymc_repeater (the installed location)
     print_info "Patching installed files..."
@@ -1055,10 +1171,9 @@ do_upgrade() {
         print_warning "Dashboard update failed - service will continue with existing UI"
     }
     
-    # =========================================================================
     # Step 5: Restart service with patches
-    # =========================================================================
-    print_step 5 $total_steps "Restarting service"
+    ((step_num++)) || true
+    print_step $step_num $total_steps "Restarting service"
     
     systemctl restart "$BACKEND_SERVICE" 2>/dev/null || true
     sleep 2
@@ -1069,7 +1184,7 @@ do_upgrade() {
         print_warning "Service may need configuration"
     fi
     
-    # Show completion with version details
+    # Show completion with version details (all components)
     local new_repeater_ver=$(get_repeater_version)
     local new_core_ver=$(get_core_version)
     local new_console_ver=$(get_console_version)
@@ -1077,13 +1192,13 @@ do_upgrade() {
     
     echo ""
     echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}${GREEN}  Upgrade Complete!${NC}"
+    echo -e "${BOLD}${GREEN}  Full Upgrade Complete!${NC}"
     echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "  ${BOLD}Versions:${NC}"
-    echo -e "  ${CHECK} pyMC Repeater: ${DIM}$current_version${NC} → ${CYAN}v${new_repeater_ver}${NC}"
-    echo -e "  ${CHECK} pyMC Core:     ${CYAN}v${new_core_ver}${NC}"
-    echo -e "  ${CHECK} pyMC Console:  ${CYAN}${new_console_ver}${NC}"
+    echo -e "  ${CHECK} pyMC Repeater: ${DIM}v${current_repeater_ver}${NC} → ${CYAN}v${new_repeater_ver}${NC}"
+    echo -e "  ${CHECK} pyMC Core:     ${DIM}v${current_core_ver}${NC} → ${CYAN}v${new_core_ver}${NC}"
+    echo -e "  ${CHECK} pyMC Console:  ${DIM}${current_console_ver}${NC} → ${CYAN}${new_console_ver}${NC}"
     echo ""
     echo -e "  ${CHECK} Branch: ${BOLD}$branch${NC}"
     echo -e "  ${CHECK} Configuration preserved"
