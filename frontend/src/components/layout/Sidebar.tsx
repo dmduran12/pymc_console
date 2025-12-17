@@ -5,7 +5,6 @@ import {
   Radio, 
   Settings, 
   FileText,
-  Wifi,
   Users,
   BarChart3,
   Cpu,
@@ -19,6 +18,8 @@ import {
   ChevronDown,
   Sliders
 } from 'lucide-react';
+import { version } from '../../../package.json';
+import wifiIcon from '@/assets/WCM_Waves.gif';
 import clsx from 'clsx';
 import { useStore, usePrefetchForRoute } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
@@ -316,10 +317,13 @@ export function Sidebar() {
       <header className="lg:hidden fixed top-0 inset-x-0 z-50 h-14 bg-bg-body/70 backdrop-blur-xl border-b border-white/10">
         <div className="flex items-center justify-between h-full px-4">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-accent-primary/20 flex items-center justify-center">
-              <Wifi className="w-4.5 h-4.5 text-accent-primary" />
+            <div className="w-8 h-8 rounded-lg bg-accent-primary/20 flex items-center justify-center overflow-hidden">
+              <img src={wifiIcon} alt="" className="w-5 h-5 object-contain" />
             </div>
-            <span className="type-body-sm font-semibold text-text-primary">pyMC Repeater</span>
+            <div>
+              <span className="type-body-sm font-semibold text-text-primary">pyMC Console</span>
+              <p className="type-data-xs text-text-muted">v{version}</p>
+            </div>
           </div>
           <button
             onClick={() => setIsOpen(!isOpen)}
@@ -361,12 +365,12 @@ export function Sidebar() {
       >
         {/* Drawer header */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-white/5">
-          <div className="w-10 h-10 rounded-xl bg-accent-primary/20 flex items-center justify-center">
-            <Wifi className="w-5 h-5 text-accent-primary" />
+          <div className="w-10 h-10 rounded-xl bg-accent-primary/20 flex items-center justify-center overflow-hidden">
+            <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="type-body-sm font-semibold text-text-primary">pyMC Repeater</h1>
-            <p className="type-data-xs text-text-muted">LoRa Mesh Dashboard</p>
+            <h1 className="type-body-sm font-semibold text-text-primary">pyMC Console</h1>
+            <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
         </div>
 
@@ -382,12 +386,12 @@ export function Sidebar() {
       <aside className="hidden lg:flex flex-col w-64 flex-shrink-0 h-screen sticky top-0 bg-bg-surface/70 backdrop-blur-2xl border-r border-white/10">
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-6 border-b border-white/5">
-          <div className="w-10 h-10 rounded-xl bg-accent-primary/15 flex items-center justify-center">
-            <Wifi className="w-5 h-5 text-accent-primary" />
+          <div className="w-10 h-10 rounded-xl bg-accent-primary/15 flex items-center justify-center overflow-hidden">
+            <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="type-body font-semibold text-text-primary">pyMC Repeater</h1>
-            <p className="type-data-xs text-text-muted">LoRa Mesh Dashboard</p>
+            <h1 className="type-body font-semibold text-text-primary">pyMC Console</h1>
+            <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
         </div>
 
