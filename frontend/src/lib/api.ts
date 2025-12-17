@@ -363,11 +363,16 @@ export async function getBucketedStats(minutes = 20, bucketCount = 20): Promise<
     const startTime = endTime - (minutes * 60);
     const bucketDuration = (minutes * 60) / bucketCount;
     
+    // Scale limit based on time range to avoid capping data for longer periods
+    // Rough estimate: ~500 packets/hour at busy times, with 2x buffer
+    const estimatedPackets = Math.ceil((minutes / 60) * 1000);
+    const limit = Math.max(5000, Math.min(estimatedPackets, 50000));
+    
     // Fetch packets for the time range
     const response = await getFilteredPackets({
       start_timestamp: startTime,
       end_timestamp: endTime,
-      limit: 5000,
+      limit,
     });
     
     if (!response.success || !response.data) {

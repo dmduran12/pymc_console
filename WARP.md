@@ -12,6 +12,13 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 - **manage.sh Installer** - TUI that installs upstream pyMC_Repeater + our dashboard overlay
 - **True SPA** - Single index.html served by CherryPy; React Router handles all client-side routing
 
+## Git Workflow Rules
+
+**IMPORTANT for Warp:**
+- **NEVER commit or push changes unless explicitly asked by the user**
+- Make code changes and let the user review before committing
+- When asked to commit, include `Co-Authored-By: Warp <agent@warp.dev>` in commit messages
+
 ## Tech Stack
 
 - **Frontend**: Vite 6, React 18, React Router 6, TypeScript, Tailwind CSS 4
