@@ -41,7 +41,6 @@ function StatItem({ icon, label, value, color, percentage }: StatItemProps) {
  */
 function PacketStatsComponent({ packets }: PacketStatsProps) {
   const stats = useMemo(() => {
-    let rx = 0;
     let fwd = 0;
     let dropped = 0;
     let duplicate = 0;
@@ -52,10 +51,9 @@ function PacketStatsComponent({ packets }: PacketStatsProps) {
     for (const pkt of packets) {
       const direction = getPacketDirection(pkt);
       
+      // Count forwarded, dropped, duplicate separately
+      // "Received" is total packets (everything was received)
       switch (direction) {
-        case 'rx':
-          rx++;
-          break;
         case 'forward':
           fwd++;
           break;
@@ -79,6 +77,9 @@ function PacketStatsComponent({ packets }: PacketStatsProps) {
 
     const total = packets.length;
     const avgRssi = rssiCount > 0 ? Math.round(totalRssi / rssiCount) : 0;
+    
+    // Received = all packets (everything is received before being processed)
+    const rx = total;
 
     return {
       total,
@@ -88,7 +89,7 @@ function PacketStatsComponent({ packets }: PacketStatsProps) {
       duplicate,
       uniqueSources: sources.size,
       avgRssi,
-      rxPercent: total > 0 ? Math.round((rx / total) * 100) : 0,
+      rxPercent: 100, // All packets are received
       fwdPercent: total > 0 ? Math.round((fwd / total) * 100) : 0,
       droppedPercent: total > 0 ? Math.round((dropped / total) * 100) : 0,
     };
