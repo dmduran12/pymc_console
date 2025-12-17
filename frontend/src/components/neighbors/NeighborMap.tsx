@@ -218,28 +218,28 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           );
         })}
         
-        {/* Local node marker - larger with skeuomorphic glow */}
+        {/* Local node marker - matte plastic style */}
         {localNode && localNode.latitude && localNode.longitude && (
           <>
-            {/* Outer glow ring */}
+            {/* Dark outline/shadow ring for depth */}
             <CircleMarker
               center={[localNode.latitude, localNode.longitude]}
-              radius={18}
-              fillColor={SIGNAL_COLORS.localNode}
+              radius={14}
+              fillColor="#0D0E12"
               color="transparent"
               weight={0}
               opacity={1}
-              fillOpacity={0.15}
+              fillOpacity={0.6}
             />
-            {/* Main marker */}
+            {/* Main marker - solid matte fill */}
             <CircleMarker
               center={[localNode.latitude, localNode.longitude]}
-              radius={15}
+              radius={12}
               fillColor={SIGNAL_COLORS.localNode}
-              color="rgba(255,255,255,0.4)"
-              weight={2}
+              color="#0D0E12"
+              weight={1.5}
               opacity={1}
-              fillOpacity={0.9}
+              fillOpacity={1}
             >
               <Popup>
                 <div className="text-gray-900 text-sm">
@@ -256,7 +256,7 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           </>
         )}
         
-        {/* Neighbor markers - larger with skeuomorphic styling */}
+        {/* Neighbor markers - matte plastic style */}
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
@@ -265,25 +265,25 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           
           return (
             <span key={hash}>
-              {/* Outer glow ring */}
+              {/* Dark outline/shadow ring for depth */}
               <CircleMarker
                 center={[neighbor.latitude, neighbor.longitude]}
-                radius={15}
-                fillColor={color}
+                radius={11}
+                fillColor="#0D0E12"
                 color="transparent"
                 weight={0}
                 opacity={1}
-                fillOpacity={0.15}
+                fillOpacity={0.6}
               />
-              {/* Main marker */}
+              {/* Main marker - solid matte fill */}
               <CircleMarker
                 center={[neighbor.latitude, neighbor.longitude]}
-                radius={12}
+                radius={9}
                 fillColor={color}
-                color="rgba(255,255,255,0.3)"
-                weight={2}
+                color="#0D0E12"
+                weight={1.5}
                 opacity={1}
-                fillOpacity={0.9}
+                fillOpacity={1}
               >
                 <Popup>
                   <div className="text-gray-900 text-sm min-w-[150px]">
@@ -351,27 +351,27 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           <div className="text-text-secondary font-medium mb-1.5">Signal</div>
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, boxShadow: `0 0 6px ${SIGNAL_COLORS.excellent}40` }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '1px solid #0D0E12' }}></div>
               <span className="text-text-muted">≥5 dB</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, boxShadow: `0 0 6px ${SIGNAL_COLORS.good}40` }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '1px solid #0D0E12' }}></div>
               <span className="text-text-muted">0–5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, boxShadow: `0 0 6px ${SIGNAL_COLORS.fair}40` }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '1px solid #0D0E12' }}></div>
               <span className="text-text-muted">-5–0</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, boxShadow: `0 0 6px ${SIGNAL_COLORS.poor}40` }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '1px solid #0D0E12' }}></div>
               <span className="text-text-muted">-10–-5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, boxShadow: `0 0 6px ${SIGNAL_COLORS.critical}40` }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '1px solid #0D0E12' }}></div>
               <span className="text-text-muted">&lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, boxShadow: `0 0 6px ${SIGNAL_COLORS.localNode}40` }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '1px solid #0D0E12' }}></div>
               <span className="text-text-muted">Local</span>
             </div>
           </div>
