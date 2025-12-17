@@ -15,7 +15,7 @@ interface HashBadgeProps {
   /** Additional CSS classes */
   className?: string;
   /** Size variant */
-  size?: 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md';
 }
 
 // Cross-platform clipboard copy with fallback
@@ -106,9 +106,11 @@ export function HashBadge({
     ? hash
     : `${hash.slice(0, prefixLength)}…${hash.slice(-suffixLength)}`;
 
-  const sizeClasses = size === 'sm' 
-    ? 'text-[10px] px-1.5 py-0.5 gap-1'
-    : 'text-xs px-2 py-1 gap-1.5';
+  const sizeClasses = {
+    xs: 'text-[9px] px-1 py-0.5 gap-0.5',
+    sm: 'text-[10px] px-1.5 py-0.5 gap-1',
+    md: 'text-xs px-2 py-1 gap-1.5',
+  }[size];
 
   return (
     <button
@@ -135,18 +137,18 @@ export function HashBadge({
       
       <span className={clsx(
         'flex items-center justify-center transition-all duration-200',
-        size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5'
+        size === 'xs' ? 'w-2.5 h-2.5' : size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5'
       )}>
         {copied ? (
           <Check className={clsx(
             'text-accent-success',
-            size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'
+            size === 'xs' ? 'w-2 h-2' : size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'
           )} />
         ) : (
           <Copy className={clsx(
             'transition-opacity duration-200',
             isHovered ? 'opacity-70' : 'opacity-40',
-            size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'
+            size === 'xs' ? 'w-2 h-2' : size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'
           )} />
         )}
       </span>
