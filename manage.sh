@@ -914,10 +914,18 @@ do_upgrade() {
     # Self-update: pull latest pymc_console repo first
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -d "$script_dir/.git" ]; then
+        echo ""
         print_info "Updating pymc_console repository..."
         git config --global --add safe.directory "$script_dir" 2>/dev/null || true
         cd "$script_dir"
-        git pull --ff-only 2>/dev/null && print_success "pymc_console updated" || print_warning "Could not update pymc_console (continuing with current version)"
+        # Show git pull output so user can see what's happening
+        if git pull --ff-only; then
+            print_success "pymc_console updated"
+        else
+            print_warning "Could not auto-update pymc_console (continuing with current version)"
+            print_info "You may need to manually run: cd $script_dir && sudo git pull"
+        fi
+        echo ""
     fi
     
     # Capture current versions BEFORE upgrade
