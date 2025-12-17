@@ -1,11 +1,30 @@
 
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { NeighborInfo } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
+
+// Create a matte dot icon with CSS shadows
+function createDotIcon(color: string, size: number): L.DivIcon {
+  return L.divIcon({
+    className: 'map-dot-marker',
+    html: `<div style="
+      width: ${size}px;
+      height: ${size}px;
+      background-color: ${color};
+      border-radius: 50%;
+      border: 0.75px solid rgba(13, 14, 18, 0.6);
+      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.05), inset 0 -2px 3px rgba(0, 0, 0, 0.03);
+    "></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+}
 
 interface LocalNode {
   latitude: number;
@@ -218,45 +237,27 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           );
         })}
         
-        {/* Local node marker - matte plastic style */}
+        {/* Local node marker - matte plastic style with CSS shadows */}
         {localNode && localNode.latitude && localNode.longitude && (
-          <>
-            {/* Dark outline/shadow ring for depth */}
-            <CircleMarker
-              center={[localNode.latitude, localNode.longitude]}
-              radius={14}
-              fillColor="#0D0E12"
-              color="transparent"
-              weight={0}
-              opacity={1}
-              fillOpacity={0.6}
-            />
-            {/* Main marker - solid matte fill */}
-            <CircleMarker
-              center={[localNode.latitude, localNode.longitude]}
-              radius={12}
-              fillColor={SIGNAL_COLORS.localNode}
-              color="#0D0E12"
-              weight={1.5}
-              opacity={1}
-              fillOpacity={1}
-            >
-              <Popup>
-                <div className="text-gray-900 text-sm">
-                  <strong className="text-base">{localNode.name}</strong>
-                  <br />
-                  <span className="text-cyan-600 font-medium">This Node (Local)</span>
-                  <br />
-                  <span className="text-xs text-gray-500">
-                    {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
-                  </span>
-                </div>
-              </Popup>
-            </CircleMarker>
-          </>
+          <Marker
+            position={[localNode.latitude, localNode.longitude]}
+            icon={createDotIcon(SIGNAL_COLORS.localNode, 24)}
+          >
+            <Popup>
+              <div className="text-gray-900 text-sm">
+                <strong className="text-base">{localNode.name}</strong>
+                <br />
+                <span className="text-cyan-600 font-medium">This Node (Local)</span>
+                <br />
+                <span className="text-xs text-gray-500">
+                  {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
+                </span>
+              </div>
+            </Popup>
+          </Marker>
         )}
         
-        {/* Neighbor markers - matte plastic style */}
+        {/* Neighbor markers - matte plastic style with CSS shadows */}
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
@@ -264,53 +265,36 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           
           return (
-            <span key={hash}>
-              {/* Dark outline/shadow ring for depth */}
-              <CircleMarker
-                center={[neighbor.latitude, neighbor.longitude]}
-                radius={11}
-                fillColor="#0D0E12"
-                color="transparent"
-                weight={0}
-                opacity={1}
-                fillOpacity={0.6}
-              />
-              {/* Main marker - solid matte fill */}
-              <CircleMarker
-                center={[neighbor.latitude, neighbor.longitude]}
-                radius={9}
-                fillColor={color}
-                color="#0D0E12"
-                weight={1.5}
-                opacity={1}
-                fillOpacity={1}
-              >
-                <Popup>
-                  <div className="text-gray-900 text-sm min-w-[150px]">
-                    <strong className="text-base">{name}</strong>
-                    <div className="mt-1">
-                      <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
-                    </div>
-                    <hr className="my-2 border-gray-200" />
-                    {neighbor.rssi !== undefined && (
-                      <div>RSSI: <strong>{neighbor.rssi} dBm</strong></div>
-                    )}
-                    {neighbor.snr !== undefined && (
-                      <div>SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
-                    )}
-                    {neighbor.advert_count !== undefined && (
-                      <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
-                    )}
-                    <div className="text-xs text-gray-500 mt-1">
-                      Last seen: {formatRelativeTime(neighbor.last_seen)}
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
-                    </div>
+            <Marker
+              key={hash}
+              position={[neighbor.latitude, neighbor.longitude]}
+              icon={createDotIcon(color, 18)}
+            >
+              <Popup>
+                <div className="text-gray-900 text-sm min-w-[150px]">
+                  <strong className="text-base">{name}</strong>
+                  <div className="mt-1">
+                    <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
                   </div>
-                </Popup>
-              </CircleMarker>
-            </span>
+                  <hr className="my-2 border-gray-200" />
+                  {neighbor.rssi !== undefined && (
+                    <div>RSSI: <strong>{neighbor.rssi} dBm</strong></div>
+                  )}
+                  {neighbor.snr !== undefined && (
+                    <div>SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
+                  )}
+                  {neighbor.advert_count !== undefined && (
+                    <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
+                  )}
+                  <div className="text-xs text-gray-500 mt-1">
+                    Last seen: {formatRelativeTime(neighbor.last_seen)}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
           );
         })}
         </MapContainer>
@@ -351,27 +335,27 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
           <div className="text-text-secondary font-medium mb-1.5">Signal</div>
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '1px solid #0D0E12' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.05), inset 0 -2px 3px rgba(0,0,0,0.03)' }}></div>
               <span className="text-text-muted">≥5 dB</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '1px solid #0D0E12' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.05), inset 0 -2px 3px rgba(0,0,0,0.03)' }}></div>
               <span className="text-text-muted">0–5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '1px solid #0D0E12' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.05), inset 0 -2px 3px rgba(0,0,0,0.03)' }}></div>
               <span className="text-text-muted">-5–0</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '1px solid #0D0E12' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.05), inset 0 -2px 3px rgba(0,0,0,0.03)' }}></div>
               <span className="text-text-muted">-10–-5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '1px solid #0D0E12' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.05), inset 0 -2px 3px rgba(0,0,0,0.03)' }}></div>
               <span className="text-text-muted">&lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '1px solid #0D0E12' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.05), inset 0 -2px 3px rgba(0,0,0,0.03)' }}></div>
               <span className="text-text-muted">Local</span>
             </div>
           </div>
