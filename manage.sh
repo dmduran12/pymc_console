@@ -2595,25 +2595,23 @@ install_static_frontend() {
     
     print_info "Downloading dashboard ($version)..."
     
-    # Download with wget (fallback to curl)
-    if command -v wget &> /dev/null; then
-        if ! wget -q --show-progress -O "$temp_file" "$download_url" 2>/dev/null; then
-            # Retry without progress for non-interactive
-            if ! wget -q -O "$temp_file" "$download_url"; then
-                print_error "Failed to download dashboard from $download_url"
-                print_info "Check your internet connection or try a specific version"
-                rm -f "$temp_file"
-                return 1
-            fi
-        fi
-    elif command -v curl &> /dev/null; then
-        if ! curl -sL -o "$temp_file" "$download_url"; then
+    # Download with curl (preferred - handles redirects better) or wget
+    if command -v curl &> /dev/null; then
+        if ! curl -fsSL -o "$temp_file" "$download_url"; then
             print_error "Failed to download dashboard from $download_url"
             rm -f "$temp_file"
             return 1
         fi
+    elif command -v wget &> /dev/null; then
+        # wget needs explicit redirect following for GitHub releases
+        if ! wget -q --max-redirect=5 -O "$temp_file" "$download_url"; then
+            print_error "Failed to download dashboard from $download_url"
+            print_info "Check your internet connection or try a specific version"
+            rm -f "$temp_file"
+            return 1
+        fi
     else
-        print_error "Neither wget nor curl found - cannot download dashboard"
+        print_error "Neither curl nor wget found - cannot download dashboard"
         return 1
     fi
     
