@@ -13,9 +13,11 @@ import { PacketDetailModal } from '@/components/packets/PacketDetailModal';
 import { PacketStats } from '@/components/packets/PacketStats';
 import { getPacketDirection } from '@/components/packets/PacketDirection';
 
-/** Extended filters including status */
+/** Extended filters including status, signal, and time range */
 interface ExtendedFilters extends PacketFilters {
   status?: 'all' | 'rx' | 'forward' | 'dropped' | 'duplicate';
+  signalMin?: number; // Minimum RSSI threshold
+  timeRange?: number; // Hours (0 = all)
 }
 
 export default function Packets() {
@@ -75,8 +77,19 @@ export default function Packets() {
       result = result.filter((p) => getPacketDirection(p) === filters.status);
     }
     
+    // Signal strength filter
+    if (filters.signalMin !== undefined) {
+      result = result.filter((p) => p.rssi >= filters.signalMin!);
+    }
+    
+    // Time range filter
+    if (filters.timeRange && filters.timeRange > 0) {
+      const cutoff = Date.now() / 1000 - (filters.timeRange * 3600);
+      result = result.filter((p) => p.timestamp >= cutoff);
+    }
+    
     return result;
-  }, [packets, filters.type, filters.route, filters.status]);
+  }, [packets, filters.type, filters.route, filters.status, filters.signalMin, filters.timeRange]);
 
   // Fetch immediately when limit changes
   useEffect(() => {
@@ -114,7 +127,12 @@ export default function Packets() {
     setFilters({ limit: filters.limit, status: 'all' });
   };
 
-  const hasActiveFilters = filters.type !== undefined || filters.route !== undefined || (filters.status && filters.status !== 'all');
+  const hasActiveFilters = 
+    filters.type !== undefined || 
+    filters.route !== undefined || 
+    (filters.status && filters.status !== 'all') ||
+    filters.signalMin !== undefined ||
+    (filters.timeRange && filters.timeRange > 0);
 
   return (
     <div className="section-gap">
@@ -230,8 +248,40 @@ export default function Packets() {
               </select>
             </div>
 
-            {/* Limit */}
+            {/* Time Range */}
             <div className="flex-1 min-w-[100px]">
+              <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wide">Time</label>
+              <select
+                value={filters.timeRange ?? 0}
+                onChange={(e) => handleFilterChange('timeRange', Number(e.target.value) || undefined)}
+                className="w-full bg-bg-subtle border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent-primary/50"
+              >
+                <option value={0}>All Time</option>
+                <option value={1}>Last 1h</option>
+                <option value={6}>Last 6h</option>
+                <option value={24}>Last 24h</option>
+                <option value={168}>Last 7d</option>
+              </select>
+            </div>
+
+            {/* Signal Threshold */}
+            <div className="flex-1 min-w-[100px]">
+              <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wide">Signal</label>
+              <select
+                value={filters.signalMin ?? ''}
+                onChange={(e) => handleFilterChange('signalMin', e.target.value ? Number(e.target.value) : undefined)}
+                className="w-full bg-bg-subtle border border-border-subtle rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent-primary/50"
+              >
+                <option value="">Any Signal</option>
+                <option value={-90}>Strong (≥-90)</option>
+                <option value={-100}>Good (≥-100)</option>
+                <option value={-110}>Fair (≥-110)</option>
+                <option value={-120}>Weak (≥-120)</option>
+              </select>
+            </div>
+
+            {/* Limit */}
+            <div className="flex-1 min-w-[80px]">
               <label className="block text-[10px] text-text-muted mb-1 uppercase tracking-wide">Limit</label>
               <select
                 value={filters.limit ?? 100}
