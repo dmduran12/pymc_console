@@ -14,10 +14,10 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 
 ## Tech Stack
 
-- **Frontend**: Vite 6, React 18, React Router 7, TypeScript, Tailwind CSS 4
+- **Frontend**: Vite 6, React 18, React Router 6, TypeScript, Tailwind CSS 4
 - **State Management**: Zustand
 - **Charts**: Recharts
-- **Maps**: Leaflet / react-leaflet
+- **Maps**: Leaflet 1.9 / react-leaflet 4.2 (React 18 compatible)
 - **Icons**: lucide-react
 - **Installer**: Bash with whiptail/dialog TUI
 
@@ -274,21 +274,37 @@ sudo journalctl -u pymc-repeater -f  # Live logs
 
 See [RELEASE.md](RELEASE.md) for detailed instructions.
 
-**Quick release:**
+### Quick Release (Recommended)
+
+From the `frontend/` directory:
+
 ```bash
 cd frontend
-npm version patch  # or minor/major
+npm version patch  # or minor/major - updates package.json
 git push origin main
 git push origin --tags
 ```
 
-**What happens automatically:**
+**Note:** `npm version` only updates `package.json`. You must manually create and push the git tag:
+
+```bash
+# After npm version patch shows "v0.4.6":
+git add frontend/package.json frontend/package-lock.json
+git commit -m "chore: Bump version to v0.4.6"
+git tag v0.4.6
+git push origin main
+git push origin v0.4.6
+```
+
+### What Happens Automatically
+
 1. GitHub Actions builds on every push to main/dev
 2. Version tags (`v*`) trigger GitHub Releases
 3. Release includes `pymc-ui-vX.Y.Z.tar.gz` and `.zip` archives
 4. `manage.sh` downloads from releases during install/upgrade
 
-**Versioning:**
-- `patch` (0.1.1 → 0.1.2): Bug fixes
-- `minor` (0.1.2 → 0.2.0): New features
-- `major` (0.2.0 → 1.0.0): Breaking changes
+### Versioning
+
+- `patch` (0.4.5 → 0.4.6): Bug fixes
+- `minor` (0.4.6 → 0.5.0): New features
+- `major` (0.5.0 → 1.0.0): Breaking changes

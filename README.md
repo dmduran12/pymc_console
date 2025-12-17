@@ -1,8 +1,11 @@
 # pyMC Console
 
-A modern dashboard for monitoring and managing your [MeshCore](https://meshcore.co.uk/) LoRa mesh repeater.
+[![GitHub Release](https://img.shields.io/github/v/release/dmduran12/pymc_console)](https://github.com/dmduran12/pymc_console/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console adds an intuitive web interface for monitoring your mesh network.
+A modern web dashboard for monitoring and managing your [MeshCore](https://meshcore.co.uk/) LoRa mesh repeater.
+
+Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console provides real-time visibility into your mesh network with an intuitive interface.
 
 ## Features
 
@@ -37,31 +40,32 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 
 ## Quick Start
 
-### 1. Clone the Repository
+### Requirements
+
+- Raspberry Pi (3, 4, 5, or Zero 2 W)
+- LoRa module (SX1262 or SX1276 based)
+- Raspbian/Raspberry Pi OS (Bookworm recommended)
+
+### Installation
 
 ```bash
+# Clone this repository
 git clone https://github.com/dmduran12/pymc_console.git
 cd pymc_console
-```
 
-### 2. Run the Installer
-
-```bash
+# Run the installer (requires sudo)
 sudo bash manage.sh install
 ```
 
-That's it! The installer will guide you through the setup process.
+The installer will:
+1. Install all dependencies
+2. Set up [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)
+3. Deploy the web dashboard
+4. Configure the systemd service
 
-## What Gets Installed
+Once complete, access your dashboard at `http://<your-pi-ip>:8000`
 
-The installer automatically:
-- Installs all required system dependencies (git, curl, whiptail, Python packages)
-- Clones and configures [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)
-- Sets up the systemd service for automatic startup
-- Deploys the React dashboard
-- Creates the configuration file at `/etc/pymc_repeater/config.yaml`
-
-## Using the Installer Menu
+## Management Menu
 
 After installation, run `sudo bash manage.sh` to access the management menu:
 
@@ -90,16 +94,6 @@ After installation, run `sudo bash manage.sh` to access the management menu:
 - **Upgrade** — Pull latest updates and reinstall
 - **Uninstall** — Remove the installation completely
 
-## Accessing the Dashboard
-
-Once installed and running, access your dashboard at:
-
-```
-http://<your-pi-ip>:8000/
-```
-
-The dashboard is served directly by the repeater backend — no separate web server needed.
-
 ## Upgrading
 
 To update to the latest version:
@@ -107,10 +101,10 @@ To update to the latest version:
 ```bash
 cd pymc_console
 git pull
-sudo bash manage.sh
+sudo bash manage.sh upgrade
 ```
 
-Then select **Upgrade** from the menu.
+Or use the TUI menu: `sudo bash manage.sh` → **Upgrade**
 
 ## Configuration
 
@@ -198,27 +192,19 @@ Select **Uninstall** from the menu. This removes:
 
 ## Development
 
-See [WARP.md](WARP.md) for architecture and development details.
+See [WARP.md](WARP.md) for architecture details and [RELEASE.md](RELEASE.md) for the release process.
 
 ```bash
 cd frontend
 npm install
-npm run dev  # http://localhost:5173
+npm run dev  # Starts dev server at http://localhost:5173
 ```
 
-Point to your Pi by setting `VITE_API_URL=http://<pi-ip>:8000` in `frontend/.env.local`.
+To connect to a remote Pi during development, create `frontend/.env.local`:
 
-### Creating a Release
-
-See [RELEASE.md](RELEASE.md) for the full release guide.
-
-```bash
-cd frontend
-npm version patch  # or minor/major
-git push origin main --tags
+```env
+VITE_API_URL=http://<pi-ip>:8000
 ```
-
-GitHub Actions will automatically build and publish the release.
 
 ## License
 
