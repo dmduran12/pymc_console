@@ -89,30 +89,33 @@ function PacketCardRow({ packet, onClick, isFlashing = false }: PacketRowProps) 
     <div
       onClick={() => onClick(packet)}
       className={clsx(
-        'px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150',
-        'bg-bg-elevated/50 border border-border-subtle/50',
-        'hover:bg-bg-subtle hover:border-border-subtle',
-        'active:scale-[0.99]',
+        'px-3 py-2.5 cursor-pointer transition-colors duration-150',
+        'hover:bg-bg-subtle',
+        'active:bg-bg-elevated',
         isTruthy(packet.is_duplicate) && 'opacity-50',
         isFlashing && 'flash-row'
       )}
     >
       {/* Single row: Direction | Time | Source | Type+Route | Signal */}
       <div className="flex items-center gap-2">
-        {/* Direction with label (same as desktop) */}
-        <PacketDirection packet={packet} showLabel={true} size="sm" />
+        {/* Direction with label */}
+        <div className="w-14 flex-shrink-0">
+          <PacketDirection packet={packet} showLabel={true} size="sm" />
+        </div>
         
-        {/* Time - same position as desktop */}
+        {/* Time */}
         <span className="text-[10px] font-mono text-text-muted w-8 flex-shrink-0">
           {formatTimeAgo(packet.timestamp)}
         </span>
         
         {/* Source hash */}
-        {packet.src_hash ? (
-          <HashBadge hash={packet.src_hash} size="xs" />
-        ) : (
-          <span className="text-[10px] text-text-muted w-10">—</span>
-        )}
+        <div className="w-10 flex-shrink-0">
+          {packet.src_hash ? (
+            <HashBadge hash={packet.src_hash} size="xs" />
+          ) : (
+            <span className="text-[10px] text-text-muted">—</span>
+          )}
+        </div>
         
         {/* Type & Route - takes remaining space */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -124,7 +127,7 @@ function PacketCardRow({ packet, onClick, isFlashing = false }: PacketRowProps) 
           </span>
         </div>
         
-        {/* Signal - rightmost (same as desktop) */}
+        {/* Signal - rightmost */}
         <div className="flex-shrink-0">
           <SignalIndicator rssi={packet.rssi} compact showValues />
         </div>

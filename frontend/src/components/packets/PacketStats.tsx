@@ -100,7 +100,7 @@ function PacketStatsComponent({ packets }: PacketStatsProps) {
   }
 
   return (
-    <div className="glass-card p-3">
+    <div className="glass-card p-3 pr-4">
       {/* Mobile: 2x2 grid */}
       {/* Desktop: Single row */}
       <div className="grid grid-cols-2 gap-3 sm:flex sm:items-center sm:justify-between sm:gap-6">
@@ -140,7 +140,7 @@ function PacketStatsComponent({ packets }: PacketStatsProps) {
             value={stats.uniqueSources}
             color="bg-accent-secondary/10"
           />
-          <div className="flex flex-col items-end">
+          <div className="flex flex-col items-end pr-1">
             <span className="text-sm font-mono text-text-secondary">{stats.avgRssi} dBm</span>
             <span className="text-[10px] text-text-muted">Avg Signal</span>
           </div>
