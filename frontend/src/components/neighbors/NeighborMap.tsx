@@ -48,8 +48,6 @@ const SIGNAL_COLORS = {
   localNode: '#60A5FA',  // --map-local-node
 };
 
-// Line color for connections
-const LINE_COLOR = '#5D6570';
 
 // Get color based on signal strength (SNR is more reliable than RSSI for LoRa)
 function getSignalColor(snr?: number, rssi?: number): string {
@@ -219,23 +217,27 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw straight lines to neighbors - rendered FIRST so they're behind markers */}
-        {localNode && localNode.latitude && localNode.longitude && neighborsWithLocation.map(([hash, neighbor]) => {
-          if (!neighbor.latitude || !neighbor.longitude) return null;
-          
-          return (
-            <Polyline
-              key={`line-${hash}`}
-              positions={[
-                [localNode.latitude, localNode.longitude],
-                [neighbor.latitude, neighbor.longitude]
-              ]}
-              color={LINE_COLOR}
-              weight={1.5}
-              opacity={0.4}
-            />
-          );
-        })}
+        {/* Draw lines only to DIRECT neighbors (zero_hop), colored by signal strength */}
+        {localNode && localNode.latitude && localNode.longitude && neighborsWithLocation
+          .filter(([, neighbor]) => neighbor.zero_hop === true)
+          .map(([hash, neighbor]) => {
+            if (!neighbor.latitude || !neighbor.longitude) return null;
+            
+            const lineColor = getSignalColor(neighbor.snr, neighbor.rssi);
+            
+            return (
+              <Polyline
+                key={`line-${hash}`}
+                positions={[
+                  [localNode.latitude, localNode.longitude],
+                  [neighbor.latitude, neighbor.longitude]
+                ]}
+                color={lineColor}
+                weight={2}
+                opacity={0.5}
+              />
+            );
+          })}
         
         {/* Local node marker - matte plastic style with CSS shadows */}
         {localNode && localNode.latitude && localNode.longitude && (
