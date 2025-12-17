@@ -321,7 +321,10 @@ export function Sidebar() {
               <img src={wifiIcon} alt="" className="w-5 h-5 object-contain" />
             </div>
             <div>
-              <span className="type-body-sm font-semibold text-text-primary">pyMC Console</span>
+              <span className="text-text-primary leading-tight">
+                <span style={{ fontFamily: 'var(--font-data)' }} className="text-sm">py</span>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontStyle: 'italic' }} className="text-sm">MC CONSOLE</span>
+              </span>
               <p className="type-data-xs text-text-muted">v{version}</p>
             </div>
           </div>
@@ -369,7 +372,10 @@ export function Sidebar() {
             <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="type-body-sm font-semibold text-text-primary">pyMC Console</h1>
+            <h1 className="text-text-primary leading-tight">
+              <span style={{ fontFamily: 'var(--font-data)' }} className="text-sm">py</span>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontStyle: 'italic' }} className="text-sm">MC CONSOLE</span>
+            </h1>
             <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
         </div>
@@ -390,7 +396,10 @@ export function Sidebar() {
             <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="type-body font-semibold text-text-primary">pyMC Console</h1>
+            <h1 className="text-text-primary leading-tight">
+              <span style={{ fontFamily: 'var(--font-data)' }} className="text-base">py</span>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontStyle: 'italic' }} className="text-base">MC CONSOLE</span>
+            </h1>
             <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
         </div>
