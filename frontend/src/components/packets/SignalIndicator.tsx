@@ -64,13 +64,13 @@ function SignalIndicatorComponent({ rssi, snr, compact = false, showValues = tru
   if (compact) {
     return (
       <div className="flex items-center gap-1.5">
-        {/* Mini bars */}
-        <div className="flex items-end gap-px h-3">
+        {/* Slim signal bars */}
+        <div className="flex items-end gap-[2px] h-3">
           {Array.from({ length: barCount }).map((_, i) => (
             <div
               key={i}
               className={clsx(
-                'w-1 rounded-sm transition-colors',
+                'w-[3px] rounded-[1px] transition-colors',
                 getBarColor(level, i < activeBars)
               )}
               style={{ height: `${((i + 1) / barCount) * 100}%` }}
@@ -78,7 +78,7 @@ function SignalIndicatorComponent({ rssi, snr, compact = false, showValues = tru
           ))}
         </div>
         {showValues && (
-          <span className={clsx('text-xs font-mono', getSignalColor(level))}>
+          <span className={clsx('text-[10px] font-mono', getSignalColor(level))}>
             {rssi}
           </span>
         )}
@@ -88,13 +88,13 @@ function SignalIndicatorComponent({ rssi, snr, compact = false, showValues = tru
 
   return (
     <div className="flex items-center gap-2">
-      {/* Signal bars */}
-      <div className="flex items-end gap-0.5 h-4">
+      {/* Signal bars - refined */}
+      <div className="flex items-end gap-[2px] h-3.5">
         {Array.from({ length: barCount }).map((_, i) => (
           <div
             key={i}
             className={clsx(
-              'w-1.5 rounded-sm transition-colors',
+              'w-[3px] rounded-[1px] transition-colors',
               getBarColor(level, i < activeBars)
             )}
             style={{ height: `${((i + 1) / barCount) * 100}%` }}

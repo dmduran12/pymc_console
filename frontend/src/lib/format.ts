@@ -61,18 +61,19 @@ export function formatTimestamp(timestamp: number): string {
 
 /**
  * Format timestamp to short date/time for tables
- * @example "Dec 12, 14:30:45"
+ * @example "Dec 17, 14:30:45"
  */
 export function formatDateTime(timestamp: number): string {
   const date = new Date(timestamp * 1000);
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
+  const month = date.toLocaleString('en-US', { month: 'short' });
+  const day = date.getDate();
+  const time = date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
   });
+  return `${month} ${day}, ${time}`;
 }
 
 /**

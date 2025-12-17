@@ -95,7 +95,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
 
   return (
     <div
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
+      className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-end sm:items-center justify-center"
       onClick={onClose}
     >
       {/* Mobile: Bottom sheet / Desktop: Centered modal */}

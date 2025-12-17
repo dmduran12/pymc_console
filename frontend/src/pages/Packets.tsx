@@ -343,19 +343,18 @@ export default function Packets() {
                 <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Route</th>
                 <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Source</th>
                 <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider">Signal</th>
-                <th className="text-left py-2.5 px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider w-16">Size</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-subtle/30">
               {loading && packets.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-text-muted">
+                  <td colSpan={6} className="text-center py-12 text-text-muted">
                     Loading packets...
                   </td>
                 </tr>
               ) : filteredPackets.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-text-muted">
+                  <td colSpan={6} className="text-center py-12 text-text-muted">
                     No packets found
                   </td>
                 </tr>
