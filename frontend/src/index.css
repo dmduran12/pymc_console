@@ -934,6 +934,12 @@ body {
   opacity: 0.5;
 }
 
+/* Custom map dot markers - hide default Leaflet icon styling */
+.map-dot-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    UTILITY OVERRIDES FOR TAILWIND
    Apply data font to font-mono class
