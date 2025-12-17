@@ -15,15 +15,21 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 - **Time range selector** — View stats from 20 minutes to 7 days
 - **Recent packets** — Live feed of incoming traffic
 
+![Dashboard](docs/images/dashboard.png)
+
 ### Statistics
 - **Traffic flow chart** — Stacked area showing RX/forwarded/dropped over time
 - **Link quality polar** — Neighbor signal strength by compass bearing
 - **Packet types treemap** — Distribution of ADVERT, TXT_MSG, ACK, etc.
 - **Noise floor heatmap** — RF interference patterns over time
 
+![Statistics](docs/images/statistics.png)
+
 ### Neighbors
 - **Interactive map** — OpenStreetMap view with neighbor positions
 - **Neighbor list** — RSSI, SNR, last seen, direct vs relayed
+
+![Neighbors](docs/images/neighbors.png)
 
 ### Packets
 - **Searchable history** — Filter by type, route, time range
@@ -34,9 +40,13 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 - **Duty cycle** — Enable/disable enforcement
 - **Radio config** — Live frequency, power, SF, bandwidth changes
 
+![Settings](docs/images/settings.png)
+
 ### System & Logs
 - **Hardware stats** — CPU, memory, disk, temperature
 - **Live logs** — Stream from repeater daemon
+
+![System](docs/images/system.png)
 
 ## Quick Start
 
