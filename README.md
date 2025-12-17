@@ -119,11 +119,11 @@ sudo nano /etc/pymc_repeater/config.yaml
 Key settings:
 ```yaml
 radio:
-  frequency: 906000000      # Frequency in Hz
+  frequency: 927875000      # Frequency in Hz
   spreading_factor: 7       # SF7-SF12
   bandwidth: 62500          # Bandwidth in Hz  
-  tx_power: 22              # TX power in dBm
-  coding_rate: 5            # 4/5, 4/6, 4/7, or 4/8
+  tx_power: 28              # TX power in dBm
+  coding_rate: 6            # 4/5, 4/6, 4/7, or 4/8
 ```
 
 ### Service Management
