@@ -321,9 +321,12 @@ export function Sidebar() {
               <img src={wifiIcon} alt="" className="w-5 h-5 object-contain" />
             </div>
             <div>
-              <span className="text-text-primary leading-tight">
-                <span style={{ fontFamily: 'var(--font-data)' }} className="text-sm">py</span>
-                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontStyle: 'italic' }} className="text-sm">MC CONSOLE</span>
+              <span className="font-mono text-sm font-medium tracking-tight">
+                <span className="text-[#569CD6]">py</span>
+                <span className="text-[#DCDCAA]">(</span>
+                <span className="text-[#4EC9B0]">MC</span>
+                <span className="text-[#DCDCAA]">)</span>
+                <span className="text-[#CE9178]">:C0NS0LE</span>
               </span>
               <p className="type-data-xs text-text-muted">v{version}</p>
             </div>
@@ -372,9 +375,12 @@ export function Sidebar() {
             <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="text-text-primary leading-tight">
-              <span style={{ fontFamily: 'var(--font-data)' }} className="text-sm">py</span>
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontStyle: 'italic' }} className="text-sm">MC CONSOLE</span>
+            <h1 className="font-mono text-sm font-medium tracking-tight">
+              <span className="text-[#569CD6]">py</span>
+              <span className="text-[#DCDCAA]">(</span>
+              <span className="text-[#4EC9B0]">MC</span>
+              <span className="text-[#DCDCAA]">)</span>
+              <span className="text-[#CE9178]">:C0NS0LE</span>
             </h1>
             <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
@@ -396,9 +402,12 @@ export function Sidebar() {
             <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="text-text-primary leading-tight">
-              <span style={{ fontFamily: 'var(--font-data)' }} className="text-base">py</span>
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontStyle: 'italic' }} className="text-base">MC CONSOLE</span>
+            <h1 className="font-mono text-base font-medium tracking-tight">
+              <span className="text-[#569CD6]">py</span>
+              <span className="text-[#DCDCAA]">(</span>
+              <span className="text-[#4EC9B0]">MC</span>
+              <span className="text-[#DCDCAA]">)</span>
+              <span className="text-[#CE9178]">:C0NS0LE</span>
             </h1>
             <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
