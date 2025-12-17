@@ -321,13 +321,7 @@ export function Sidebar() {
               <img src={wifiIcon} alt="" className="w-5 h-5 object-contain" />
             </div>
             <div>
-              <span className="font-mono text-sm font-medium tracking-tight">
-                <span className="text-[#569CD6]">py</span>
-                <span className="text-[#DCDCAA]">(</span>
-                <span className="text-[#4EC9B0]">MC</span>
-                <span className="text-[#DCDCAA]">)</span>
-                <span className="text-[#CE9178]">:C0NS0LE</span>
-              </span>
+              <h1 className="text-sm font-semibold text-text-primary">pyMC Console</h1>
               <p className="type-data-xs text-text-muted">v{version}</p>
             </div>
           </div>
@@ -375,13 +369,7 @@ export function Sidebar() {
             <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="font-mono text-sm font-medium tracking-tight">
-              <span className="text-[#569CD6]">py</span>
-              <span className="text-[#DCDCAA]">(</span>
-              <span className="text-[#4EC9B0]">MC</span>
-              <span className="text-[#DCDCAA]">)</span>
-              <span className="text-[#CE9178]">:C0NS0LE</span>
-            </h1>
+            <h1 className="text-sm font-semibold text-text-primary">pyMC Console</h1>
             <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
         </div>
@@ -402,13 +390,7 @@ export function Sidebar() {
             <img src={wifiIcon} alt="" className="w-6 h-6 object-contain" />
           </div>
           <div>
-            <h1 className="font-mono text-base font-medium tracking-tight">
-              <span className="text-[#569CD6]">py</span>
-              <span className="text-[#DCDCAA]">(</span>
-              <span className="text-[#4EC9B0]">MC</span>
-              <span className="text-[#DCDCAA]">)</span>
-              <span className="text-[#CE9178]">:C0NS0LE</span>
-            </h1>
+            <h1 className="text-base font-semibold text-text-primary">pyMC Console</h1>
             <p className="type-data-xs text-text-muted">v{version}</p>
           </div>
         </div>
