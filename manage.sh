@@ -911,19 +911,32 @@ do_upgrade() {
         return 1
     fi
     
-    # Self-update: pull latest pymc_console repo first
+    # Self-update: pull latest pymc_console repo first, then re-exec if updated
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -d "$script_dir/.git" ]; then
         echo ""
-        print_info "Updating pymc_console repository..."
+        print_info "Checking for pymc_console updates..."
         git config --global --add safe.directory "$script_dir" 2>/dev/null || true
         cd "$script_dir"
-        # Show git pull output so user can see what's happening
-        if git pull --ff-only; then
-            print_success "pymc_console updated"
+        
+        # Check if there are updates available
+        git fetch origin 2>/dev/null || true
+        local local_hash=$(git rev-parse HEAD 2>/dev/null)
+        local remote_hash=$(git rev-parse origin/main 2>/dev/null || git rev-parse origin/master 2>/dev/null)
+        
+        if [ -n "$remote_hash" ] && [ "$local_hash" != "$remote_hash" ]; then
+            print_info "Updates available, pulling..."
+            if git pull --ff-only; then
+                print_success "pymc_console updated - restarting with new version..."
+                echo ""
+                # Re-exec this script with 'upgrade' so new code runs
+                exec "$script_dir/manage.sh" upgrade
+            else
+                print_warning "Could not auto-update pymc_console (continuing with current version)"
+                print_info "You may need to manually run: cd $script_dir && sudo git pull"
+            fi
         else
-            print_warning "Could not auto-update pymc_console (continuing with current version)"
-            print_info "You may need to manually run: cd $script_dir && sudo git pull"
+            print_success "pymc_console is up to date"
         fi
         echo ""
     fi
