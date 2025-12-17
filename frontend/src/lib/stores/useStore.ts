@@ -80,7 +80,12 @@ interface StoreState {
   resourceHistory: ResourceDataPoint[];
   lastResourceFetch: number; // Prevent duplicate entries
 
+  // Initialization flag
+  initialized: boolean;
+  
   // Actions
+  initializeApp: () => Promise<void>;
+  prefetchForRoute: (route: string) => void;
   fetchStats: () => Promise<void>;
   fetchPackets: (limit?: number) => Promise<void>;
   fetchLogs: () => Promise<void>;
@@ -114,13 +119,79 @@ const store = create<StoreState>((set, get) => ({
 
   resourceHistory: loadResourceHistory(),
   lastResourceFetch: loadLastResourceFetch(),
+  initialized: false,
 
   // Actions
+  
+  // Initialize app with parallel data fetch for fast startup
+  initializeApp: async () => {
+    const { initialized } = get();
+    if (initialized) return;
+    
+    set({ initialized: true, statsLoading: true, packetsLoading: true });
+    
+    // Fetch critical data in parallel
+    try {
+      const [stats, packetsResponse] = await Promise.all([
+        api.getStats(),
+        api.getRecentPackets(50),
+      ]);
+      
+      set({ stats, statsLoading: false });
+      
+      if (packetsResponse.success && packetsResponse.data) {
+        const newestTimestamp = packetsResponse.data.length > 0
+          ? Math.max(...packetsResponse.data.map(p => p.timestamp ?? 0))
+          : 0;
+        set({
+          packets: packetsResponse.data,
+          packetsLoading: false,
+          lastPacketTimestamp: newestTimestamp,
+        });
+      } else {
+        set({ packetsLoading: false });
+      }
+    } catch (error) {
+      set({
+        statsError: error instanceof Error ? error.message : 'Failed to initialize',
+        statsLoading: false,
+        packetsLoading: false,
+      });
+    }
+  },
+  
+  // Prefetch data for a route before navigation (called on hover)
+  prefetchForRoute: (route: string) => {
+    switch (route) {
+      case '/logs':
+        // Fire and forget - just warm the cache
+        api.getLogs().catch(() => {});
+        break;
+      case '/system':
+        api.getHardwareStats().catch(() => {});
+        break;
+      case '/statistics':
+        // Prefetch chart data
+        api.getPacketTypeGraphData(3).catch(() => {});
+        api.getNoiseFloorHistory(3).catch(() => {});
+        break;
+      case '/settings':
+        api.getRadioPresets().catch(() => {});
+        break;
+      // Dashboard, Neighbors, Packets all use stats which is already loaded
+    }
+  },
+
   fetchStats: async () => {
-    set({ statsLoading: true, statsError: null });
+    const { stats: existingStats } = get();
+    // Only show loading spinner on initial load (no existing data)
+    if (!existingStats) {
+      set({ statsLoading: true });
+    }
+    set({ statsError: null });
+    
     try {
       const stats = await api.getStats();
-      // Flash trigger moved to fetchPackets where we have actual packet data
       set({ stats, statsLoading: false });
     } catch (error) {
       set({ 
@@ -131,7 +202,13 @@ const store = create<StoreState>((set, get) => ({
   },
 
   fetchPackets: async (limit = 50) => {
-    set({ packetsLoading: true, packetsError: null });
+    const { packets: existingPackets } = get();
+    // Only show loading spinner on initial load
+    if (existingPackets.length === 0) {
+      set({ packetsLoading: true });
+    }
+    set({ packetsError: null });
+    
     try {
       const response = await api.getRecentPackets(limit);
       if (response.success && response.data) {
@@ -166,7 +243,12 @@ const store = create<StoreState>((set, get) => ({
   },
 
   fetchLogs: async () => {
-    set({ logsLoading: true });
+    const { logs: existingLogs } = get();
+    // Only show loading spinner on initial load
+    if (existingLogs.length === 0) {
+      set({ logsLoading: true });
+    }
+    
     try {
       const response = await api.getLogs();
       set({ logs: response.logs, logsLoading: false });
@@ -272,6 +354,8 @@ export const useFlashReceived = () => store((s) => s.flashReceived);
 export const useFlashAdvert = () => store((s) => s.flashAdvert);
 
 // Individual action selectors (stable references, no re-renders)
+export const useInitializeApp = () => store((s) => s.initializeApp);
+export const usePrefetchForRoute = () => store((s) => s.prefetchForRoute);
 export const useFetchStats = () => store((s) => s.fetchStats);
 export const useFetchPackets = () => store((s) => s.fetchPackets);
 export const useFetchLogs = () => store((s) => s.fetchLogs);

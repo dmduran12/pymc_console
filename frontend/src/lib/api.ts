@@ -1,4 +1,5 @@
 // API Client for pyMC Repeater backend
+// Features: SWR caching, request deduplication, background revalidation
 
 import type {
   Stats,
@@ -13,11 +14,127 @@ import type {
 // Empty string = same-origin (relative URLs work when served from pyMC_Repeater)
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+// ═══════════════════════════════════════════════════════════════════════════
+// SWR Cache Configuration
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  ttl: number; // Time-to-live in ms
+}
+
+// In-memory cache with LRU eviction
+const cache = new Map<string, CacheEntry<unknown>>();
+const MAX_CACHE_SIZE = 50;
+const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes - entries older than this are evicted
+
+// Track in-flight requests for deduplication
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
+// TTL configuration by endpoint pattern (in milliseconds)
+const TTL_CONFIG: Record<string, number> = {
+  '/api/stats': 2000,
+  '/api/logs': 1000,
+  '/api/recent_packets': 2000,
+  '/api/hardware_stats': 3000,
+  '/api/packet_type_graph_data': 30000,
+  '/api/metrics_graph_data': 30000,
+  '/api/noise_floor_history': 30000,
+  '/api/radio_presets': 60000,
+  default: 5000,
+};
+
+function getTTL(endpoint: string): number {
+  // Find matching TTL config by endpoint prefix
+  for (const [pattern, ttl] of Object.entries(TTL_CONFIG)) {
+    if (pattern !== 'default' && endpoint.startsWith(pattern)) {
+      return ttl;
+    }
+  }
+  return TTL_CONFIG.default;
+}
+
+function getCacheKey(endpoint: string, options?: RequestInit): string {
+  // Only cache GET requests
+  if (options?.method && options.method !== 'GET') {
+    return '';
+  }
+  return endpoint;
+}
+
+function cleanupCache(): void {
+  const now = Date.now();
+  
+  // Remove stale entries (older than STALE_THRESHOLD)
+  for (const [key, entry] of cache.entries()) {
+    if (now - entry.timestamp > STALE_THRESHOLD) {
+      cache.delete(key);
+    }
+  }
+  
+  // LRU eviction if still over max size
+  if (cache.size > MAX_CACHE_SIZE) {
+    const entries = Array.from(cache.entries());
+    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = entries.slice(0, entries.length - MAX_CACHE_SIZE);
+    for (const [key] of toRemove) {
+      cache.delete(key);
+    }
+  }
+}
+
+function setCache<T>(key: string, data: T, ttl: number): void {
+  if (!key) return;
+  cache.set(key, { data, timestamp: Date.now(), ttl });
+  cleanupCache();
+}
+
+function getCache<T>(key: string): { data: T; isStale: boolean } | null {
+  if (!key) return null;
+  const entry = cache.get(key) as CacheEntry<T> | undefined;
+  if (!entry) return null;
+  
+  const age = Date.now() - entry.timestamp;
+  const isStale = age > entry.ttl;
+  
+  return { data: entry.data, isStale };
+}
+
+// Clear cache on tab visibility change (user returns to tab)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Mark all entries as stale by setting their timestamp to old value
+      for (const entry of cache.values()) {
+        entry.timestamp = 0;
+      }
+    }
+  });
+}
+
+// Export for manual cache invalidation
+export function invalidateCache(pattern?: string): void {
+  if (!pattern) {
+    cache.clear();
+    return;
+  }
+  for (const key of cache.keys()) {
+    if (key.includes(pattern)) {
+      cache.delete(key);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Core Fetch Function with SWR
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Raw fetch without caching (for mutations and internal use)
+async function fetchRaw<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
   
   // Only include Content-Type for requests with a body (POST, PUT, etc.)
-  // This avoids triggering CORS preflight on GET requests
   const headers: Record<string, string> = {};
   if (options?.headers) {
     const h = options.headers;
@@ -43,6 +160,62 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   }
 
   return response.json();
+}
+
+// SWR-enabled fetch: returns cached data immediately, revalidates in background
+async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const cacheKey = getCacheKey(endpoint, options);
+  const ttl = getTTL(endpoint);
+  
+  // For non-GET requests, skip caching
+  if (!cacheKey) {
+    return fetchRaw<T>(endpoint, options);
+  }
+  
+  // Check cache first
+  const cached = getCache<T>(cacheKey);
+  
+  // If we have fresh cached data, return it immediately
+  if (cached && !cached.isStale) {
+    return cached.data;
+  }
+  
+  // Check for in-flight request (deduplication)
+  const inFlight = inFlightRequests.get(cacheKey);
+  if (inFlight) {
+    // If we have stale data, return it while waiting for in-flight request
+    if (cached) {
+      // Don't await - let the in-flight request update cache in background
+      return cached.data;
+    }
+    // No cached data, wait for in-flight request
+    return inFlight as Promise<T>;
+  }
+  
+  // Start new request
+  const fetchPromise = fetchRaw<T>(endpoint, options)
+    .then((data) => {
+      setCache(cacheKey, data, ttl);
+      inFlightRequests.delete(cacheKey);
+      return data;
+    })
+    .catch((error) => {
+      inFlightRequests.delete(cacheKey);
+      throw error;
+    });
+  
+  inFlightRequests.set(cacheKey, fetchPromise);
+  
+  // If we have stale cached data, return it immediately
+  // The fetch will update the cache in the background
+  if (cached) {
+    // Fire and forget - update cache in background
+    fetchPromise.catch(() => {}); // Suppress unhandled rejection
+    return cached.data;
+  }
+  
+  // No cached data, wait for fetch
+  return fetchPromise;
 }
 
 // Stats endpoints
