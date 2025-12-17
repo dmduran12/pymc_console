@@ -28,7 +28,6 @@ function PacketTableRow({ packet, onClick, isFlashing = false }: PacketRowProps)
     packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
   const routeTypeName =
     packet.route_type_name || getRouteTypeName(packet.route_type ?? packet.route);
-  const payloadLength = packet.payload_length ?? packet.length ?? 0;
 
   return (
     <tr
@@ -36,7 +35,6 @@ function PacketTableRow({ packet, onClick, isFlashing = false }: PacketRowProps)
       className={clsx(
         'cursor-pointer transition-colors duration-150',
         'hover:bg-bg-subtle',
-        isTruthy(packet.transmitted) && 'bg-accent-success/5',
         isTruthy(packet.is_duplicate) && 'opacity-50',
         isFlashing && 'flash-row'
       )}
@@ -69,13 +67,9 @@ function PacketTableRow({ packet, onClick, isFlashing = false }: PacketRowProps)
           <span className="text-xs text-text-muted">—</span>
         )}
       </td>
-      {/* Signal */}
+      {/* Signal - rightmost */}
       <td className="py-2.5 px-3">
         <SignalIndicator rssi={packet.rssi} snr={packet.snr} compact showValues />
-      </td>
-      {/* Length */}
-      <td className="py-2.5 px-3 text-xs font-mono text-text-secondary">
-        {payloadLength}B
       </td>
     </tr>
   );
@@ -95,21 +89,32 @@ function PacketCardRow({ packet, onClick, isFlashing = false }: PacketRowProps) 
     <div
       onClick={() => onClick(packet)}
       className={clsx(
-        'px-3 py-2 rounded-lg cursor-pointer transition-all duration-150',
+        'px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150',
         'bg-bg-elevated/50 border border-border-subtle/50',
         'hover:bg-bg-subtle hover:border-border-subtle',
         'active:scale-[0.99]',
-        isTruthy(packet.transmitted) && 'border-l-2 border-l-accent-success',
         isTruthy(packet.is_duplicate) && 'opacity-50',
         isFlashing && 'flash-row'
       )}
     >
-      {/* Single row: Direction | Type+Route | Signal | Time */}
+      {/* Single row: Direction | Time | Source | Type+Route | Signal */}
       <div className="flex items-center gap-2">
-        {/* Direction arrow */}
-        <PacketDirection packet={packet} showLabel={false} size="sm" />
+        {/* Direction with label (same as desktop) */}
+        <PacketDirection packet={packet} showLabel={true} size="sm" />
         
-        {/* Type & Route - takes available space */}
+        {/* Time - same position as desktop */}
+        <span className="text-[10px] font-mono text-text-muted w-8 flex-shrink-0">
+          {formatTimeAgo(packet.timestamp)}
+        </span>
+        
+        {/* Source hash */}
+        {packet.src_hash ? (
+          <HashBadge hash={packet.src_hash} size="xs" />
+        ) : (
+          <span className="text-[10px] text-text-muted w-10">—</span>
+        )}
+        
+        {/* Type & Route - takes remaining space */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           <span className={clsx('text-xs font-semibold truncate', getPacketTypeColor(payloadTypeName))}>
             {payloadTypeName}
@@ -119,13 +124,8 @@ function PacketCardRow({ packet, onClick, isFlashing = false }: PacketRowProps) 
           </span>
         </div>
         
-        {/* Signal bars + value */}
+        {/* Signal - rightmost (same as desktop) */}
         <SignalIndicator rssi={packet.rssi} compact showValues />
-        
-        {/* Compact time */}
-        <span className="text-[10px] font-mono text-text-muted w-6 text-right flex-shrink-0">
-          {formatTimeAgo(packet.timestamp)}
-        </span>
       </div>
     </div>
   );
