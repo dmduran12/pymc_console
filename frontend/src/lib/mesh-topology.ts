@@ -29,15 +29,29 @@ export interface TopologyEdge {
   hopDistanceFromLocal: number;
   /** Whether this edge connects to a hub node (high centrality) */
   isHubConnection: boolean;
+  /** 
+   * Whether this edge is 100% certain (both endpoints uniquely matched) 
+   * vs inferred (at least one endpoint had multiple possible matches)
+   */
+  isCertain: boolean;
+  /** Number of times this exact connection was observed with 100% certainty */
+  certainCount: number;
 }
 
 /** Result of topology analysis */
 export interface MeshTopology {
+  /** All edges (both certain and uncertain) */
   edges: TopologyEdge[];
+  /** 100% certain edges only (both endpoints uniquely identified) - solid lines */
+  certainEdges: TopologyEdge[];
+  /** Uncertain/inferred edges (at least one ambiguous endpoint) - dotted lines */
+  uncertainEdges: TopologyEdge[];
   /** Map from edge key to edge for quick lookup */
   edgeMap: Map<string, TopologyEdge>;
   /** Max packet count across all edges (for normalization) */
   maxPacketCount: number;
+  /** Max certain count for normalization of solid line thickness */
+  maxCertainCount: number;
   /** Neighbor affinity scores (hash -> combined score for backward compat) */
   neighborAffinity: Map<string, number>;
   /** Full affinity data with hop statistics (hash -> NeighborAffinity) */
@@ -60,6 +74,10 @@ interface EdgeAccumulator {
   minHopDistance: number;
   /** How many times this edge was observed at each hop distance */
   hopDistanceCounts: number[];
+  /** Number of 100% certain observations (both endpoints uniquely matched) */
+  certainCount: number;
+  /** Number of uncertain observations (at least one ambiguous endpoint) */
+  uncertainCount: number;
 }
 
 /**
@@ -208,9 +226,19 @@ export function buildNeighborAffinity(
   
   // Analyze packets for hop positions and frequency
   for (const packet of packets) {
-    const path = packet.forwarded_path ?? packet.original_path;
+    // Note: paths may be JSON strings or arrays depending on API version
+    let path = packet.forwarded_path ?? packet.original_path;
     
-    if (path && path.length >= 1 && localPrefix) {
+    // Parse JSON string if needed
+    if (typeof path === 'string') {
+      try {
+        path = JSON.parse(path);
+      } catch {
+        continue; // Invalid JSON, skip
+      }
+    }
+    
+    if (path && Array.isArray(path) && path.length >= 1 && localPrefix) {
       const lastPrefix = path[path.length - 1];
       const pathEndsWithLocal = lastPrefix.toUpperCase() === localPrefix;
       
@@ -241,7 +269,7 @@ export function buildNeighborAffinity(
     }
     
     // Also count direct packets (empty path) from src_hash
-    if ((!path || path.length === 0) && packet.src_hash) {
+    if ((!path || (Array.isArray(path) && path.length === 0)) && packet.src_hash) {
       const srcAff = affinity.get(packet.src_hash);
       if (srcAff) {
         srcAff.frequency++;
@@ -482,7 +510,18 @@ export function buildMeshTopology(
   
   for (const packet of packets) {
     // Get path from packet (forwarded_path has local appended)
-    const path = packet.forwarded_path ?? packet.original_path;
+    // Note: paths may be JSON strings or arrays depending on API version
+    let path = packet.forwarded_path ?? packet.original_path;
+    
+    // Parse JSON string if needed
+    if (typeof path === 'string') {
+      try {
+        path = JSON.parse(path);
+      } catch {
+        continue; // Invalid JSON, skip
+      }
+    }
+    
     if (!path || !Array.isArray(path) || path.length < 1) continue;
     
     // Track which nodes appear in this path (for centrality)
@@ -494,6 +533,10 @@ export function buildMeshTopology(
       const toPrefix = path[i + 1];
       const isToLastHop = (i + 1) === path.length - 1;
       
+      // Get all matches for both endpoints (to determine certainty)
+      const fromMatches = matchPrefix(fromPrefix, neighbors, localHash, neighborAffinity, false);
+      const toMatches = matchPrefix(toPrefix, neighbors, localHash, neighborAffinity, isToLastHop);
+      
       // Resolve both ends of this hop with affinity tiebreaking
       const fromResolved = resolveHop(fromPrefix, neighbors, localHash, neighborAffinity, false);
       const toResolved = resolveHop(toPrefix, neighbors, localHash, neighborAffinity, isToLastHop);
@@ -503,6 +546,10 @@ export function buildMeshTopology(
       
       // Skip self-loops
       if (fromResolved.hash === toResolved.hash) continue;
+      
+      // Determine if this observation is 100% certain
+      // Certain = both endpoints have exactly 1 match (unique identification)
+      const isCertainObservation = fromMatches.matches.length === 1 && toMatches.matches.length === 1;
       
       // Track nodes for centrality
       nodesInPath.add(fromResolved.hash);
@@ -516,8 +563,8 @@ export function buildMeshTopology(
       // Calculate combined confidence for this hop
       const hopConfidence = fromResolved.confidence * toResolved.confidence;
       
-      // Skip if below threshold
-      if (hopConfidence < confidenceThreshold) continue;
+      // For uncertain edges, apply threshold; certain edges always included
+      if (!isCertainObservation && hopConfidence < confidenceThreshold) continue;
       
       // Calculate hop distance from local (0 = edge touches local)
       // For path [A, B, C, local]: A-B is 2 hops from local, B-C is 1 hop, C-local is 0 hops
@@ -536,6 +583,12 @@ export function buildMeshTopology(
         if (hopDistanceFromLocal < existing.hopDistanceCounts.length) {
           existing.hopDistanceCounts[hopDistanceFromLocal]++;
         }
+        // Track certain vs uncertain
+        if (isCertainObservation) {
+          existing.certainCount++;
+        } else {
+          existing.uncertainCount++;
+        }
       } else {
         const hopCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Track up to 10 hops
         if (hopDistanceFromLocal < hopCounts.length) {
@@ -549,6 +602,8 @@ export function buildMeshTopology(
           confidenceSum: hopConfidence,
           minHopDistance: hopDistanceFromLocal,
           hopDistanceCounts: hopCounts,
+          certainCount: isCertainObservation ? 1 : 0,
+          uncertainCount: isCertainObservation ? 0 : 1,
         });
       }
     }
@@ -594,17 +649,24 @@ export function buildMeshTopology(
   
   // Convert accumulators to edges
   const edges: TopologyEdge[] = [];
+  const certainEdges: TopologyEdge[] = [];
+  const uncertainEdges: TopologyEdge[] = [];
   let maxPacketCount = 0;
+  let maxCertainCount = 0;
   const hubSet = new Set(hubNodes);
   
   for (const acc of accumulators.values()) {
     const avgConfidence = acc.confidenceSum / acc.count;
     maxPacketCount = Math.max(maxPacketCount, acc.count);
+    maxCertainCount = Math.max(maxCertainCount, acc.certainCount);
     
     // Check if either end is a hub node
     const isHubConnection = hubSet.has(acc.fromHash) || hubSet.has(acc.toHash);
     
-    edges.push({
+    // An edge is "certain" if it has at least one 100% certain observation
+    const isCertain = acc.certainCount > 0;
+    
+    const edge: TopologyEdge = {
       fromHash: acc.fromHash,
       toHash: acc.toHash,
       key: acc.key,
@@ -613,7 +675,18 @@ export function buildMeshTopology(
       strength: 0, // Will be calculated below
       hopDistanceFromLocal: acc.minHopDistance,
       isHubConnection,
-    });
+      isCertain,
+      certainCount: acc.certainCount,
+    };
+    
+    edges.push(edge);
+    
+    // Separate into certain vs uncertain lists
+    if (isCertain) {
+      certainEdges.push(edge);
+    } else {
+      uncertainEdges.push(edge);
+    }
   }
   
   // Calculate strength scores (normalized count × confidence)
@@ -622,16 +695,21 @@ export function buildMeshTopology(
     edge.strength = normalizedCount * edge.avgConfidence;
   }
   
-  // Sort by strength descending
+  // Sort all lists by strength descending
   edges.sort((a, b) => b.strength - a.strength);
+  certainEdges.sort((a, b) => b.certainCount - a.certainCount); // Sort certain by frequency
+  uncertainEdges.sort((a, b) => b.avgConfidence - a.avgConfidence); // Sort uncertain by confidence
   
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
   return { 
     edges, 
+    certainEdges,
+    uncertainEdges,
     edgeMap, 
     maxPacketCount, 
+    maxCertainCount,
     neighborAffinity: simpleAffinity, 
     fullAffinity: neighborAffinity, 
     localPrefix,
@@ -720,4 +798,45 @@ export function getEdgeWeightByHopDistance(
   const distanceFactor = Math.max(0.4, 1 - hopDistance * 0.15);
   
   return countWeight * distanceFactor;
+}
+
+/**
+ * Get line weight for a CERTAIN edge based on how many times the path was validated.
+ * More frequent = thicker line.
+ * 
+ * @param certainCount - Number of certain observations
+ * @param maxCertainCount - Maximum certain count for normalization
+ * @param minWeight - Minimum line weight
+ * @param maxWeight - Maximum line weight
+ */
+export function getCertainEdgeWeight(
+  certainCount: number,
+  maxCertainCount: number,
+  minWeight: number = 1.5,
+  maxWeight: number = 6
+): number {
+  const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
+  return minWeight + (maxWeight - minWeight) * normalized;
+}
+
+/**
+ * Get color for an UNCERTAIN edge based on confidence level.
+ * Uses a gradient from red (low confidence) to yellow (medium) to white (high).
+ * 
+ * @param confidence - Confidence score 0-1
+ */
+export function getUncertainEdgeColor(confidence: number): string {
+  if (confidence >= 0.9) {
+    // Very high confidence - light purple (almost certain)
+    return 'rgba(196, 181, 253, 0.6)'; // violet-300
+  } else if (confidence >= 0.7) {
+    // High confidence - blue
+    return 'rgba(147, 197, 253, 0.5)'; // blue-300
+  } else if (confidence >= 0.5) {
+    // Medium confidence - yellow
+    return 'rgba(253, 224, 71, 0.4)'; // yellow-300
+  } else {
+    // Low confidence - orange/red
+    return 'rgba(253, 186, 116, 0.3)'; // orange-300
+  }
 }
