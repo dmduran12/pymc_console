@@ -6,7 +6,7 @@ import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology, getEdgeWeight, getEdgeColor, TopologyEdge, getHashPrefix } from '@/lib/mesh-topology';
+import { buildMeshTopology, getEdgeColorByHopDistance, getEdgeWeightByHopDistance, TopologyEdge } from '@/lib/mesh-topology';
 
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
@@ -281,39 +281,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     return lines;
   }, [meshConnections, meshTopology, nodeCoordinates]);
   
-  // Generate solid lines from local node to zero-hop neighbors
-  // Also draw line to closest neighbor by proximity
-  const zeroHopLines = useMemo(() => {
-    const lines: Array<{ from: [number, number]; to: [number, number]; key: string }> = [];
-    const drawnKeys = new Set<string>();
-    
-    if (!localNode || !localNode.latitude || !localNode.longitude) return lines;
-    const localCoords: [number, number] = [localNode.latitude, localNode.longitude];
-    
-    // Draw lines from local node to each zero-hop neighbor with location
-    // zeroHopNeighbors contains PREFIXES, so we need to match by prefix
-    neighborsWithLocation.forEach(([hash, neighbor]) => {
-      if (!neighbor.latitude || !neighbor.longitude) return;
-      
-      const neighborPrefix = getHashPrefix(hash);
-      const isZeroHop = zeroHopNeighbors.has(hash) || zeroHopNeighbors.has(neighborPrefix);
-      
-      if (isZeroHop) {
-        const key = `zerohop-${hash}`;
-        if (!drawnKeys.has(key)) {
-          drawnKeys.add(key);
-          lines.push({
-            from: localCoords,
-            to: [neighbor.latitude, neighbor.longitude],
-            key,
-          });
-        }
-      }
-    });
-    
-    return lines;
-  }, [localNode, neighborsWithLocation, zeroHopNeighbors]);
-  
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
     const positions: [number, number][] = [];
@@ -425,27 +392,22 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw zero-hop direct connections as solid blue lines */}
-        {zeroHopLines.map(({ from, to, key }) => (
-          <Polyline
-            key={key}
-            positions={[from, to]}
-            pathOptions={{
-              color: SIGNAL_COLORS.zeroHop,
-              weight: 2.5,
-              opacity: 0.75,
-              lineCap: 'round',
-              lineJoin: 'round',
-            }}
-          />
-        ))}
-        
-        {/* Draw high-confidence topology connections with strength-based styling */}
+        {/* Draw topology connections with hop-distance based coloring */}
+        {/* Note: Zero-hop connections are now handled through proper topology analysis */}
         {topologyPolylines.map(({ from, to, edge }) => {
-          const weight = getEdgeWeight(edge.strength);
-          const color = getEdgeColor(edge.strength);
-          // Try to get full affinity data for richer tooltips
-          const affinity = meshTopology.fullAffinity.get(edge.fromHash) || meshTopology.fullAffinity.get(edge.toHash);
+          // Use hop-distance based styling
+          const normalizedCount = meshTopology.maxPacketCount > 0 
+            ? edge.packetCount / meshTopology.maxPacketCount 
+            : 0;
+          const weight = getEdgeWeightByHopDistance(edge.hopDistanceFromLocal, normalizedCount);
+          const color = getEdgeColorByHopDistance(edge.hopDistanceFromLocal, edge.isHubConnection);
+          
+          // Get names for tooltip
+          const fromNeighbor = neighbors[edge.fromHash];
+          const toNeighbor = neighbors[edge.toHash];
+          const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
+          const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
+          
           return (
             <Polyline
               key={`topology-${edge.key}`}
@@ -464,13 +426,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 className="topology-edge-tooltip"
               >
                 <div className="text-xs">
-                  <div className="font-medium">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
-                  <div className="text-text-muted">Confidence: {(edge.avgConfidence * 100).toFixed(0)}%</div>
-                  {affinity && affinity.typicalHopPosition > 0 && (
-                    <div className="text-text-muted">Typical: {affinity.typicalHopPosition}-hop</div>
-                  )}
-                  {affinity && affinity.directForwardCount > 0 && (
-                    <div className="text-accent-success">Direct: {affinity.directForwardCount}×</div>
+                  <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                  <div className="text-text-muted">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
+                  <div className="text-text-muted">
+                    {edge.hopDistanceFromLocal === 0 ? 'Direct to local' : 
+                     edge.hopDistanceFromLocal === 1 ? '1 hop from local' :
+                     `${edge.hopDistanceFromLocal} hops from local`}
+                  </div>
+                  {edge.isHubConnection && (
+                    <div className="text-amber-400">Hub connection</div>
                   )}
                 </div>
               </Tooltip>
@@ -521,13 +485,22 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
-          // Check if this is a zero-hop neighbor
+          // Check if this is a zero-hop neighbor or hub node
           const isZeroHop = zeroHopNeighbors.has(hash);
+          const isHub = meshTopology.hubNodes.includes(hash);
+          const centrality = meshTopology.centrality.get(hash) || 0;
           
-          // Zero-hop neighbors get royal blue; others colored by signal strength
+          // Hub nodes get amber, zero-hop gets blue, others by signal strength
           const meanSnr = calculateMeanSnr(packets, hash);
           const displaySnr = meanSnr ?? neighbor.snr;
-          const color = isZeroHop ? SIGNAL_COLORS.zeroHop : getSignalColor(displaySnr);
+          const color = isHub 
+            ? '#FBBF24' // amber-400 for hub nodes
+            : isZeroHop 
+              ? SIGNAL_COLORS.zeroHop 
+              : getSignalColor(displaySnr);
+          
+          // Hub nodes get larger markers
+          const markerSize = isHub ? 22 : 18;
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
@@ -539,7 +512,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             <Marker
               key={hash}
               position={[neighbor.latitude, neighbor.longitude]}
-              icon={createDotIcon(color, 18, isHovered)}
+              icon={createDotIcon(color, markerSize, isHovered)}
               eventHandlers={{
                 mouseover: () => setHoveredMarker(hash),
                 mouseout: () => setHoveredMarker(null),
@@ -548,17 +521,23 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               <Popup>
                 <div className="text-sm min-w-[150px]">
                   <strong className="text-base">{name}</strong>
-                  {isZeroHop && (
+                  {isHub && (
+                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>HUB</span>
+                  )}
+                  {isZeroHop && !isHub && (
                     <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}>DIRECT</span>
                   )}
-                  {affinity && affinity.typicalHopPosition > 0 && !isZeroHop && (
+                  {affinity && affinity.typicalHopPosition > 0 && !isZeroHop && !isHub && (
                     <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-surface-elevated text-text-secondary">{affinity.typicalHopPosition}-HOP</span>
                   )}
                   <div className="mt-1">
                     <HashBadge hash={hash} size="sm" />
                   </div>
                   <hr className="my-2" />
-                  {isZeroHop && (
+                  {isHub && centrality > 0 && (
+                    <div className="text-text-secondary mb-1">Role: <strong style={{ color: '#FBBF24' }}>Network Hub ({(centrality * 100).toFixed(0)}% centrality)</strong></div>
+                  )}
+                  {isZeroHop && !isHub && (
                     <div className="text-text-secondary mb-1">Connection: <strong style={{ color: SIGNAL_COLORS.zeroHop }}>Zero-hop (Direct RF)</strong></div>
                   )}
                   {affinity && affinity.frequency > 1 && (
@@ -682,23 +661,33 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               <span className="text-text-muted">Local</span>
             </div>
           </div>
-          {/* Topology legend */}
+          {/* Topology legend - hop distance based */}
           {topologyPolylines.length > 0 && (
             <>
-              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Links</div>
+              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Hops</div>
               <div className="flex flex-col gap-0.5">
                 <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.9)' }}></div>
+                  <span className="text-text-muted">0 (local)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
                   <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.8)' }}></div>
-                  <span className="text-text-muted">Strong</span>
+                  <span className="text-text-muted">1 hop</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.6)' }}></div>
-                  <span className="text-text-muted">Medium</span>
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(163, 230, 53, 0.7)' }}></div>
+                  <span className="text-text-muted">2 hops</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(255, 255, 255, 0.35)' }}></div>
-                  <span className="text-text-muted">Weak</span>
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 146, 60, 0.6)' }}></div>
+                  <span className="text-text-muted">3+ hops</span>
                 </div>
+                {meshTopology.hubNodes.length > 0 && (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 191, 36, 0.85)' }}></div>
+                    <span className="text-text-muted">Hub</span>
+                  </div>
+                )}
               </div>
             </>
           )}
