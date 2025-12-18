@@ -213,9 +213,17 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   }, [neighborsWithLocation, localNode, localHash]);
   
   // Build mesh topology with confidence-weighted edges (80% threshold)
+  // Pass local coordinates for proximity-based scoring
   const meshTopology = useMemo(() => {
-    return buildMeshTopology(packets, neighbors, localHash, 0.8);
-  }, [packets, neighbors, localHash]);
+    return buildMeshTopology(
+      packets, 
+      neighbors, 
+      localHash, 
+      0.8,
+      localNode?.latitude,
+      localNode?.longitude
+    );
+  }, [packets, neighbors, localHash, localNode?.latitude, localNode?.longitude]);
   
   // Generate polylines for high-confidence topology connections
   const topologyPolylines = useMemo(() => {
