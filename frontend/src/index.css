@@ -392,7 +392,7 @@ html {
    Setting transition-duration: 0s on :hover makes the "in" instant.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* Apply to interactive elements - buttons, links, cards */
+/* Apply to interactive elements - buttons, links, cards, rows */
 a,
 button,
 [role="button"],
@@ -404,7 +404,9 @@ button,
 .pill-subtle,
 .toggle-group-item,
 .roster-row,
-.nav-item {
+.nav-item,
+tbody tr,
+.packet-row {
   transition: all 0.15s ease-out;
 }
 
@@ -419,7 +421,9 @@ button:hover,
 .pill-subtle:hover,
 .toggle-group-item:hover,
 .roster-row:hover,
-.nav-item:hover {
+.nav-item:hover,
+tbody tr:hover,
+.packet-row:hover {
   transition-duration: 0s;
 }
 

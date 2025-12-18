@@ -33,7 +33,7 @@ function PacketTableRow({ packet, onClick, isFlashing = false }: PacketRowProps)
     <tr
       onClick={() => onClick(packet)}
       className={clsx(
-        'cursor-pointer transition-colors duration-150',
+        'cursor-pointer',
         'hover:bg-bg-subtle',
         isTruthy(packet.is_duplicate) && 'opacity-50',
         isFlashing && 'flash-row'
@@ -89,7 +89,7 @@ function PacketCardRow({ packet, onClick, isFlashing = false }: PacketRowProps) 
     <div
       onClick={() => onClick(packet)}
       className={clsx(
-        'px-3 py-2.5 cursor-pointer transition-colors duration-150',
+        'packet-row px-3 py-2.5 cursor-pointer',
         'hover:bg-bg-subtle',
         'active:bg-bg-elevated',
         isTruthy(packet.is_duplicate) && 'opacity-50',
