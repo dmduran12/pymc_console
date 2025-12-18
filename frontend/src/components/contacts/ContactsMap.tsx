@@ -6,7 +6,7 @@ import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology, getEdgeColorByHopDistance, getEdgeWeightByHopDistance, TopologyEdge } from '@/lib/mesh-topology';
+import { buildMeshTopology, getEdgeColorByHopDistance, getCertainEdgeWeight, getUncertainEdgeColor, TopologyEdge } from '@/lib/mesh-topology';
 
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
@@ -120,31 +120,6 @@ function getSignalColor(snr?: number): string {
   return SIGNAL_COLORS.critical;
 }
 
-// Parse paths from packets to infer mesh connections
-function inferMeshConnections(packets: Packet[]): Map<string, Set<string>> {
-  const connections = new Map<string, Set<string>>();
-  
-  const addConnection = (from: string, to: string) => {
-    if (!connections.has(from)) connections.set(from, new Set());
-    if (!connections.has(to)) connections.set(to, new Set());
-    connections.get(from)!.add(to);
-    connections.get(to)!.add(from); // Bidirectional
-  };
-  
-  for (const packet of packets) {
-    // Parse forwarded_path or original_path
-    const path = packet.forwarded_path ?? packet.original_path;
-    if (!path || !Array.isArray(path) || path.length < 2) continue;
-    
-    // Each consecutive pair in the path represents a connection
-    for (let i = 0; i < path.length - 1; i++) {
-      addConnection(path[i], path[i + 1]);
-    }
-  }
-  
-  return connections;
-}
-
 // Component to fit bounds only on initial load (not when user navigates)
 function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   const map = useMap();
@@ -225,15 +200,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     );
   }, [packets, neighbors, localHash, localNode?.latitude, localNode?.longitude]);
   
-  // Generate polylines for high-confidence topology connections
-  const topologyPolylines = useMemo(() => {
+  // Generate polylines for CERTAIN edges (100% validated connections)
+  const certainPolylines = useMemo(() => {
     const lines: Array<{
       from: [number, number];
       to: [number, number];
       edge: TopologyEdge;
     }> = [];
     
-    for (const edge of meshTopology.edges) {
+    for (const edge of meshTopology.certainEdges) {
       const fromCoords = nodeCoordinates.get(edge.fromHash);
       const toCoords = nodeCoordinates.get(edge.toHash);
       
@@ -246,40 +221,26 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     return lines;
   }, [meshTopology, nodeCoordinates]);
   
-  // Legacy mesh connections for fallback (low-confidence dotted lines)
-  const meshConnections = useMemo(() => {
-    return inferMeshConnections(packets);
-  }, [packets]);
-  
-  // Generate polylines for low-confidence mesh connections (not in topology)
-  const fallbackPolylines = useMemo(() => {
-    const lines: Array<{ from: [number, number]; to: [number, number]; key: string }> = [];
-    const drawnConnections = new Set<string>();
+  // Generate polylines for UNCERTAIN edges (inferred connections)
+  const uncertainPolylines = useMemo(() => {
+    const lines: Array<{
+      from: [number, number];
+      to: [number, number];
+      edge: TopologyEdge;
+    }> = [];
     
-    // Skip connections already in topology
-    const topologyKeys = new Set(meshTopology.edges.map(e => e.key));
-    
-    meshConnections.forEach((connectedNodes, nodeHash) => {
-      const fromCoords = nodeCoordinates.get(nodeHash);
-      if (!fromCoords) return;
+    for (const edge of meshTopology.uncertainEdges) {
+      const fromCoords = nodeCoordinates.get(edge.fromHash);
+      const toCoords = nodeCoordinates.get(edge.toHash);
       
-      connectedNodes.forEach(connectedHash => {
-        const connectionKey = [nodeHash, connectedHash].sort().join('-');
-        
-        // Skip if already drawn or in high-confidence topology
-        if (drawnConnections.has(connectionKey)) return;
-        if (topologyKeys.has(connectionKey)) return;
-        drawnConnections.add(connectionKey);
-        
-        const toCoords = nodeCoordinates.get(connectedHash);
-        if (!toCoords) return;
-        
-        lines.push({ from: fromCoords, to: toCoords, key: connectionKey });
-      });
-    });
+      // Only draw if both nodes have coordinates
+      if (!fromCoords || !toCoords) continue;
+      
+      lines.push({ from: fromCoords, to: toCoords, edge });
+    }
     
     return lines;
-  }, [meshConnections, meshTopology, nodeCoordinates]);
+  }, [meshTopology, nodeCoordinates]);
   
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
@@ -392,14 +353,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw topology connections with hop-distance based coloring */}
-        {/* Note: Zero-hop connections are now handled through proper topology analysis */}
-        {topologyPolylines.map(({ from, to, edge }) => {
-          // Use hop-distance based styling
-          const normalizedCount = meshTopology.maxPacketCount > 0 
-            ? edge.packetCount / meshTopology.maxPacketCount 
-            : 0;
-          const weight = getEdgeWeightByHopDistance(edge.hopDistanceFromLocal, normalizedCount);
+        {/* Draw CERTAIN edges as SOLID lines - thickness based on validation count */}
+        {certainPolylines.map(({ from, to, edge }) => {
+          // Thickness based on how many times this connection was validated
+          const weight = getCertainEdgeWeight(edge.certainCount, meshTopology.maxCertainCount);
+          // Color based on hop distance from local
           const color = getEdgeColorByHopDistance(edge.hopDistanceFromLocal, edge.isHubConnection);
           
           // Get names for tooltip
@@ -410,12 +368,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           
           return (
             <Polyline
-              key={`topology-${edge.key}`}
+              key={`certain-${edge.key}`}
               positions={[from, to]}
               pathOptions={{
                 color,
                 weight,
-                opacity: 0.85,
+                opacity: 0.9,
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
@@ -427,7 +385,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               >
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
-                  <div className="text-text-muted">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
+                  <div className="text-accent-success">Validated {edge.certainCount}×</div>
+                  <div className="text-text-muted">{edge.packetCount} total packet{edge.packetCount !== 1 ? 's' : ''}</div>
                   <div className="text-text-muted">
                     {edge.hopDistanceFromLocal === 0 ? 'Direct to local' : 
                      edge.hopDistanceFromLocal === 1 ? '1 hop from local' :
@@ -442,20 +401,43 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           );
         })}
         
-        {/* Draw low-confidence connections as faint dotted lines */}
-        {fallbackPolylines.map(({ from, to, key }) => (
-          <Polyline
-            key={`mesh-${key}`}
-            positions={[from, to]}
-            pathOptions={{
-              color: 'rgba(255, 255, 255, 0.12)',
-              weight: 1,
-              opacity: 1,
-              dashArray: '3, 8',
-              lineCap: 'round',
-            }}
-          />
-        ))}
+        {/* Draw UNCERTAIN edges as DOTTED lines - color based on confidence */}
+        {uncertainPolylines.map(({ from, to, edge }) => {
+          // Color based on confidence level
+          const color = getUncertainEdgeColor(edge.avgConfidence);
+          
+          // Get names for tooltip
+          const fromNeighbor = neighbors[edge.fromHash];
+          const toNeighbor = neighbors[edge.toHash];
+          const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
+          const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
+          
+          return (
+            <Polyline
+              key={`uncertain-${edge.key}`}
+              positions={[from, to]}
+              pathOptions={{
+                color,
+                weight: 1.5,
+                opacity: 1,
+                dashArray: '4, 6',
+                lineCap: 'round',
+              }}
+            >
+              <Tooltip
+                permanent={false}
+                direction="center"
+                className="topology-edge-tooltip"
+              >
+                <div className="text-xs">
+                  <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                  <div className="text-text-muted">Inferred ({(edge.avgConfidence * 100).toFixed(0)}% confidence)</div>
+                  <div className="text-text-muted">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
+                </div>
+              </Tooltip>
+            </Polyline>
+          );
+        })}
         
         {/* Local node marker - matte plastic style with CSS shadows */}
         {localNode && localNode.latitude && localNode.longitude && (
@@ -661,30 +643,44 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               <span className="text-text-muted">Local</span>
             </div>
           </div>
-          {/* Topology legend - hop distance based */}
-          {topologyPolylines.length > 0 && (
+          {/* Topology legend - certain vs uncertain edges */}
+          {(certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
             <>
-              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Hops</div>
+              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Links</div>
               <div className="flex flex-col gap-0.5">
+                {/* Certain edges - solid lines */}
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.9)' }}></div>
+                  <div className="w-4 h-0.5 flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.9)' }}></div>
+                  <span className="text-text-muted">Verified</span>
+                </div>
+                {/* Uncertain edges - dotted lines */}
+                <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 flex-shrink-0" style={{ 
+                    background: 'repeating-linear-gradient(90deg, rgba(196, 181, 253, 0.6) 0px, rgba(196, 181, 253, 0.6) 2px, transparent 2px, transparent 4px)'
+                  }}></div>
+                  <span className="text-text-muted">Inferred</span>
+                </div>
+                {/* Hop distance colors */}
+                <div className="text-text-secondary font-medium mt-1.5 mb-1">Hops</div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.9)' }}></div>
                   <span className="text-text-muted">0 (local)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.8)' }}></div>
-                  <span className="text-text-muted">1 hop</span>
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.8)' }}></div>
+                  <span className="text-text-muted">1</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(163, 230, 53, 0.7)' }}></div>
-                  <span className="text-text-muted">2 hops</span>
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(163, 230, 53, 0.7)' }}></div>
+                  <span className="text-text-muted">2</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 146, 60, 0.6)' }}></div>
-                  <span className="text-text-muted">3+ hops</span>
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 146, 60, 0.6)' }}></div>
+                  <span className="text-text-muted">3+</span>
                 </div>
                 {meshTopology.hubNodes.length > 0 && (
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 191, 36, 0.85)' }}></div>
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 191, 36, 0.85)' }}></div>
                     <span className="text-text-muted">Hub</span>
                   </div>
                 )}
