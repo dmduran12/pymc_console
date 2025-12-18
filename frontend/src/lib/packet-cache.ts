@@ -1,11 +1,14 @@
 /**
- * PacketCache - Intelligent caching layer for consistent topology
+ * PacketCache - Caching layer for packet data with localStorage persistence
  * 
  * Strategy:
- * 1. Bootstrap: Quick 24h fetch for immediate usability
- * 2. Deep Load: Background fetch of entire DB for complete topology
- * 3. Poll: Incremental updates for new packets
- * 4. Persist: localStorage survives page refresh
+ * 1. Load from localStorage on init (instant)
+ * 2. Quick fetch of 1,000 packets for fast startup
+ * 3. Background fetch of 20,000 packets for rich topology (~7 days)
+ * 4. Merge and deduplicate by packet_hash
+ * 5. Persist to localStorage
+ * 
+ * Note: Backend only supports /api/recent_packets with a limit.
  */
 
 import type { Packet } from '@/types/api';
@@ -13,23 +16,22 @@ import type { Packet } from '@/types/api';
 const STORAGE_KEY = 'pymc-packet-cache';
 const META_KEY = 'pymc-packet-cache-meta';
 const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour - clear cache if away longer
-const BOOTSTRAP_HOURS = 24;
-const DEEP_LOAD_BATCH_SIZE = 1000;
-const DEEP_LOAD_DELAY_MS = 100; // Small delay between batches to not overwhelm Pi
+const QUICK_FETCH_LIMIT = 1000;  // Fast initial load
+const DEEP_FETCH_LIMIT = 20000;  // Background load for full topology (~7 days)
+const POLL_LIMIT = 500;          // Incremental polling
 
 export interface PacketCacheMeta {
   oldestTimestamp: number;
   newestTimestamp: number;
   lastUpdated: number;
-  deepLoadComplete: boolean;
   packetCount: number;
+  deepLoadComplete: boolean;
 }
 
 export interface PacketCacheState {
-  isBootstrapping: boolean;
+  isLoading: boolean;
   isDeepLoading: boolean;
   packetCount: number;
-  deepLoadComplete: boolean;
 }
 
 type StateListener = (state: PacketCacheState) => void;
@@ -40,13 +42,12 @@ class PacketCache {
     oldestTimestamp: 0,
     newestTimestamp: 0,
     lastUpdated: 0,
-    deepLoadComplete: false,
     packetCount: 0,
+    deepLoadComplete: false,
   };
-  private isBootstrapping = false;
+  private isLoading = false;
   private isDeepLoading = false;
   private listeners: Set<StateListener> = new Set();
-  private deepLoadAborted = false;
 
   constructor() {
     this.loadFromStorage();
@@ -71,10 +72,9 @@ class PacketCache {
    */
   getState(): PacketCacheState {
     return {
-      isBootstrapping: this.isBootstrapping,
+      isLoading: this.isLoading,
       isDeepLoading: this.isDeepLoading,
       packetCount: this.packets.size,
-      deepLoadComplete: this.meta.deepLoadComplete,
     };
   }
 
@@ -87,59 +87,61 @@ class PacketCache {
   }
 
   /**
-   * Check if cache needs bootstrap (empty or stale)
+   * Check if cache is stale (away > 1hr)
    */
-  needsBootstrap(): boolean {
+  isStale(): boolean {
     if (this.packets.size === 0) return true;
     const age = Date.now() - this.meta.lastUpdated;
     return age > STALE_THRESHOLD_MS;
   }
 
   /**
-   * Check if deep load should run
+   * Quick load: Fast 1K packet fetch for immediate usability
+   * Triggers deep load in background automatically
    */
-  needsDeepLoad(): boolean {
-    return !this.meta.deepLoadComplete;
-  }
-
-  /**
-   * Bootstrap: Quick 24h fetch for immediate usability
-   */
-  async bootstrap(): Promise<Packet[]> {
-    // If cache is fresh, just return existing data
-    if (!this.needsBootstrap()) {
-      return this.getPackets();
-    }
-
-    // If stale (away > 1hr), clear everything
-    if (this.packets.size > 0) {
+  async quickLoad(): Promise<Packet[]> {
+    // If stale (away > 1hr), clear and refetch
+    if (this.isStale() && this.packets.size > 0) {
+      console.log('[PacketCache] Cache stale, clearing...');
       this.clear();
     }
 
-    this.isBootstrapping = true;
+    // Return cached data immediately if we have any
+    if (this.packets.size > 0) {
+      // Trigger deep load in background if not done
+      if (!this.meta.deepLoadComplete) {
+        this.deepLoad();
+      }
+      return this.getPackets();
+    }
+
+    // No cached data - do quick initial load
+    this.isLoading = true;
     this.notifyListeners();
 
     try {
-      const startTimestamp = Math.floor(Date.now() / 1000) - (BOOTSTRAP_HOURS * 3600);
-      const response = await this.fetchFilteredPackets(startTimestamp, undefined, 10000);
+      const response = await this.fetchRecentPackets(QUICK_FETCH_LIMIT);
       
       if (response.success && response.data) {
         this.mergePackets(response.data);
         this.saveToStorage();
+        console.log(`[PacketCache] Quick load: ${response.data.length} packets`);
       }
     } catch (error) {
-      console.error('[PacketCache] Bootstrap failed:', error);
+      console.error('[PacketCache] Quick load failed:', error);
     } finally {
-      this.isBootstrapping = false;
+      this.isLoading = false;
       this.notifyListeners();
     }
+
+    // Trigger deep load in background
+    this.deepLoad();
 
     return this.getPackets();
   }
 
   /**
-   * Deep Load: Fetch entire database in background
-   * Paginates backwards from oldest cached timestamp
+   * Deep load: Background fetch of 20K packets for full topology
    */
   async deepLoad(): Promise<void> {
     if (this.meta.deepLoadComplete || this.isDeepLoading) {
@@ -147,48 +149,18 @@ class PacketCache {
     }
 
     this.isDeepLoading = true;
-    this.deepLoadAborted = false;
     this.notifyListeners();
 
     try {
-      let fetchedCount = 0;
-      let iterations = 0;
-      const maxIterations = 100; // Safety limit
-
-      while (!this.deepLoadAborted && iterations < maxIterations) {
-        iterations++;
-        
-        // Fetch packets older than our oldest
-        const endTimestamp = this.meta.oldestTimestamp > 0 
-          ? this.meta.oldestTimestamp - 0.001 // Slightly before oldest to avoid duplicates
-          : undefined;
-        
-        const response = await this.fetchFilteredPackets(undefined, endTimestamp, DEEP_LOAD_BATCH_SIZE);
-        
-        if (!response.success || !response.data || response.data.length === 0) {
-          // No more packets - deep load complete
-          this.meta.deepLoadComplete = true;
-          this.saveToStorage();
-          break;
-        }
-
-        fetchedCount += response.data.length;
+      const response = await this.fetchRecentPackets(DEEP_FETCH_LIMIT);
+      
+      if (response.success && response.data) {
+        const beforeCount = this.packets.size;
         this.mergePackets(response.data);
+        this.meta.deepLoadComplete = true;
         this.saveToStorage();
-        this.notifyListeners();
-
-        // If we got fewer than batch size, we've reached the end
-        if (response.data.length < DEEP_LOAD_BATCH_SIZE) {
-          this.meta.deepLoadComplete = true;
-          this.saveToStorage();
-          break;
-        }
-
-        // Small delay to not overwhelm the Pi
-        await this.delay(DEEP_LOAD_DELAY_MS);
+        console.log(`[PacketCache] Deep load: +${this.packets.size - beforeCount} packets, total: ${this.packets.size}`);
       }
-
-      console.log(`[PacketCache] Deep load complete: ${fetchedCount} additional packets fetched`);
     } catch (error) {
       console.error('[PacketCache] Deep load failed:', error);
     } finally {
@@ -198,12 +170,11 @@ class PacketCache {
   }
 
   /**
-   * Poll: Incremental fetch for new packets
+   * Poll: Incremental fetch for new packets (smaller request)
    */
   async poll(): Promise<Packet[]> {
     try {
-      // Fetch recent packets (relies on existing SWR cache in api.ts)
-      const response = await this.fetchRecentPackets(200);
+      const response = await this.fetchRecentPackets(POLL_LIMIT);
       
       if (response.success && response.data) {
         const beforeCount = this.packets.size;
@@ -231,10 +202,9 @@ class PacketCache {
       oldestTimestamp: 0,
       newestTimestamp: 0,
       lastUpdated: 0,
-      deepLoadComplete: false,
       packetCount: 0,
+      deepLoadComplete: false,
     };
-    this.deepLoadAborted = true;
     this.clearStorage();
     this.notifyListeners();
   }
@@ -268,10 +238,6 @@ class PacketCache {
     for (const listener of this.listeners) {
       listener(state);
     }
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -338,26 +304,7 @@ class PacketCache {
   // API Calls (direct fetch to avoid circular dependency with api.ts)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private async fetchFilteredPackets(
-    startTimestamp?: number,
-    endTimestamp?: number,
-    limit = 1000
-  ): Promise<{ success: boolean; data?: Packet[] }> {
-    const API_BASE = import.meta.env.VITE_API_URL || '';
-    const params = new URLSearchParams();
-    if (startTimestamp !== undefined) params.set('start_timestamp', startTimestamp.toString());
-    if (endTimestamp !== undefined) params.set('end_timestamp', endTimestamp.toString());
-    params.set('limit', limit.toString());
-
-    const url = `${API_BASE}/api/filtered_packets?${params.toString()}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-    return response.json();
-  }
-
-  private async fetchRecentPackets(limit = 100): Promise<{ success: boolean; data?: Packet[] }> {
+  private async fetchRecentPackets(limit = 1000): Promise<{ success: boolean; data?: Packet[] }> {
     const API_BASE = import.meta.env.VITE_API_URL || '';
     const url = `${API_BASE}/api/recent_packets?limit=${limit}`;
     const response = await fetch(url);

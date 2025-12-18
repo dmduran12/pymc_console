@@ -50,11 +50,11 @@ export function Header() {
       {/* Status indicators */}
       <div className="flex items-center gap-6">
         {/* Building Topology indicator or Packet count */}
-        {(cacheState.isBootstrapping || cacheState.isDeepLoading) ? (
+        {(cacheState.isLoading || cacheState.isDeepLoading) ? (
           <div className="flex items-center gap-2 px-2 py-1 rounded bg-surface-secondary/50">
             <Loader2 className="w-3.5 h-3.5 text-accent-secondary animate-spin" />
             <span className="type-data-xs text-accent-secondary">
-              {cacheState.isBootstrapping 
+              {cacheState.isLoading 
                 ? 'Loading packets...'
                 : `Building topology... ${cacheState.packetCount.toLocaleString()} packets`
               }

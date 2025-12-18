@@ -254,11 +254,11 @@ export function Sidebar() {
       {/* Packet Cache Status */}
       <div className="px-3 py-3">
         <div className="bg-white/[0.03] rounded-xl p-3">
-          {(cacheState.isBootstrapping || cacheState.isDeepLoading) ? (
+          {(cacheState.isLoading || cacheState.isDeepLoading) ? (
             <div className="flex items-center gap-2">
               <Loader2 className="w-4 h-4 text-accent-secondary animate-spin" />
               <span className="type-data-xs text-accent-secondary">
-                {cacheState.isBootstrapping 
+                {cacheState.isLoading 
                   ? 'Loading packets...'
                   : `Building topology... ${cacheState.packetCount.toLocaleString()}`
                 }
