@@ -264,15 +264,35 @@ function getConfidenceColor(confidence: number): string {
 }
 
 /**
- * Get color class for hop badge based on confidence
+ * Get inline style color for hop badge based on confidence.
+ * Uses inline styles to guarantee color application regardless of CSS specificity.
  */
-function getHopBadgeColor(confidence: number, candidateCount: number): string {
-  if (candidateCount === 0) return 'text-text-muted';     // Unknown - gray
-  if (confidence >= 1) return 'text-accent-success';      // 100% - green
-  if (confidence >= 0.5) return 'text-accent-secondary';  // 50-99% - yellow  
-  if (confidence >= 0.25) return 'text-signal-poor';      // 25-49% - orange (uses theme var)
-  if (confidence > 0) return 'text-accent-danger';        // 1-24% - red
-  return 'text-text-muted';                               // fallback - gray
+function getHopBadgeStyle(confidence: number, candidateCount: number): React.CSSProperties {
+  // Color values from the design system
+  const colors = {
+    success: '#39D98A',    // Green - 100% confidence
+    secondary: '#F9D26F',  // Yellow - 50-99%
+    poor: '#FF8A5C',       // Orange - 25-49%
+    danger: '#FF5C7A',     // Red - 1-24%
+    muted: '#767688',      // Gray - unknown/0%
+  };
+  
+  let color: string;
+  if (candidateCount === 0) {
+    color = colors.muted;     // Unknown - gray
+  } else if (confidence >= 1) {
+    color = colors.success;   // 100% - green
+  } else if (confidence >= 0.5) {
+    color = colors.secondary; // 50-99% - yellow  
+  } else if (confidence >= 0.25) {
+    color = colors.poor;      // 25-49% - orange
+  } else if (confidence > 0) {
+    color = colors.danger;    // 1-24% - red
+  } else {
+    color = colors.muted;     // fallback - gray
+  }
+  
+  return { color };
 }
 
 // Error boundary for map loading
@@ -389,7 +409,7 @@ export function PathMapVisualization({
                 : `${hop.totalMatches} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
             }
           >
-            <span className={getHopBadgeColor(hop.confidence, hop.totalMatches)}>
+            <span style={getHopBadgeStyle(hop.confidence, hop.totalMatches)}>
               {hop.prefix}
             </span>
             {hop.totalMatches > 1 && (
