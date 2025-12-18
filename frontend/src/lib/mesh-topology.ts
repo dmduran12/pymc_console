@@ -846,3 +846,51 @@ export function getUncertainEdgeColor(confidence: number): string {
     return 'rgba(253, 186, 116, 0.3)'; // orange-300
   }
 }
+
+/**
+ * Get color for a CERTAIN edge based on link quality (validation frequency).
+ * Green = strong/frequent, Yellow = moderate, Orange/Red = weak/infrequent.
+ * 
+ * @param certainCount - Number of certain observations
+ * @param maxCertainCount - Maximum certain count for normalization
+ */
+export function getLinkQualityColor(certainCount: number, maxCertainCount: number): string {
+  const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
+  
+  if (normalized >= 0.7) {
+    // Strong link - bright green
+    return 'rgba(74, 222, 128, 0.9)'; // green-400
+  } else if (normalized >= 0.4) {
+    // Moderate link - lime/yellow-green
+    return 'rgba(163, 230, 53, 0.8)'; // lime-400
+  } else if (normalized >= 0.2) {
+    // Weaker link - yellow
+    return 'rgba(250, 204, 21, 0.7)'; // yellow-400
+  } else if (normalized >= 0.1) {
+    // Weak link - orange
+    return 'rgba(251, 146, 60, 0.6)'; // orange-400
+  } else {
+    // Very weak link - red/coral
+    return 'rgba(248, 113, 113, 0.5)'; // red-400
+  }
+}
+
+/**
+ * Get line weight for a CERTAIN edge based on link quality (validation frequency).
+ * More frequent = thicker (stronger link).
+ * 
+ * @param certainCount - Number of certain observations
+ * @param maxCertainCount - Maximum certain count for normalization
+ * @param minWeight - Minimum line weight
+ * @param maxWeight - Maximum line weight
+ */
+export function getLinkQualityWeight(
+  certainCount: number,
+  maxCertainCount: number,
+  minWeight: number = 1,
+  maxWeight: number = 5
+): number {
+  const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
+  // Use sqrt for a more gradual scale (so thin lines aren't too thin)
+  return minWeight + (maxWeight - minWeight) * Math.sqrt(normalized);
+}

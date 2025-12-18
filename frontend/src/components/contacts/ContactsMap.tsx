@@ -6,7 +6,7 @@ import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology, getEdgeColorByHopDistance, getCertainEdgeWeight, getUncertainEdgeColor, TopologyEdge } from '@/lib/mesh-topology';
+import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, getUncertainEdgeColor, TopologyEdge } from '@/lib/mesh-topology';
 
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
@@ -399,18 +399,23 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw CERTAIN edges as SOLID lines - thickness based on validation count */}
+        {/* Draw CERTAIN edges as SOLID lines - color & thickness based on link quality */}
         {filteredCertainPolylines.map(({ from, to, edge }) => {
-          // Thickness based on how many times this connection was validated
-          const weight = getCertainEdgeWeight(edge.certainCount, meshTopology.maxCertainCount);
-          // Color based on hop distance from local
-          const color = getEdgeColorByHopDistance(edge.hopDistanceFromLocal, edge.isHubConnection);
+          // Color based on link quality (green=strong, red=weak)
+          const color = getLinkQualityColor(edge.certainCount, meshTopology.maxCertainCount);
+          // Thickness based on validation frequency (thicker=stronger link)
+          const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
           
           // Get names for tooltip
           const fromNeighbor = neighbors[edge.fromHash];
           const toNeighbor = neighbors[edge.toHash];
           const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
           const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
+          
+          // Calculate link quality percentage for tooltip
+          const linkQuality = meshTopology.maxCertainCount > 0 
+            ? Math.round((edge.certainCount / meshTopology.maxCertainCount) * 100)
+            : 0;
           
           return (
             <Polyline
@@ -431,13 +436,10 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               >
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
-                  <div className="text-accent-success">Validated {edge.certainCount}×</div>
-                  <div className="text-text-muted">{edge.packetCount} total packet{edge.packetCount !== 1 ? 's' : ''}</div>
-                  <div className="text-text-muted">
-                    {edge.hopDistanceFromLocal === 0 ? 'Direct to local' : 
-                     edge.hopDistanceFromLocal === 1 ? '1 hop from local' :
-                     `${edge.hopDistanceFromLocal} hops from local`}
+                  <div style={{ color }}>
+                    Link quality: {linkQuality}% ({edge.certainCount} validations)
                   </div>
+                  <div className="text-text-muted">{edge.packetCount} total packet{edge.packetCount !== 1 ? 's' : ''}</div>
                   {edge.isHubConnection && (
                     <div className="text-amber-400">Hub connection</div>
                   )}
@@ -714,45 +716,35 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               <span className="text-text-muted">Local</span>
             </div>
           </div>
-          {/* Topology legend - certain vs uncertain edges */}
+          {/* Topology legend - link quality based */}
           {(certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
             <>
               <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Links</div>
               <div className="flex flex-col gap-0.5">
-                {/* Certain edges - solid lines */}
+                {/* Link quality gradient for verified edges */}
                 <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0.5 flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.9)' }}></div>
-                  <span className="text-text-muted">Verified</span>
+                  <div className="w-4 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.9)' }}></div>
+                  <span className="text-text-muted">Strong</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(250, 204, 21, 0.7)' }}></div>
+                  <span className="text-text-muted">Moderate</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-px rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(248, 113, 113, 0.5)' }}></div>
+                  <span className="text-text-muted">Weak</span>
                 </div>
                 {/* Uncertain edges - dotted lines */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
                   <div className="w-4 h-0.5 flex-shrink-0" style={{ 
                     background: 'repeating-linear-gradient(90deg, rgba(196, 181, 253, 0.6) 0px, rgba(196, 181, 253, 0.6) 2px, transparent 2px, transparent 4px)'
                   }}></div>
                   <span className="text-text-muted">Inferred</span>
                 </div>
-                {/* Hop distance colors */}
-                <div className="text-text-secondary font-medium mt-1.5 mb-1">Hops</div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.9)' }}></div>
-                  <span className="text-text-muted">0 (local)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.8)' }}></div>
-                  <span className="text-text-muted">1</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(163, 230, 53, 0.7)' }}></div>
-                  <span className="text-text-muted">2</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 146, 60, 0.6)' }}></div>
-                  <span className="text-text-muted">3+</span>
-                </div>
                 {meshTopology.hubNodes.length > 0 && (
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 191, 36, 0.85)' }}></div>
-                    <span className="text-text-muted">Hub</span>
+                    <span className="text-text-muted">Hub node</span>
                   </div>
                 )}
               </div>

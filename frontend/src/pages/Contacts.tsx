@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
-import { Signal, Radio, MapPin, Repeat, Users, X } from 'lucide-react';
+import { Signal, Radio, MapPin, Repeat, Users, X, Network } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { buildMeshTopology } from '@/lib/mesh-topology';
 
 // Get signal color for card badges based on SNR
 function getSignalColor(snr?: number): string {
@@ -49,6 +50,21 @@ export default function Contacts() {
   const contactsWithLocation = contactEntries.filter(
     ([, n]) => n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0
   ).length;
+  
+  // Build mesh topology to identify hub nodes
+  const meshTopology = useMemo(() => {
+    return buildMeshTopology(
+      packets,
+      visibleContacts,
+      localHash,
+      0.8,
+      localNode?.latitude,
+      localNode?.longitude
+    );
+  }, [packets, visibleContacts, localHash, localNode?.latitude, localNode?.longitude]);
+  
+  // Create set of hub nodes for quick lookup
+  const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
 
   return (
     <div className="section-gap">
@@ -98,10 +114,11 @@ export default function Contacts() {
               const hasLocation = contact.latitude && contact.longitude && 
                                   contact.latitude !== 0 && contact.longitude !== 0;
               const displayName = contact.node_name || contact.name || 'Unknown';
+              const isHub = hubNodeSet.has(hash);
               
               return (
                 <div key={hash}>
-                  <div className="roster-row">
+                  <div className={`roster-row ${isHub ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''}`}>
                     {/* Icon with signal indicator */}
                     <div className="relative">
                       <div className="roster-icon">
@@ -118,6 +135,12 @@ export default function Contacts() {
                     <div className="roster-content">
                       <div className="flex items-center gap-2">
                         <span className="roster-title">{displayName}</span>
+                        {isHub && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded flex items-center gap-1" style={{ backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#FBBF24' }}>
+                            <Network className="w-3 h-3" />
+                            HUB
+                          </span>
+                        )}
                         {contact.is_repeater && (
                           <span className="pill-tag">RPT</span>
                         )}
