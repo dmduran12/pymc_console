@@ -575,14 +575,13 @@ export function buildMeshTopology(
     // Track which nodes appear in this path (for centrality)
     const nodesInPath = new Set<string>();
     
-    // === ADVERT SOURCE → FIRST HOP INFERENCE ===
-    // For adverts (type=4), we can infer an edge from the source to the first hop in the path
-    // This tells us who the source's direct neighbor is (on the source's side of the network)
-    const packetType = packet.type ?? packet.payload_type;
-    if (packetType === 4 && packet.src_hash && path.length >= 1) {
+    // === SOURCE → FIRST HOP INFERENCE (ALL PACKET TYPES) ===
+    // For any packet with src_hash, we can infer an edge from the source to the first hop
+    // This reveals the source's direct RF neighbor on their side of the network
+    if (packet.src_hash && path.length >= 1) {
       const firstHopPrefix = path[0];
       
-      // Resolve the first hop (this is the node that received the advert directly from source)
+      // Resolve the first hop (this is the node that received the packet directly from source)
       const firstHopMatches = matchPrefix(firstHopPrefix, neighbors, localHash, neighborAffinity, false);
       const firstHopResolved = resolveHop(firstHopPrefix, neighbors, localHash, neighborAffinity, false);
       
@@ -605,6 +604,30 @@ export function buildMeshTopology(
         // Track for centrality
         nodesInPath.add(srcHash);
         nodesInPath.add(firstHopResolved.hash);
+      }
+    }
+    
+    // === LAST HOP → LOCAL INFERENCE (ALL PACKET TYPES) ===
+    // The last element in the path is always our direct neighbor who forwarded to us
+    // This is a 100% CERTAIN edge - we received the packet directly from them!
+    if (localHash && path.length >= 1) {
+      const lastHopPrefix = path[path.length - 1];
+      
+      // Resolve the last hop
+      const lastHopMatches = matchPrefix(lastHopPrefix, neighbors, localHash, neighborAffinity, true);
+      const lastHopResolved = resolveHop(lastHopPrefix, neighbors, localHash, neighborAffinity, true);
+      
+      if (lastHopResolved.hash && lastHopResolved.hash !== localHash) {
+        // This edge touches local directly - hop distance = 0
+        // Certainty depends on whether last hop uniquely resolves
+        const isCertain = lastHopMatches.matches.length === 1;
+        const confidence = isCertain ? 1 : lastHopResolved.confidence;
+        
+        addEdgeObservation(lastHopResolved.hash, localHash, confidence, isCertain, 0);
+        
+        // Track for centrality
+        nodesInPath.add(lastHopResolved.hash);
+        nodesInPath.add(localHash);
       }
     }
     

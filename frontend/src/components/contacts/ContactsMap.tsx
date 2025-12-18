@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Users } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Users, GitBranch, EyeOff } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
@@ -273,6 +273,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   // Hub-only view toggle
   const [showHubsOnly, setShowHubsOnly] = useState(false);
   
+  // Show/hide topology toggle
+  const [showTopology, setShowTopology] = useState(true);
+  
   // Build set of hub nodes and their connected neighbors for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
   
@@ -400,7 +403,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         <FitBoundsOnce positions={allPositions} />
         
         {/* Draw CERTAIN edges as SOLID lines - color & thickness based on link quality */}
-        {filteredCertainPolylines.map(({ from, to, edge }) => {
+        {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
           // Color based on link quality (green=strong, red=weak)
           const color = getLinkQualityColor(edge.certainCount, meshTopology.maxCertainCount);
           // Thickness based on validation frequency (thicker=stronger link)
@@ -450,7 +453,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         })}
         
         {/* Draw UNCERTAIN edges as DOTTED lines - color based on confidence */}
-        {filteredUncertainPolylines.map(({ from, to, edge }) => {
+        {showTopology && filteredUncertainPolylines.map(({ from, to, edge }) => {
           // Color based on confidence level
           const color = getUncertainEdgeColor(edge.avgConfidence);
           
@@ -629,8 +632,30 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         
         {/* Map controls - top right */}
         <div className="absolute top-4 right-4 z-[600] flex gap-2">
-          {/* Hub-only toggle - only show if there are hubs */}
-          {meshTopology.hubNodes.length > 0 && (
+          {/* Show/hide topology toggle */}
+          {(certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
+            <button
+              onClick={() => setShowTopology(!showTopology)}
+              className="p-2 transition-colors hover:bg-white/10"
+              style={{
+                background: showTopology ? 'rgba(74, 222, 128, 0.15)' : 'rgba(20, 20, 22, 0.85)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                borderRadius: '0.75rem',
+                border: showTopology ? '1px solid rgba(74, 222, 128, 0.4)' : '1px solid rgba(140, 160, 200, 0.2)',
+              }}
+              title={showTopology ? 'Hide topology' : 'Show topology'}
+            >
+              {showTopology ? (
+                <GitBranch className="w-4 h-4 text-green-400" />
+              ) : (
+                <EyeOff className="w-4 h-4 text-text-secondary" />
+              )}
+            </button>
+          )}
+          
+          {/* Hub-only toggle - only show if there are hubs and topology is visible */}
+          {showTopology && meshTopology.hubNodes.length > 0 && (
             <button
               onClick={() => setShowHubsOnly(!showHubsOnly)}
               className="p-2 transition-colors hover:bg-white/10"
@@ -716,8 +741,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               <span className="text-text-muted">Local</span>
             </div>
           </div>
-          {/* Topology legend - link quality based */}
-          {(certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
+          {/* Topology legend - link quality based (only show when topology visible) */}
+          {showTopology && (certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
             <>
               <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Links</div>
               <div className="flex flex-col gap-0.5">
