@@ -103,6 +103,26 @@ class TopologyService {
     // Deserialize and store result
     this.currentTopology = deserializeTopology(message.payload);
     
+    // DEBUG: Log topology stats including edges touching local
+    const localPrefix = this.currentTopology.localPrefix;
+    const localEdges = this.currentTopology.edges.filter(e => 
+      e.fromHash.includes(localPrefix || 'XXX') || e.toHash.includes(localPrefix || 'XXX') ||
+      e.fromHash.startsWith('0x') || e.toHash.startsWith('0x')
+    );
+    console.log(`[TopologyService] Computed in ${message.computeTimeMs.toFixed(0)}ms:`, {
+      totalEdges: this.currentTopology.edges.length,
+      validatedEdges: this.currentTopology.validatedEdges.length,
+      hubNodes: this.currentTopology.hubNodes.length,
+      localPrefix,
+      edgesTouchingLocal: localEdges.length,
+      localEdgeSample: localEdges.slice(0, 5).map(e => ({
+        from: e.fromHash.slice(0, 10),
+        to: e.toHash.slice(0, 10),
+        certainCount: e.certainCount,
+        validated: e.certainCount >= 5,
+      })),
+    });
+    
     // Notify listeners
     for (const listener of this.listeners) {
       try {
