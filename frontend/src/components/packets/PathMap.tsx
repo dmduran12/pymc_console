@@ -68,9 +68,14 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
     if (positions.length > 0 && !hasFitted.current) {
       hasFitted.current = true;
       if (positions.length === 1) {
-        map.setView(positions[0], 12);
+        // Single point - zoom in close
+        map.setView(positions[0], 15);
       } else {
-        map.fitBounds(positions, { padding: [30, 30], maxZoom: 14 });
+        // Multiple points - fit bounds to show all markers with padding
+        map.fitBounds(positions, { 
+          padding: [30, 30], 
+          maxZoom: 16,  // Allow zooming in close for nearby nodes
+        });
       }
     }
   }, [map, positions]);
