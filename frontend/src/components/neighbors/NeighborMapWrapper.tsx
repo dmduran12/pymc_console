@@ -1,5 +1,5 @@
 import { Suspense, lazy, Component, ReactNode } from 'react';
-import { NeighborInfo } from '@/types/api';
+import { NeighborInfo, Packet } from '@/types/api';
 
 interface LocalNode {
   latitude: number;
@@ -10,6 +10,8 @@ interface LocalNode {
 interface NeighborMapWrapperProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
+  packets?: Packet[];
+  onRemoveNode?: (hash: string) => void;
 }
 
 // Error boundary to catch Leaflet loading errors
@@ -48,7 +50,7 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
 // Lazy import - Leaflet requires window object
 const NeighborMap = lazy(() => import('./NeighborMap'));
 
-export default function NeighborMapWrapper({ neighbors, localNode }: NeighborMapWrapperProps) {
+export default function NeighborMapWrapper({ neighbors, localNode, packets, onRemoveNode }: NeighborMapWrapperProps) {
   return (
     <MapErrorBoundary>
       <Suspense fallback={
@@ -56,7 +58,7 @@ export default function NeighborMapWrapper({ neighbors, localNode }: NeighborMap
           <div className="text-white/50">Loading map...</div>
         </div>
       }>
-        <NeighborMap neighbors={neighbors} localNode={localNode} />
+        <NeighborMap neighbors={neighbors} localNode={localNode} packets={packets} onRemoveNode={onRemoveNode} />
       </Suspense>
     </MapErrorBoundary>
   );

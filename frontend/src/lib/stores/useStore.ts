@@ -13,6 +13,7 @@ export interface ResourceDataPoint {
 // localStorage key for resource history persistence
 const RESOURCE_HISTORY_KEY = 'pymc-resource-history';
 const RESOURCE_LAST_FETCH_KEY = 'pymc-resource-last-fetch';
+const HIDDEN_NEIGHBORS_KEY = 'pymc-hidden-neighbors';
 
 /** Load resource history from localStorage */
 function loadResourceHistory(): ResourceDataPoint[] {
@@ -26,6 +27,30 @@ function loadResourceHistory(): ResourceDataPoint[] {
     // Ignore localStorage errors (e.g., in SSR or incognito)
   }
   return [];
+}
+
+/** Load hidden neighbors set from localStorage */
+function loadHiddenNeighbors(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const stored = localStorage.getItem(HIDDEN_NEIGHBORS_KEY);
+    if (stored) {
+      return new Set(JSON.parse(stored) as string[]);
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+  return new Set();
+}
+
+/** Save hidden neighbors set to localStorage */
+function saveHiddenNeighbors(hidden: Set<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(HIDDEN_NEIGHBORS_KEY, JSON.stringify([...hidden]));
+  } catch {
+    // Ignore localStorage errors
+  }
 }
 
 /** Load last fetch timestamp from localStorage */
@@ -80,6 +105,9 @@ interface StoreState {
   resourceHistory: ResourceDataPoint[];
   lastResourceFetch: number; // Prevent duplicate entries
 
+  // Hidden neighbors (user-removed nodes, persisted to localStorage)
+  hiddenNeighbors: Set<string>;
+
   // Initialization flag
   initialized: boolean;
   
@@ -96,6 +124,7 @@ interface StoreState {
   triggerFlashReceived: () => void;
   triggerFlashAdvert: () => void;
   addResourceDataPoint: (cpu: number, memory: number, maxSlots: number) => void;
+  hideNeighbor: (hash: string) => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -119,6 +148,7 @@ const store = create<StoreState>((set, get) => ({
 
   resourceHistory: loadResourceHistory(),
   lastResourceFetch: loadLastResourceFetch(),
+  hiddenNeighbors: loadHiddenNeighbors(),
   initialized: false,
 
   // Actions
@@ -336,6 +366,14 @@ const store = create<StoreState>((set, get) => ({
     // Persist to localStorage
     saveResourceHistory(trimmed, now);
   },
+
+  hideNeighbor: (hash: string) => {
+    const { hiddenNeighbors } = get();
+    const updated = new Set(hiddenNeighbors);
+    updated.add(hash);
+    set({ hiddenNeighbors: updated });
+    saveHiddenNeighbors(updated);
+  },
 }));
 
 // Main store hook (full access)
@@ -367,3 +405,5 @@ export const useTriggerFlashReceived = () => store((s) => s.triggerFlashReceived
 export const useTriggerFlashAdvert = () => store((s) => s.triggerFlashAdvert);
 export const useResourceHistory = () => store((s) => s.resourceHistory);
 export const useAddResourceDataPoint = () => store((s) => s.addResourceDataPoint);
+export const useHiddenNeighbors = () => store((s) => s.hiddenNeighbors);
+export const useHideNeighbor = () => store((s) => s.hideNeighbor);

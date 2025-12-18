@@ -1,11 +1,25 @@
-import { useStore } from '@/lib/stores/useStore';
-import { Users, Signal, Radio, MapPin, Repeat } from 'lucide-react';
+import { useMemo } from 'react';
+import { useStore, useHiddenNeighbors, useHideNeighbor } from '@/lib/stores/useStore';
+import { Map, Signal, Radio, MapPin, Repeat, Users, X } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import NeighborMapWrapper from '@/components/neighbors/NeighborMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
+import type { Packet } from '@/types/api';
+
+// Calculate mean SNR from packets for a given source hash (for zero-hop nodes)
+function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefined {
+  const nodePackets = packets.filter(p => p.src_hash === srcHash && p.snr !== undefined);
+  if (nodePackets.length === 0) return undefined;
+  
+  const sum = nodePackets.reduce((acc, p) => acc + (p.snr ?? 0), 0);
+  return sum / nodePackets.length;
+}
 
 // Get signal color for card badges based on SNR
-function getSignalColor(snr?: number): string {
+function getSignalColor(snr?: number, isMultiHop: boolean = false): string {
+  // Multi-hop nodes get deep royal blue
+  if (isMultiHop) return 'bg-[#1E3A8A]';
+  
   if (snr === undefined) return 'bg-[var(--signal-unknown)]';
   if (snr >= 5) return 'bg-[var(--signal-excellent)]';
   if (snr >= 0) return 'bg-[var(--signal-good)]';
@@ -15,9 +29,20 @@ function getSignalColor(snr?: number): string {
 }
 
 export default function Neighbors() {
-  const { stats } = useStore();
+  const { stats, packets } = useStore();
+  const hiddenNeighbors = useHiddenNeighbors();
+  const hideNeighbor = useHideNeighbor();
+  
   const neighbors = stats?.neighbors ?? {};
-  const neighborEntries = Object.entries(neighbors);
+  
+  // Filter out hidden neighbors
+  const visibleNeighbors = useMemo(() => {
+    return Object.fromEntries(
+      Object.entries(neighbors).filter(([hash]) => !hiddenNeighbors.has(hash))
+    );
+  }, [neighbors, hiddenNeighbors]);
+  
+  const neighborEntries = Object.entries(visibleNeighbors);
   
   // Get local node info from config
   const localNode = stats?.config?.repeater ? {
@@ -36,8 +61,8 @@ export default function Neighbors() {
       {/* Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
         <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Users className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          Neighbors
+          <Map className="w-6 h-6 text-accent-primary flex-shrink-0" />
+          Map
         </h1>
         <div className="flex items-baseline gap-3 sm:gap-4">
           <span className="roster-title tabular-nums">{neighborEntries.length} node{neighborEntries.length !== 1 ? 's' : ''}</span>
@@ -52,7 +77,12 @@ export default function Neighbors() {
       
       {/* Map */}
       <div className="relative">
-        <NeighborMapWrapper neighbors={neighbors} localNode={localNode} />
+        <NeighborMapWrapper 
+          neighbors={visibleNeighbors} 
+          localNode={localNode} 
+          packets={packets}
+          onRemoveNode={hideNeighbor}
+        />
       </div>
 
       {/* Neighbors List */}
@@ -73,7 +103,11 @@ export default function Neighbors() {
               const hasLocation = neighbor.latitude && neighbor.longitude && 
                                   neighbor.latitude !== 0 && neighbor.longitude !== 0;
               const displayName = neighbor.node_name || neighbor.name || 'Unknown';
-              const snr = neighbor.snr ?? 0;
+              const isZeroHop = neighbor.zero_hop === true;
+              
+              // For zero-hop nodes, use mean SNR from packets; for multi-hop, show special color
+              const meanSnr = isZeroHop ? calculateMeanSnr(packets, hash) : undefined;
+              const displaySnr = isZeroHop ? (meanSnr ?? neighbor.snr) : neighbor.snr;
               
               return (
                 <div key={hash}>
@@ -87,7 +121,7 @@ export default function Neighbors() {
                           <Radio className="w-5 h-5 text-text-muted" />
                         )}
                       </div>
-                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(neighbor.snr)} border-2 border-bg-surface`} />
+                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(displaySnr, !isZeroHop)} border-2 border-bg-surface`} />
                     </div>
                     
                     {/* Main content */}
@@ -103,16 +137,22 @@ export default function Neighbors() {
                     
                     {/* Metrics row */}
                     <div className="roster-metrics">
-                      {neighbor.rssi !== undefined && (
-                        <div className="flex items-center gap-1.5">
-                          <Signal className="w-3.5 h-3.5" />
-                          <span className="type-data-xs tabular-nums">{neighbor.rssi}</span>
-                        </div>
-                      )}
-                      {neighbor.snr !== undefined && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="type-data-xs tabular-nums">{snr.toFixed(1)} dB</span>
-                        </div>
+                      {isZeroHop ? (
+                        <>
+                          {neighbor.rssi !== undefined && (
+                            <div className="flex items-center gap-1.5">
+                              <Signal className="w-3.5 h-3.5" />
+                              <span className="type-data-xs tabular-nums">{neighbor.rssi}</span>
+                            </div>
+                          )}
+                          {displaySnr !== undefined && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="type-data-xs tabular-nums">{displaySnr.toFixed(1)} dB</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="type-data-xs text-text-muted">Multi-hop</span>
                       )}
                       {hasLocation && (
                         <MapPin className="w-3.5 h-3.5 text-accent-tertiary" />
@@ -123,6 +163,15 @@ export default function Neighbors() {
                     <div className="roster-metric">
                       {neighbor.last_seen ? formatRelativeTime(neighbor.last_seen) : '—'}
                     </div>
+                    
+                    {/* Remove button */}
+                    <button
+                      onClick={() => hideNeighbor(hash)}
+                      className="ml-2 p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Remove node"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                   
                   {/* Separator between rows */}
