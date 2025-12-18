@@ -1,8 +1,6 @@
-
-
-import { useStore } from '@/lib/stores/useStore';
+import { useStore, usePacketCacheState } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
-import { Circle, Clock } from 'lucide-react';
+import { Circle, Clock, Loader2 } from 'lucide-react';
 
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -20,6 +18,7 @@ function formatUptime(seconds: number): string {
 
 export function Header() {
   const { stats, fetchStats } = useStore();
+  const cacheState = usePacketCacheState();
 
   // Poll stats every 5 seconds
   usePolling(fetchStats, 5000);
@@ -49,6 +48,16 @@ export function Header() {
 
       {/* Status indicators */}
       <div className="flex items-center gap-6">
+        {/* Building Topology indicator */}
+        {cacheState.isDeepLoading && (
+          <div className="flex items-center gap-2 px-2 py-1 rounded bg-surface-secondary/50">
+            <Loader2 className="w-3.5 h-3.5 text-accent-secondary animate-spin" />
+            <span className="type-data-xs text-accent-secondary">
+              Building topology... {cacheState.packetCount.toLocaleString()} packets
+            </span>
+          </div>
+        )}
+
         {/* Uptime */}
         {stats && stats.uptime_seconds !== undefined && (
           <div className="flex items-center gap-2">
