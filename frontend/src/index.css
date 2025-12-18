@@ -444,7 +444,7 @@ a, button {
 }
 
 body {
-  background: var(--bg-body);
+  background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-display), system-ui, -apple-system, sans-serif;
   font-weight: var(--font-normal);
