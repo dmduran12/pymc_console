@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Users, GitBranch, EyeOff } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Users, GitBranch, EyeOff, Info } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, getUncertainEdgeColor, TopologyEdge } from '@/lib/mesh-topology';
+import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, TopologyEdge } from '@/lib/mesh-topology';
 
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
@@ -276,6 +276,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   // Show/hide topology toggle
   const [showTopology, setShowTopology] = useState(true);
   
+  // Show/hide hub markers toggle (independent of topology)
+  const [showHubs, setShowHubs] = useState(true);
+  
   // Build set of hub nodes and their connected neighbors for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
   
@@ -402,23 +405,26 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw CERTAIN edges as SOLID lines - color & thickness based on link quality */}
+        {/* Draw CERTAIN edges - SOLID if strong, DOTTED if weak */}
         {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
           // Color based on link quality (green=strong, red=weak)
           const color = getLinkQualityColor(edge.certainCount, meshTopology.maxCertainCount);
           // Thickness based on validation frequency (thicker=stronger link)
           const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
           
+          // Calculate link quality percentage
+          const linkQuality = meshTopology.maxCertainCount > 0 
+            ? (edge.certainCount / meshTopology.maxCertainCount)
+            : 0;
+          
+          // Weak links (< 30% quality) are dotted
+          const isWeak = linkQuality < 0.3;
+          
           // Get names for tooltip
           const fromNeighbor = neighbors[edge.fromHash];
           const toNeighbor = neighbors[edge.toHash];
           const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
           const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
-          
-          // Calculate link quality percentage for tooltip
-          const linkQuality = meshTopology.maxCertainCount > 0 
-            ? Math.round((edge.certainCount / meshTopology.maxCertainCount) * 100)
-            : 0;
           
           return (
             <Polyline
@@ -430,6 +436,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 opacity: 0.9,
                 lineCap: 'round',
                 lineJoin: 'round',
+                dashArray: isWeak ? '4, 6' : undefined,
               }}
             >
               <Tooltip
@@ -440,7 +447,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
                   <div style={{ color }}>
-                    Link quality: {linkQuality}% ({edge.certainCount} validations)
+                    Link quality: {Math.round(linkQuality * 100)}% ({edge.certainCount} validations)
                   </div>
                   <div className="text-text-muted">{edge.packetCount} total packet{edge.packetCount !== 1 ? 's' : ''}</div>
                   {edge.isHubConnection && (
@@ -452,11 +459,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           );
         })}
         
-        {/* Draw UNCERTAIN edges as DOTTED lines - color based on confidence */}
+        {/* Draw UNCERTAIN/INFERRED edges as DOTTED GREY lines */}
         {showTopology && filteredUncertainPolylines.map(({ from, to, edge }) => {
-          // Color based on confidence level
-          const color = getUncertainEdgeColor(edge.avgConfidence);
-          
           // Get names for tooltip
           const fromNeighbor = neighbors[edge.fromHash];
           const toNeighbor = neighbors[edge.toHash];
@@ -468,7 +472,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               key={`uncertain-${edge.key}`}
               positions={[from, to]}
               pathOptions={{
-                color,
+                color: 'rgba(140, 140, 160, 0.6)', // Grey for inferred
                 weight: 1.5,
                 opacity: 1,
                 dashArray: '4, 6',
@@ -523,17 +527,20 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           const isHub = meshTopology.hubNodes.includes(hash);
           const centrality = meshTopology.centrality.get(hash) || 0;
           
+          // Skip hub nodes if hubs are hidden
+          if (isHub && !showHubs) return null;
+          
           // Hub nodes get amber, zero-hop gets blue, others by signal strength
           const meanSnr = calculateMeanSnr(packets, hash);
           const displaySnr = meanSnr ?? neighbor.snr;
-          const color = isHub 
+          const color = (isHub && showHubs)
             ? '#FBBF24' // amber-400 for hub nodes
             : isZeroHop 
               ? SIGNAL_COLORS.zeroHop 
               : getSignalColor(displaySnr);
           
           // Hub nodes get larger markers
-          const markerSize = isHub ? 22 : 18;
+          const markerSize = (isHub && showHubs) ? 22 : 18;
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
@@ -644,7 +651,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 borderRadius: '0.75rem',
                 border: showTopology ? '1px solid rgba(74, 222, 128, 0.4)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
-              title={showTopology ? 'Hide topology' : 'Show topology'}
+              title={showTopology ? 'Hide topology lines' : 'Show topology lines'}
             >
               {showTopology ? (
                 <GitBranch className="w-4 h-4 text-green-400" />
@@ -654,25 +661,39 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             </button>
           )}
           
-          {/* Hub-only toggle - only show if there are hubs and topology is visible */}
-          {showTopology && meshTopology.hubNodes.length > 0 && (
+          {/* Hub markers toggle - independent of topology */}
+          {meshTopology.hubNodes.length > 0 && (
+            <button
+              onClick={() => setShowHubs(!showHubs)}
+              className="p-2 transition-colors hover:bg-white/10"
+              style={{
+                background: showHubs ? 'rgba(251, 191, 36, 0.2)' : 'rgba(20, 20, 22, 0.85)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                borderRadius: '0.75rem',
+                border: showHubs ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
+              }}
+              title={showHubs ? 'Hide hub highlighting' : 'Show hub highlighting'}
+            >
+              <Network className={`w-4 h-4 ${showHubs ? 'text-amber-400' : 'text-text-secondary'}`} />
+            </button>
+          )}
+          
+          {/* Hub-only filter toggle - only show if there are hubs */}
+          {meshTopology.hubNodes.length > 0 && (
             <button
               onClick={() => setShowHubsOnly(!showHubsOnly)}
               className="p-2 transition-colors hover:bg-white/10"
               style={{
-                background: showHubsOnly ? 'rgba(251, 191, 36, 0.2)' : 'rgba(20, 20, 22, 0.85)',
+                background: showHubsOnly ? 'rgba(139, 92, 246, 0.2)' : 'rgba(20, 20, 22, 0.85)',
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
                 borderRadius: '0.75rem',
-                border: showHubsOnly ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
+                border: showHubsOnly ? '1px solid rgba(139, 92, 246, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
-              title={showHubsOnly ? 'Show all nodes' : 'Show hubs only'}
+              title={showHubsOnly ? 'Show all nodes' : 'Filter to hub connections only'}
             >
-              {showHubsOnly ? (
-                <Users className="w-4 h-4 text-amber-400" />
-              ) : (
-                <Network className="w-4 h-4 text-text-secondary" />
-              )}
+              <Users className={`w-4 h-4 ${showHubsOnly ? 'text-violet-400' : 'text-text-secondary'}`} />
             </button>
           )}
           
@@ -707,69 +728,103 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             borderRadius: '0.75rem',
             padding: '0.625rem',
             border: '1px solid rgba(140, 160, 200, 0.2)',
-            maxWidth: '100px',
+            maxWidth: '140px',
           }}
         >
-          <div className="text-text-secondary font-medium mb-1.5">Signal</div>
+          <div className="text-text-secondary font-medium mb-1.5 flex items-center gap-1">
+            Signal (SNR)
+            <span className="group relative cursor-help">
+              <Info className="w-3 h-3 text-text-muted" />
+              <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-48 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                Node color indicates mean SNR from received packets. Higher SNR = better signal quality.
+              </div>
+            </span>
+          </div>
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">≥5 dB</span>
+              <span className="text-text-muted">Excellent ≥5</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">0–5</span>
+              <span className="text-text-muted">Good 0–5</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">-5–0</span>
+              <span className="text-text-muted">Fair -5–0</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">-10–-5</span>
+              <span className="text-text-muted">Poor -10–-5</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">&lt;-10</span>
+              <span className="text-text-muted">Critical &lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">Direct</span>
+              <span className="text-text-muted">Direct (0-hop)</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">Local</span>
+              <span className="text-text-muted">Local node</span>
             </div>
           </div>
           {/* Topology legend - link quality based (only show when topology visible) */}
           {showTopology && (certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
             <>
-              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Links</div>
+              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5 flex items-center gap-1">
+                Links
+                <span className="group relative cursor-help">
+                  <Info className="w-3 h-3 text-text-muted" />
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-48 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                    <strong>Verified:</strong> Both endpoints identified in packet paths. Color/thickness = link frequency.<br/><br/>
+                    <strong>Inferred:</strong> One or both endpoints ambiguous (prefix matched multiple nodes).
+                  </div>
+                </span>
+              </div>
               <div className="flex flex-col gap-0.5">
                 {/* Link quality gradient for verified edges */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 group relative">
                   <div className="w-4 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.9)' }}></div>
                   <span className="text-text-muted">Strong</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                    ≥70% of max validation count. Thick solid line.
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 group relative">
                   <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(250, 204, 21, 0.7)' }}></div>
                   <span className="text-text-muted">Moderate</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                    30-70% of max validation count. Medium solid line.
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-px rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(248, 113, 113, 0.5)' }}></div>
-                  <span className="text-text-muted">Weak</span>
-                </div>
-                {/* Uncertain edges - dotted lines */}
-                <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
+                <div className="flex items-center gap-1.5 group relative">
                   <div className="w-4 h-0.5 flex-shrink-0" style={{ 
-                    background: 'repeating-linear-gradient(90deg, rgba(196, 181, 253, 0.6) 0px, rgba(196, 181, 253, 0.6) 2px, transparent 2px, transparent 4px)'
+                    background: 'repeating-linear-gradient(90deg, rgba(248, 113, 113, 0.6) 0px, rgba(248, 113, 113, 0.6) 2px, transparent 2px, transparent 4px)'
+                  }}></div>
+                  <span className="text-text-muted">Weak</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                    &lt;30% of max validation count. Thin dotted line.
+                  </div>
+                </div>
+                {/* Inferred edges - dotted grey lines */}
+                <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10 group relative">
+                  <div className="w-4 h-0.5 flex-shrink-0" style={{ 
+                    background: 'repeating-linear-gradient(90deg, rgba(140, 140, 160, 0.6) 0px, rgba(140, 140, 160, 0.6) 2px, transparent 2px, transparent 4px)'
                   }}></div>
                   <span className="text-text-muted">Inferred</span>
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                    Connection inferred from path data but one/both nodes ambiguous (multiple prefix matches).
+                  </div>
                 </div>
                 {meshTopology.hubNodes.length > 0 && (
-                  <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
+                  <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10 group relative">
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 191, 36, 0.85)' }}></div>
                     <span className="text-text-muted">Hub node</span>
+                    <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
+                      High betweenness centrality (≥50%) AND appears in ≥5% of packet paths. Key routing node.
+                    </div>
                   </div>
                 )}
               </div>
