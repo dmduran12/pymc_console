@@ -825,38 +825,46 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               <span className="text-text-muted">Local node</span>
             </div>
           </div>
-          {/* Topology legend - link quality based (only show when topology visible) */}
+          {/* Topology stats - compact summary */}
           {showTopology && validatedPolylines.length > 0 && (
             <>
-              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5 flex items-center gap-1">
-                Links (3+ validations)
+              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1 flex items-center gap-1">
+                Topology
                 <LegendTooltip text="Only showing connections validated 3+ times. Line thickness = validation count." />
               </div>
-              <div className="flex flex-col gap-0.5">
-                <LegendItem 
-                  indicator={<div className="w-4 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(74, 222, 128)' }} />}
-                  label="Strong"
-                  tooltip="≥70% of max validation count. Thick solid line."
-                />
-                <LegendItem 
-                  indicator={<div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(250, 204, 21)' }} />}
-                  label="Moderate"
-                  tooltip="30-70% of max validation count. Medium line."
-                />
-                <LegendItem 
-                  indicator={<div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(248, 113, 113)' }} />}
-                  label="Weak"
-                  tooltip="<30% of max validation count. Thin line."
-                />
+              <div className="flex flex-col gap-0.5 text-text-muted">
+                <div className="flex justify-between tabular-nums">
+                  <span>Nodes</span>
+                  <span className="text-text-secondary">{filteredNeighbors.length + (localNode ? 1 : 0)}</span>
+                </div>
+                <div className="flex justify-between tabular-nums">
+                  <span>Links</span>
+                  <span className="text-text-secondary">{filteredCertainPolylines.length}</span>
+                </div>
                 {meshTopology.hubNodes.length > 0 && (
-                  <div className="mt-1 pt-1 border-t border-white/10">
-                    <LegendItem 
-                      indicator={<div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(251, 191, 36)', border: '1px solid rgba(13,14,18,0.8)' }} />}
-                      label="Hub node"
-                      tooltip="High betweenness centrality (≥50%) AND appears in ≥1% of packet paths."
-                    />
+                  <div className="flex justify-between tabular-nums">
+                    <span>Hubs</span>
+                    <span className="text-amber-400">{meshTopology.hubNodes.length}</span>
                   </div>
                 )}
+              </div>
+              {/* Link quality legend */}
+              <div className="flex flex-col gap-0.5 mt-1.5 pt-1.5 border-t border-white/10">
+                <LegendItem 
+                  indicator={<div className="w-3 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(74, 222, 128)' }} />}
+                  label="Strong"
+                  tooltip="≥70% of max validation count."
+                />
+                <LegendItem 
+                  indicator={<div className="w-3 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(250, 204, 21)' }} />}
+                  label="Moderate"
+                  tooltip="30-70% of max validation count."
+                />
+                <LegendItem 
+                  indicator={<div className="w-3 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(248, 113, 113)' }} />}
+                  label="Weak"
+                  tooltip="<30% of max validation count."
+                />
               </div>
             </>
           )}
