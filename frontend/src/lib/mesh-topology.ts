@@ -943,9 +943,16 @@ export function getUncertainEdgeColor(confidence: number): string {
   }
 }
 
+/** Relative validation thresholds for link quality tiers (% of max) */
+export const LINK_QUALITY_THRESHOLDS = {
+  STRONG: 0.24,  // 24%+ of max = strong (green)
+  MEDIUM: 0.12,  // 12%+ of max = medium (yellow)
+  WEAK: 0.06,    // 6%+ of max = weak (red)
+};
+
 /**
- * Get color for a CERTAIN edge based on link quality (validation frequency).
- * Green = strong/frequent, Yellow = moderate, Orange/Red = weak/infrequent.
+ * Get color for a CERTAIN edge based on link quality (relative to max validation count).
+ * Green = strong (24%+), Yellow = medium (12-23%), Red = weak (6-11%).
  * All colors are fully opaque.
  * 
  * @param certainCount - Number of certain observations
@@ -954,40 +961,39 @@ export function getUncertainEdgeColor(confidence: number): string {
 export function getLinkQualityColor(certainCount: number, maxCertainCount: number): string {
   const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
   
-  if (normalized >= 0.7) {
-    // Strong link - bright green
+  if (normalized >= LINK_QUALITY_THRESHOLDS.STRONG) {
+    // Strong link - bright green (24%+)
     return 'rgb(74, 222, 128)'; // green-400
-  } else if (normalized >= 0.4) {
-    // Moderate link - lime/yellow-green
-    return 'rgb(163, 230, 53)'; // lime-400
-  } else if (normalized >= 0.2) {
-    // Weaker link - yellow
+  } else if (normalized >= LINK_QUALITY_THRESHOLDS.MEDIUM) {
+    // Medium link - yellow (12-23%)
     return 'rgb(250, 204, 21)'; // yellow-400
-  } else if (normalized >= 0.1) {
-    // Weak link - orange
-    return 'rgb(251, 146, 60)'; // orange-400
   } else {
-    // Very weak link - red/coral
+    // Weak link - red (<12%)
     return 'rgb(248, 113, 113)'; // red-400
   }
 }
 
 /**
- * Get line weight for a CERTAIN edge based on link quality (validation frequency).
- * More frequent = thicker (stronger link).
+ * Get line weight for a CERTAIN edge based on link quality (relative to max validation count).
+ * Strong = thickest, medium = medium, weak = thinnest.
  * 
  * @param certainCount - Number of certain observations
  * @param maxCertainCount - Maximum certain count for normalization
- * @param minWeight - Minimum line weight
- * @param maxWeight - Maximum line weight
  */
 export function getLinkQualityWeight(
   certainCount: number,
-  maxCertainCount: number,
-  minWeight: number = 1,
-  maxWeight: number = 5
+  maxCertainCount: number
 ): number {
   const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
-  // Use sqrt for a more gradual scale (so thin lines aren't too thin)
-  return minWeight + (maxWeight - minWeight) * Math.sqrt(normalized);
+  
+  if (normalized >= LINK_QUALITY_THRESHOLDS.STRONG) {
+    // Strong link - thickest (6px, +1px from before)
+    return 6;
+  } else if (normalized >= LINK_QUALITY_THRESHOLDS.MEDIUM) {
+    // Medium link
+    return 3;
+  } else {
+    // Weak link - thinnest
+    return 1.5;
+  }
 }

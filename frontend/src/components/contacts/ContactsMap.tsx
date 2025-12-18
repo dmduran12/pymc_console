@@ -419,25 +419,31 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     return direct;
   }, [zeroHopNeighbors, localHash]);
   
-  // Filtered polylines based on solo modes
+  // Filtered polylines based on solo modes, sorted by strength (weakest first, strongest last = on top)
   const filteredCertainPolylines = useMemo(() => {
-    if (!soloHubs && !soloDirect) return validatedPolylines;
-    return validatedPolylines.filter(({ edge }) => {
-      const fromHub = hubNodeSet.has(edge.fromHash);
-      const toHub = hubNodeSet.has(edge.toHash);
-      const fromDirect = directNodeSet.has(edge.fromHash);
-      const toDirect = directNodeSet.has(edge.toHash);
-      
-      if (soloHubs && soloDirect) {
-        // Show hub connections OR direct connections
-        return fromHub || toHub || fromDirect || toDirect;
-      } else if (soloHubs) {
-        return fromHub || toHub;
-      } else if (soloDirect) {
-        return fromDirect || toDirect;
-      }
-      return true;
-    });
+    let filtered = validatedPolylines;
+    
+    if (soloHubs || soloDirect) {
+      filtered = validatedPolylines.filter(({ edge }) => {
+        const fromHub = hubNodeSet.has(edge.fromHash);
+        const toHub = hubNodeSet.has(edge.toHash);
+        const fromDirect = directNodeSet.has(edge.fromHash);
+        const toDirect = directNodeSet.has(edge.toHash);
+        
+        if (soloHubs && soloDirect) {
+          // Show hub connections OR direct connections
+          return fromHub || toHub || fromDirect || toDirect;
+        } else if (soloHubs) {
+          return fromHub || toHub;
+        } else if (soloDirect) {
+          return fromDirect || toDirect;
+        }
+        return true;
+      });
+    }
+    
+    // Sort by certainCount ascending (weakest rendered first = bottom, strongest last = top)
+    return [...filtered].sort((a, b) => a.edge.certainCount - b.edge.certainCount);
   }, [validatedPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
   
   // Filtered neighbors based on solo modes
@@ -814,17 +820,17 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 <LegendItem 
                   indicator={<div className="w-3 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(74, 222, 128)' }} />}
                   label="Strong"
-                  tooltip="≥70% of max validation count."
+                  tooltip="≥24% of max validation count."
                 />
                 <LegendItem 
                   indicator={<div className="w-3 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(250, 204, 21)' }} />}
-                  label="Moderate"
-                  tooltip="30-70% of max validation count."
+                  label="Medium"
+                  tooltip="12-23% of max validation count."
                 />
                 <LegendItem 
                   indicator={<div className="w-3 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(248, 113, 113)' }} />}
                   label="Weak"
-                  tooltip="<30% of max validation count."
+                  tooltip="6-11% of max validation count."
                 />
               </div>
             </>
