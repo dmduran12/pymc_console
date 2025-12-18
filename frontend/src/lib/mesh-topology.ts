@@ -25,6 +25,10 @@ export interface TopologyEdge {
   avgConfidence: number;
   /** Strength score (0-1) combining count and confidence */
   strength: number;
+  /** Minimum hop distance from local node (0 = directly connected to local, 1 = one hop away, etc.) */
+  hopDistanceFromLocal: number;
+  /** Whether this edge connects to a hub node (high centrality) */
+  isHubConnection: boolean;
 }
 
 /** Result of topology analysis */
@@ -40,6 +44,10 @@ export interface MeshTopology {
   fullAffinity: Map<string, NeighborAffinity>;
   /** Local node's 2-char prefix (derived from localHash) */
   localPrefix: string | null;
+  /** Node centrality scores (hash -> betweenness centrality) */
+  centrality: Map<string, number>;
+  /** Hub nodes identified by high centrality (sorted by centrality desc) */
+  hubNodes: string[];
 }
 
 interface EdgeAccumulator {
@@ -48,6 +56,10 @@ interface EdgeAccumulator {
   key: string;
   count: number;
   confidenceSum: number;
+  /** Minimum hop distance from local for this edge (lower = closer to local) */
+  minHopDistance: number;
+  /** How many times this edge was observed at each hop distance */
+  hopDistanceCounts: number[];
 }
 
 /**
@@ -428,19 +440,26 @@ function makeEdgeKey(hash1: string, hash2: string): string {
 /**
  * Analyze packets to build mesh topology with confidence-weighted edges.
  * 
+ * TOPOLOGY PRINCIPLES:
+ * - Paths represent the forwarding chain: [A, B, C, local] means A→B→C→local
+ * - Consecutive pairs in paths represent actual RF links (edges)
+ * - We build edges ONLY from consecutive path pairs, NOT from assumptions
+ * - Betweenness centrality identifies hub nodes (high-traffic forwarders)
+ * - Hop distance from local calculated by shortest path through the graph
+ * 
  * @param packets - All packets to analyze
  * @param neighbors - Known neighbors with location data
  * @param localHash - Local node's hash
- * @param confidenceThreshold - Minimum per-hop confidence to include (default 0.8)
+ * @param confidenceThreshold - Minimum per-hop confidence to include (default 0.5)
  * @param localLat - Local node latitude (for proximity calculations)
  * @param localLon - Local node longitude (for proximity calculations)
- * @returns MeshTopology with edges that meet the confidence threshold
+ * @returns MeshTopology with edges, centrality, and hub nodes
  */
 export function buildMeshTopology(
   packets: Packet[],
   neighbors: Record<string, NeighborInfo>,
   localHash?: string,
-  confidenceThreshold: number = 0.8,
+  confidenceThreshold: number = 0.5, // Lower threshold to capture more topology
   localLat?: number,
   localLon?: number
 ): MeshTopology {
@@ -454,15 +473,22 @@ export function buildMeshTopology(
     simpleAffinity.set(hash, aff.combinedScore);
   }
   
-  // Accumulate edge observations
+  // Accumulate edge observations from consecutive path pairs
   const accumulators = new Map<string, EdgeAccumulator>();
   
+  // Track node appearances for centrality calculation
+  const nodePathCounts = new Map<string, number>(); // How many paths include this node
+  const nodeBridgeCounts = new Map<string, number>(); // How many times node is in middle of path
+  
   for (const packet of packets) {
-    // Get path from packet
+    // Get path from packet (forwarded_path has local appended)
     const path = packet.forwarded_path ?? packet.original_path;
-    if (!path || !Array.isArray(path) || path.length < 2) continue;
+    if (!path || !Array.isArray(path) || path.length < 1) continue;
     
-    // Process consecutive pairs in the path
+    // Track which nodes appear in this path (for centrality)
+    const nodesInPath = new Set<string>();
+    
+    // Process consecutive pairs in the path - these are actual RF links
     for (let i = 0; i < path.length - 1; i++) {
       const fromPrefix = path[i];
       const toPrefix = path[i + 1];
@@ -478,11 +504,26 @@ export function buildMeshTopology(
       // Skip self-loops
       if (fromResolved.hash === toResolved.hash) continue;
       
+      // Track nodes for centrality
+      nodesInPath.add(fromResolved.hash);
+      nodesInPath.add(toResolved.hash);
+      
+      // Track bridge nodes (middle of path = not first or last)
+      if (i > 0) {
+        nodeBridgeCounts.set(fromResolved.hash, (nodeBridgeCounts.get(fromResolved.hash) || 0) + 1);
+      }
+      
       // Calculate combined confidence for this hop
       const hopConfidence = fromResolved.confidence * toResolved.confidence;
       
       // Skip if below threshold
       if (hopConfidence < confidenceThreshold) continue;
+      
+      // Calculate hop distance from local (0 = edge touches local)
+      // For path [A, B, C, local]: A-B is 2 hops from local, B-C is 1 hop, C-local is 0 hops
+      const hopDistanceFromLocal = localPrefix 
+        ? Math.max(0, path.length - 2 - i) 
+        : 99;
       
       // Create/update edge accumulator
       const key = makeEdgeKey(fromResolved.hash, toResolved.hash);
@@ -491,100 +532,77 @@ export function buildMeshTopology(
       if (existing) {
         existing.count++;
         existing.confidenceSum += hopConfidence;
+        existing.minHopDistance = Math.min(existing.minHopDistance, hopDistanceFromLocal);
+        if (hopDistanceFromLocal < existing.hopDistanceCounts.length) {
+          existing.hopDistanceCounts[hopDistanceFromLocal]++;
+        }
       } else {
+        const hopCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Track up to 10 hops
+        if (hopDistanceFromLocal < hopCounts.length) {
+          hopCounts[hopDistanceFromLocal]++;
+        }
         accumulators.set(key, {
           fromHash: fromResolved.hash,
           toHash: toResolved.hash,
           key,
           count: 1,
           confidenceSum: hopConfidence,
+          minHopDistance: hopDistanceFromLocal,
+          hopDistanceCounts: hopCounts,
         });
       }
     }
     
-    // Also consider src_hash → first path element
-    // This captures the source node's connection to the first relay
-    if (packet.src_hash && path.length > 0) {
-      const firstPrefix = path[0];
-      const firstResolved = resolveHop(firstPrefix, neighbors, localHash, neighborAffinity, false);
-      
-      // Source to first hop (src_hash is already a full hash)
-      if (firstResolved.hash && 
-          firstResolved.hash !== packet.src_hash &&
-          firstResolved.confidence >= confidenceThreshold) {
-        const key = makeEdgeKey(packet.src_hash, firstResolved.hash);
-        const existing = accumulators.get(key);
-        if (existing) {
-          existing.count++;
-          existing.confidenceSum += firstResolved.confidence;
-        } else {
-          accumulators.set(key, {
-            fromHash: packet.src_hash,
-            toHash: firstResolved.hash,
-            key,
-            count: 1,
-            confidenceSum: firstResolved.confidence,
-          });
-        }
-      }
+    // Update path counts for centrality
+    for (const nodeHash of nodesInPath) {
+      nodePathCounts.set(nodeHash, (nodePathCounts.get(nodeHash) || 0) + 1);
     }
-    
-    // Last path element → local node connection
-    // If last prefix matches local, the second-to-last is connected to local
-    if (localHash && localPrefix && path.length >= 1) {
-      const lastPrefix = path[path.length - 1];
-      if (lastPrefix.toUpperCase() === localPrefix) {
-        // Last hop is us - create edge from second-to-last to local
-        if (path.length >= 2) {
-          const penultimatePrefix = path[path.length - 2];
-          const penultimateResolved = resolveHop(penultimatePrefix, neighbors, localHash, neighborAffinity, false);
-          
-          if (penultimateResolved.hash && 
-              penultimateResolved.hash !== localHash &&
-              penultimateResolved.confidence >= confidenceThreshold) {
-            const key = makeEdgeKey(penultimateResolved.hash, localHash);
-            const existing = accumulators.get(key);
-            if (existing) {
-              existing.count++;
-              existing.confidenceSum += penultimateResolved.confidence;
-            } else {
-              accumulators.set(key, {
-                fromHash: penultimateResolved.hash,
-                toHash: localHash,
-                key,
-                count: 1,
-                confidenceSum: penultimateResolved.confidence,
-              });
-            }
-          }
-        } else if (packet.src_hash && packet.src_hash !== localHash) {
-          // Single-element path ending with local = direct from src
-          const key = makeEdgeKey(packet.src_hash, localHash);
-          const existing = accumulators.get(key);
-          if (existing) {
-            existing.count++;
-            existing.confidenceSum += 1; // High confidence for direct
-          } else {
-            accumulators.set(key, {
-              fromHash: packet.src_hash,
-              toHash: localHash,
-              key,
-              count: 1,
-              confidenceSum: 1,
-            });
-          }
-        }
-      }
+  }
+  
+  // Calculate betweenness centrality (simplified: bridge count / path count)
+  const centrality = new Map<string, number>();
+  let maxCentrality = 0;
+  
+  for (const [hash, pathCount] of nodePathCounts) {
+    const bridgeCount = nodeBridgeCounts.get(hash) || 0;
+    // Centrality = how often this node is in the middle of paths relative to total appearances
+    const centralityScore = pathCount > 0 ? bridgeCount / pathCount : 0;
+    centrality.set(hash, centralityScore);
+    maxCentrality = Math.max(maxCentrality, centralityScore);
+  }
+  
+  // Normalize centrality scores
+  if (maxCentrality > 0) {
+    for (const [hash, score] of centrality) {
+      centrality.set(hash, score / maxCentrality);
+    }
+  }
+  
+  // Identify hub nodes (top 20% centrality and minimum path count)
+  const minPathsForHub = Math.max(3, packets.length * 0.05); // At least 5% of packets or 3
+  const hubNodes: string[] = [];
+  const sortedByCentrality = [...centrality.entries()]
+    .filter(([hash, _]) => (nodePathCounts.get(hash) || 0) >= minPathsForHub)
+    .sort((a, b) => b[1] - a[1]);
+  
+  // Take nodes with centrality >= 0.5 (normalized) as hubs
+  for (const [hash, score] of sortedByCentrality) {
+    if (score >= 0.5) {
+      hubNodes.push(hash);
     }
   }
   
   // Convert accumulators to edges
   const edges: TopologyEdge[] = [];
   let maxPacketCount = 0;
+  const hubSet = new Set(hubNodes);
   
   for (const acc of accumulators.values()) {
     const avgConfidence = acc.confidenceSum / acc.count;
     maxPacketCount = Math.max(maxPacketCount, acc.count);
+    
+    // Check if either end is a hub node
+    const isHubConnection = hubSet.has(acc.fromHash) || hubSet.has(acc.toHash);
     
     edges.push({
       fromHash: acc.fromHash,
@@ -592,8 +610,9 @@ export function buildMeshTopology(
       key: acc.key,
       packetCount: acc.count,
       avgConfidence,
-      // Strength will be calculated after we know max count
-      strength: 0,
+      strength: 0, // Will be calculated below
+      hopDistanceFromLocal: acc.minHopDistance,
+      isHubConnection,
     });
   }
   
@@ -609,7 +628,16 @@ export function buildMeshTopology(
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
-  return { edges, edgeMap, maxPacketCount, neighborAffinity: simpleAffinity, fullAffinity: neighborAffinity, localPrefix };
+  return { 
+    edges, 
+    edgeMap, 
+    maxPacketCount, 
+    neighborAffinity: simpleAffinity, 
+    fullAffinity: neighborAffinity, 
+    localPrefix,
+    centrality,
+    hubNodes,
+  };
 }
 
 /**
@@ -626,17 +654,70 @@ export function getEdgeWeight(
 
 /**
  * Get line color for an edge based on its strength.
- * Green for strongest, transitioning to neutral for weaker.
+ * @deprecated Use getEdgeColorByHopDistance for better topology visualization
  */
 export function getEdgeColor(strength: number): string {
   if (strength >= 0.7) {
-    // High strength: green
     return 'rgba(74, 222, 128, 0.8)'; // green-400
   } else if (strength >= 0.4) {
-    // Medium strength: teal/cyan
     return 'rgba(34, 211, 238, 0.6)'; // cyan-400
   } else {
-    // Lower strength (but still above threshold): white/neutral
     return 'rgba(255, 255, 255, 0.35)';
   }
+}
+
+/**
+ * Get line color for an edge based on hop distance from local node.
+ * Closer edges are more vibrant, further edges fade out.
+ * 
+ * @param hopDistance - Hops from local (0 = touches local, 1 = one hop away, etc.)
+ * @param isHubConnection - Whether this edge connects to a high-centrality hub node
+ */
+export function getEdgeColorByHopDistance(hopDistance: number, isHubConnection: boolean = false): string {
+  // Hub connections get a distinct color (gold/amber)
+  if (isHubConnection && hopDistance <= 1) {
+    return 'rgba(251, 191, 36, 0.85)'; // amber-400 - hub connections
+  }
+  
+  switch (hopDistance) {
+    case 0:
+      // Direct connection to local - bright cyan
+      return 'rgba(34, 211, 238, 0.9)'; // cyan-400
+    case 1:
+      // One hop away - green
+      return 'rgba(74, 222, 128, 0.8)'; // green-400
+    case 2:
+      // Two hops - yellow/lime
+      return 'rgba(163, 230, 53, 0.7)'; // lime-400
+    case 3:
+      // Three hops - orange
+      return 'rgba(251, 146, 60, 0.6)'; // orange-400
+    default:
+      // 4+ hops - faded white
+      return 'rgba(255, 255, 255, 0.3)';
+  }
+}
+
+/**
+ * Get line weight for an edge based on hop distance and packet count.
+ * Closer, high-traffic edges are thicker.
+ * 
+ * @param hopDistance - Hops from local
+ * @param normalizedCount - Packet count normalized to 0-1
+ * @param minWeight - Minimum line weight
+ * @param maxWeight - Maximum line weight
+ */
+export function getEdgeWeightByHopDistance(
+  hopDistance: number,
+  normalizedCount: number,
+  minWeight: number = 1,
+  maxWeight: number = 5
+): number {
+  // Base weight from packet count
+  const countWeight = minWeight + (maxWeight - minWeight) * normalizedCount;
+  
+  // Reduce weight for distant edges
+  const distanceFactor = Math.max(0.4, 1 - hopDistance * 0.15);
+  
+  return countWeight * distanceFactor;
 }
