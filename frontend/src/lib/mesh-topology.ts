@@ -514,6 +514,48 @@ export function buildMeshTopology(
   const nodePathCounts = new Map<string, number>(); // How many paths include this node
   const nodeBridgeCounts = new Map<string, number>(); // How many times node is in middle of path
   
+  // Helper to add/update edge accumulator
+  const addEdgeObservation = (
+    fromHash: string,
+    toHash: string,
+    hopConfidence: number,
+    isCertain: boolean,
+    hopDistanceFromLocal: number
+  ) => {
+    const key = makeEdgeKey(fromHash, toHash);
+    const existing = accumulators.get(key);
+    
+    if (existing) {
+      existing.count++;
+      existing.confidenceSum += hopConfidence;
+      existing.minHopDistance = Math.min(existing.minHopDistance, hopDistanceFromLocal);
+      if (hopDistanceFromLocal < existing.hopDistanceCounts.length) {
+        existing.hopDistanceCounts[hopDistanceFromLocal]++;
+      }
+      if (isCertain) {
+        existing.certainCount++;
+      } else {
+        existing.uncertainCount++;
+      }
+    } else {
+      const hopCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      if (hopDistanceFromLocal < hopCounts.length) {
+        hopCounts[hopDistanceFromLocal]++;
+      }
+      accumulators.set(key, {
+        fromHash,
+        toHash,
+        key,
+        count: 1,
+        confidenceSum: hopConfidence,
+        minHopDistance: hopDistanceFromLocal,
+        hopDistanceCounts: hopCounts,
+        certainCount: isCertain ? 1 : 0,
+        uncertainCount: isCertain ? 0 : 1,
+      });
+    }
+  };
+  
   for (const packet of packets) {
     // Get path from packet (forwarded_path has local appended)
     // Note: paths may be JSON strings or arrays depending on API version
@@ -532,6 +574,39 @@ export function buildMeshTopology(
     
     // Track which nodes appear in this path (for centrality)
     const nodesInPath = new Set<string>();
+    
+    // === ADVERT SOURCE → FIRST HOP INFERENCE ===
+    // For adverts (type=4), we can infer an edge from the source to the first hop in the path
+    // This tells us who the source's direct neighbor is (on the source's side of the network)
+    const packetType = packet.type ?? packet.payload_type;
+    if (packetType === 4 && packet.src_hash && path.length >= 1) {
+      const firstHopPrefix = path[0];
+      
+      // Resolve the first hop (this is the node that received the advert directly from source)
+      const firstHopMatches = matchPrefix(firstHopPrefix, neighbors, localHash, neighborAffinity, false);
+      const firstHopResolved = resolveHop(firstHopPrefix, neighbors, localHash, neighborAffinity, false);
+      
+      // The source hash is known exactly (from the packet)
+      const srcHash = packet.src_hash;
+      
+      if (firstHopResolved.hash && firstHopResolved.hash !== srcHash) {
+        // This is a certain edge if we uniquely identify the first hop
+        // AND the source is a known neighbor (or at least has high affinity)
+        const srcInNeighbors = Object.keys(neighbors).includes(srcHash);
+        const isCertain = firstHopMatches.matches.length === 1 && srcInNeighbors;
+        const confidence = isCertain ? 1 : (srcInNeighbors ? 0.9 : 0.7);
+        
+        // This edge is at the FAR end of the path from local's perspective
+        // Hop distance = path length (since source is before the first element)
+        const hopDistance = path.length;
+        
+        addEdgeObservation(srcHash, firstHopResolved.hash, confidence, isCertain, hopDistance);
+        
+        // Track for centrality
+        nodesInPath.add(srcHash);
+        nodesInPath.add(firstHopResolved.hash);
+      }
+    }
     
     // Process consecutive pairs in the path - these are actual RF links
     for (let i = 0; i < path.length - 1; i++) {
@@ -578,40 +653,14 @@ export function buildMeshTopology(
         ? Math.max(0, path.length - 2 - i) 
         : 99;
       
-      // Create/update edge accumulator
-      const key = makeEdgeKey(fromResolved.hash, toResolved.hash);
-      const existing = accumulators.get(key);
-      
-      if (existing) {
-        existing.count++;
-        existing.confidenceSum += hopConfidence;
-        existing.minHopDistance = Math.min(existing.minHopDistance, hopDistanceFromLocal);
-        if (hopDistanceFromLocal < existing.hopDistanceCounts.length) {
-          existing.hopDistanceCounts[hopDistanceFromLocal]++;
-        }
-        // Track certain vs uncertain
-        if (isCertainObservation) {
-          existing.certainCount++;
-        } else {
-          existing.uncertainCount++;
-        }
-      } else {
-        const hopCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Track up to 10 hops
-        if (hopDistanceFromLocal < hopCounts.length) {
-          hopCounts[hopDistanceFromLocal]++;
-        }
-        accumulators.set(key, {
-          fromHash: fromResolved.hash,
-          toHash: toResolved.hash,
-          key,
-          count: 1,
-          confidenceSum: hopConfidence,
-          minHopDistance: hopDistanceFromLocal,
-          hopDistanceCounts: hopCounts,
-          certainCount: isCertainObservation ? 1 : 0,
-          uncertainCount: isCertainObservation ? 0 : 1,
-        });
-      }
+      // Add edge observation using helper
+      addEdgeObservation(
+        fromResolved.hash,
+        toResolved.hash,
+        hopConfidence,
+        isCertainObservation,
+        hopDistanceFromLocal
+      );
     }
     
     // Update path counts for centrality
