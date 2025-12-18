@@ -1,28 +1,32 @@
-
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2 } from 'lucide-react';
-import { NeighborInfo } from '@/types/api';
+import { Maximize2, Minimize2, X } from 'lucide-react';
+import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 
 // Create a matte dot icon with CSS shadows
-function createDotIcon(color: string, size: number): L.DivIcon {
+function createDotIcon(color: string, size: number, isHovered: boolean = false): L.DivIcon {
+  const scale = isHovered ? 1.25 : 1;
+  const actualSize = size * scale;
+  
   return L.divIcon({
     className: 'map-dot-marker',
     html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
+      width: ${actualSize}px;
+      height: ${actualSize}px;
       background-color: ${color};
       border-radius: 50%;
       border: 0.75px solid rgba(13, 14, 18, 0.6);
-      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08), inset 0 -2px 3px rgba(0, 0, 0, 0.06);
+      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08), inset 0 -2px 3px rgba(0, 0, 0, 0.06)${isHovered ? `, 0 0 12px ${color}` : ''};
+      transition: all 0.15s ease-out;
+      opacity: ${isHovered ? 1 : 0.9};
+      filter: brightness(${isHovered ? 1.1 : 1});
     "></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -size / 2],
+    iconSize: [actualSize, actualSize],
+    iconAnchor: [actualSize / 2, actualSize / 2],
+    popupAnchor: [0, -actualSize / 2],
   });
 }
 
@@ -35,6 +39,8 @@ interface LocalNode {
 interface NeighborMapProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
+  packets?: Packet[];
+  onRemoveNode?: (hash: string) => void;
 }
 
 // Signal color constants from CSS variables (computed for map use)
@@ -46,30 +52,51 @@ const SIGNAL_COLORS = {
   critical: '#FF5C7A',   // --signal-critical
   unknown: '#767688',    // --signal-unknown
   localNode: '#60A5FA',  // --map-local-node
+  multiHop: '#1E3A8A',   // Deep royal blue for multi-hop nodes
 };
 
+// Calculate mean SNR from packets for a given source hash
+function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefined {
+  const nodePackets = packets.filter(p => p.src_hash === srcHash && p.snr !== undefined);
+  if (nodePackets.length === 0) return undefined;
+  
+  const sum = nodePackets.reduce((acc, p) => acc + (p.snr ?? 0), 0);
+  return sum / nodePackets.length;
+}
 
 // Get color based on signal strength (SNR is more reliable than RSSI for LoRa)
-function getSignalColor(snr?: number, rssi?: number): string {
-  // Use SNR as primary indicator (-20 to +10 typical range)
-  if (snr !== undefined) {
-    if (snr >= 5) return SIGNAL_COLORS.excellent;
-    if (snr >= 0) return SIGNAL_COLORS.good;
-    if (snr >= -5) return SIGNAL_COLORS.fair;
-    if (snr >= -10) return SIGNAL_COLORS.poor;
-    return SIGNAL_COLORS.critical;
+function getSignalColor(snr?: number): string {
+  if (snr === undefined) return SIGNAL_COLORS.unknown;
+  if (snr >= 5) return SIGNAL_COLORS.excellent;
+  if (snr >= 0) return SIGNAL_COLORS.good;
+  if (snr >= -5) return SIGNAL_COLORS.fair;
+  if (snr >= -10) return SIGNAL_COLORS.poor;
+  return SIGNAL_COLORS.critical;
+}
+
+// Parse paths from packets to infer mesh connections
+function inferMeshConnections(packets: Packet[]): Map<string, Set<string>> {
+  const connections = new Map<string, Set<string>>();
+  
+  const addConnection = (from: string, to: string) => {
+    if (!connections.has(from)) connections.set(from, new Set());
+    if (!connections.has(to)) connections.set(to, new Set());
+    connections.get(from)!.add(to);
+    connections.get(to)!.add(from); // Bidirectional
+  };
+  
+  for (const packet of packets) {
+    // Parse forwarded_path or original_path
+    const path = packet.forwarded_path ?? packet.original_path;
+    if (!path || !Array.isArray(path) || path.length < 2) continue;
+    
+    // Each consecutive pair in the path represents a connection
+    for (let i = 0; i < path.length - 1; i++) {
+      addConnection(path[i], path[i + 1]);
+    }
   }
   
-  // Fallback to RSSI if no SNR (-120 to -50 typical range)
-  if (rssi !== undefined) {
-    if (rssi >= -70) return SIGNAL_COLORS.excellent;
-    if (rssi >= -85) return SIGNAL_COLORS.good;
-    if (rssi >= -100) return SIGNAL_COLORS.fair;
-    if (rssi >= -110) return SIGNAL_COLORS.poor;
-    return SIGNAL_COLORS.critical;
-  }
-  
-  return SIGNAL_COLORS.unknown;
+  return connections;
 }
 
 // Component to fit bounds only on initial load (not when user navigates)
@@ -96,7 +123,10 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
-export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) {
+export default function NeighborMap({ neighbors, localNode, packets = [], onRemoveNode }: NeighborMapProps) {
+  // Track hover state per marker
+  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
+  
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
     return Object.entries(neighbors).filter(([, neighbor]) => {
@@ -105,6 +135,54 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
       return lat !== undefined && lng !== undefined && lat !== 0 && lng !== 0;
     });
   }, [neighbors]);
+  
+  // Build a map of hash -> coordinates for mesh connections
+  const nodeCoordinates = useMemo(() => {
+    const coords = new Map<string, [number, number]>();
+    
+    if (localNode && localNode.latitude && localNode.longitude) {
+      // Local node uses public key hash from stats - we'll try matching with neighbor hashes
+      coords.set('local', [localNode.latitude, localNode.longitude]);
+    }
+    
+    neighborsWithLocation.forEach(([hash, neighbor]) => {
+      if (neighbor.latitude && neighbor.longitude) {
+        coords.set(hash, [neighbor.latitude, neighbor.longitude]);
+      }
+    });
+    
+    return coords;
+  }, [neighborsWithLocation, localNode]);
+  
+  // Infer mesh connections from packet paths
+  const meshConnections = useMemo(() => {
+    return inferMeshConnections(packets);
+  }, [packets]);
+  
+  // Generate polylines for mesh connections (only where we have coordinates for both endpoints)
+  const meshPolylines = useMemo(() => {
+    const lines: Array<{ from: [number, number]; to: [number, number]; key: string }> = [];
+    const drawnConnections = new Set<string>();
+    
+    meshConnections.forEach((connectedNodes, nodeHash) => {
+      const fromCoords = nodeCoordinates.get(nodeHash);
+      if (!fromCoords) return;
+      
+      connectedNodes.forEach(connectedHash => {
+        // Create consistent key to avoid duplicate lines
+        const connectionKey = [nodeHash, connectedHash].sort().join('-');
+        if (drawnConnections.has(connectionKey)) return;
+        drawnConnections.add(connectionKey);
+        
+        const toCoords = nodeCoordinates.get(connectedHash);
+        if (!toCoords) return;
+        
+        lines.push({ from: fromCoords, to: toCoords, key: connectionKey });
+      });
+    });
+    
+    return lines;
+  }, [meshConnections, nodeCoordinates]);
   
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
@@ -217,13 +295,27 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw lines only to DIRECT neighbors (zero_hop), colored by signal strength */}
+        {/* Draw inferred mesh connections as dotted lines */}
+        {meshPolylines.map(({ from, to, key }) => (
+          <Polyline
+            key={`mesh-${key}`}
+            positions={[from, to]}
+            color="rgba(255, 255, 255, 0.15)"
+            weight={1.5}
+            opacity={1}
+            dashArray="4, 6"
+          />
+        ))}
+        
+        {/* Draw solid lines to zero-hop (direct) neighbors, colored by mean SNR */}
         {localNode && localNode.latitude && localNode.longitude && neighborsWithLocation
           .filter(([, neighbor]) => neighbor.zero_hop === true)
           .map(([hash, neighbor]) => {
             if (!neighbor.latitude || !neighbor.longitude) return null;
             
-            const lineColor = getSignalColor(neighbor.snr, neighbor.rssi);
+            // Use mean SNR from packets if available, fallback to neighbor's last SNR
+            const meanSnr = calculateMeanSnr(packets, hash);
+            const lineColor = getSignalColor(meanSnr ?? neighbor.snr);
             
             return (
               <Polyline
@@ -243,7 +335,11 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
         {localNode && localNode.latitude && localNode.longitude && (
           <Marker
             position={[localNode.latitude, localNode.longitude]}
-            icon={createDotIcon(SIGNAL_COLORS.localNode, 24)}
+            icon={createDotIcon(SIGNAL_COLORS.localNode, 24, hoveredMarker === 'local')}
+            eventHandlers={{
+              mouseover: () => setHoveredMarker('local'),
+              mouseout: () => setHoveredMarker(null),
+            }}
           >
             <Popup>
               <div className="text-gray-900 text-sm">
@@ -263,14 +359,31 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
-          const color = getSignalColor(neighbor.snr, neighbor.rssi);
+          // Zero-hop nodes: color by mean SNR signal strength
+          // Multi-hop nodes: deep royal blue
+          const isZeroHop = neighbor.zero_hop === true;
+          let color: string;
+          let meanSnr: number | undefined;
+          
+          if (isZeroHop) {
+            meanSnr = calculateMeanSnr(packets, hash);
+            color = getSignalColor(meanSnr ?? neighbor.snr);
+          } else {
+            color = SIGNAL_COLORS.multiHop;
+          }
+          
           const name = neighbor.node_name || neighbor.name || 'Unknown';
+          const isHovered = hoveredMarker === hash;
           
           return (
             <Marker
               key={hash}
               position={[neighbor.latitude, neighbor.longitude]}
-              icon={createDotIcon(color, 18)}
+              icon={createDotIcon(color, 18, isHovered)}
+              eventHandlers={{
+                mouseover: () => setHoveredMarker(hash),
+                mouseout: () => setHoveredMarker(null),
+              }}
             >
               <Popup>
                 <div className="text-gray-900 text-sm min-w-[150px]">
@@ -279,11 +392,20 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
                     <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
                   </div>
                   <hr className="my-2 border-gray-200" />
-                  {neighbor.rssi !== undefined && (
-                    <div>RSSI: <strong>{neighbor.rssi} dBm</strong></div>
-                  )}
-                  {neighbor.snr !== undefined && (
-                    <div>SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
+                  {isZeroHop ? (
+                    <>
+                      {meanSnr !== undefined && (
+                        <div>Mean SNR: <strong>{meanSnr.toFixed(1)} dB</strong></div>
+                      )}
+                      {neighbor.rssi !== undefined && (
+                        <div>Last RSSI: <strong>{neighbor.rssi} dBm</strong></div>
+                      )}
+                      {neighbor.snr !== undefined && (
+                        <div>Last SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-blue-800">Multi-hop node</div>
                   )}
                   {neighbor.advert_count !== undefined && (
                     <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
@@ -294,6 +416,15 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
                   <div className="text-xs text-gray-400">
                     {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
                   </div>
+                  {onRemoveNode && (
+                    <button
+                      onClick={() => onRemoveNode(hash)}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors border border-red-200"
+                    >
+                      <X className="w-3 h-3" />
+                      Remove Node
+                    </button>
+                  )}
                 </div>
               </Popup>
             </Marker>
@@ -357,6 +488,10 @@ export default function NeighborMap({ neighbors, localNode }: NeighborMapProps) 
               <span className="text-text-muted">&lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.multiHop, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <span className="text-text-muted">Multi-hop</span>
+            </div>
+            <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
               <span className="text-text-muted">Local</span>
             </div>
