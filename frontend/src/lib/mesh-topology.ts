@@ -383,14 +383,17 @@ export function matchPrefix(
   const baseProbability = matches.length > 0 ? 1 / matches.length : 0;
   
   // Determine best match using affinity for tiebreaking
+  // IMPORTANT: Sort matches for deterministic behavior across devices
+  const sortedMatches = [...matches].sort();
+  
   let bestMatch: string | null = null;
   let bestScore = -1;
   
-  if (matches.length === 1) {
-    bestMatch = matches[0];
-  } else if (matches.length > 1 && neighborAffinity) {
+  if (sortedMatches.length === 1) {
+    bestMatch = sortedMatches[0];
+  } else if (sortedMatches.length > 1 && neighborAffinity) {
     // Use combined affinity scores to pick the most likely candidate
-    for (const hash of matches) {
+    for (const hash of sortedMatches) {
       const affValue = neighborAffinity.get(hash);
       // Support both old (number) and new (NeighborAffinity) formats
       const score = affValue 
@@ -401,10 +404,10 @@ export function matchPrefix(
         bestMatch = hash;
       }
     }
-    // If no affinity data, fall back to first match
-    if (!bestMatch) bestMatch = matches[0];
-  } else if (matches.length > 0) {
-    bestMatch = matches[0];
+    // If no affinity data or tie, fall back to first sorted match (deterministic)
+    if (!bestMatch) bestMatch = sortedMatches[0];
+  } else if (sortedMatches.length > 0) {
+    bestMatch = sortedMatches[0];
   }
   
   // Calculate probability - boost if we have strong affinity data
@@ -497,8 +500,12 @@ export function buildMeshTopology(
   localLat?: number,
   localLon?: number
 ): MeshTopology {
+  // IMPORTANT: Sort packets by timestamp for deterministic processing
+  // This ensures the same packet data produces the same topology regardless of fetch order
+  const sortedPackets = [...packets].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+  
   // First pass: build neighbor affinity map with proximity scores
-  const neighborAffinity = buildNeighborAffinity(packets, neighbors, localLat, localLon, localHash);
+  const neighborAffinity = buildNeighborAffinity(sortedPackets, neighbors, localLat, localLon, localHash);
   const localPrefix = localHash ? getHashPrefix(localHash) : null;
   
   // Convert to simple number map for backward compatibility in return value
@@ -556,7 +563,7 @@ export function buildMeshTopology(
     }
   };
   
-  for (const packet of packets) {
+  for (const packet of sortedPackets) {
     // Get path from packet (forwarded_path has local appended)
     // Note: paths may be JSON strings or arrays depending on API version
     let path = packet.forwarded_path ?? packet.original_path;
