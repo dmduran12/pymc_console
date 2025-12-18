@@ -72,18 +72,101 @@ export function prefixMatches(prefix: string, hash: string): boolean {
 }
 
 /**
- * Build neighbor affinity map from packets.
- * Counts how many packets we've received where each neighbor appears as the last hop.
- * Higher counts = stronger/closer neighbors.
+ * Calculate distance between two coordinates in meters using Haversine formula.
  */
-function buildNeighborAffinity(
+function calculateDistance(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number
+): number {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Calculate proximity score (0-1) based on distance.
+ * Closer neighbors get higher scores.
+ * - < 100m: 1.0 (very close, likely direct neighbor)
+ * - < 500m: 0.8
+ * - < 1km: 0.6
+ * - < 5km: 0.4
+ * - < 10km: 0.2
+ * - > 10km: 0.1
+ */
+function getProximityScore(distanceMeters: number): number {
+  if (distanceMeters < 100) return 1.0;
+  if (distanceMeters < 500) return 0.8;
+  if (distanceMeters < 1000) return 0.6;
+  if (distanceMeters < 5000) return 0.4;
+  if (distanceMeters < 10000) return 0.2;
+  return 0.1;
+}
+
+/** Combined affinity score for a neighbor */
+export interface NeighborAffinity {
+  hash: string;
+  /** How often this neighbor appears as direct forwarder (second-to-last hop) */
+  frequency: number;
+  /** Distance to local node in meters (null if unknown) */
+  distanceMeters: number | null;
+  /** Proximity score 0-1 based on distance */
+  proximityScore: number;
+  /** Combined score (frequency weighted by proximity) */
+  combinedScore: number;
+}
+
+/**
+ * Build neighbor affinity map from packets and proximity.
+ * Combines frequency (how often a neighbor forwards to us) with proximity (distance).
+ * 
+ * @param packets - All packets to analyze
+ * @param neighbors - Known neighbors with location data
+ * @param localLat - Local node latitude
+ * @param localLon - Local node longitude  
+ * @param localHash - Local node's hash
+ */
+export function buildNeighborAffinity(
   packets: Packet[],
   neighbors: Record<string, NeighborInfo>,
+  localLat?: number,
+  localLon?: number,
   localHash?: string
-): Map<string, number> {
-  const affinity = new Map<string, number>();
+): Map<string, NeighborAffinity> {
+  const affinity = new Map<string, NeighborAffinity>();
   const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  const hasLocalCoords = localLat !== undefined && localLon !== undefined &&
+    (localLat !== 0 || localLon !== 0);
   
+  // Initialize affinity for all neighbors with coordinates
+  for (const [hash, neighbor] of Object.entries(neighbors)) {
+    let distanceMeters: number | null = null;
+    let proximityScore = 0.5; // Default middle score
+    
+    if (hasLocalCoords && neighbor.latitude && neighbor.longitude &&
+        (neighbor.latitude !== 0 || neighbor.longitude !== 0)) {
+      distanceMeters = calculateDistance(
+        localLat!, localLon!,
+        neighbor.latitude, neighbor.longitude
+      );
+      proximityScore = getProximityScore(distanceMeters);
+    }
+    
+    affinity.set(hash, {
+      hash,
+      frequency: 0,
+      distanceMeters,
+      proximityScore,
+      combinedScore: 0, // Will be calculated after frequency
+    });
+  }
+  
+  // Count frequency from packets
   for (const packet of packets) {
     const path = packet.forwarded_path ?? packet.original_path;
     
@@ -93,10 +176,10 @@ function buildNeighborAffinity(
       if (lastPrefix.toUpperCase() === localPrefix) {
         // Second-to-last is the neighbor that forwarded to us
         const neighborPrefix = path[path.length - 2];
-        // Find matching neighbor hash
-        for (const hash of Object.keys(neighbors)) {
+        // Find matching neighbor hash and increment frequency
+        for (const [hash, aff] of affinity) {
           if (prefixMatches(neighborPrefix, hash)) {
-            affinity.set(hash, (affinity.get(hash) || 0) + 1);
+            aff.frequency++;
           }
         }
       }
@@ -104,31 +187,46 @@ function buildNeighborAffinity(
     
     // Also count direct packets (empty path or single-element path)
     if ((!path || path.length === 0) && packet.src_hash) {
-      // Direct packet from src_hash
-      if (neighbors[packet.src_hash]) {
-        affinity.set(packet.src_hash, (affinity.get(packet.src_hash) || 0) + 1);
+      const srcAff = affinity.get(packet.src_hash);
+      if (srcAff) {
+        srcAff.frequency++;
       }
     }
+  }
+  
+  // Calculate combined scores
+  // Find max frequency for normalization
+  let maxFrequency = 0;
+  for (const aff of affinity.values()) {
+    maxFrequency = Math.max(maxFrequency, aff.frequency);
+  }
+  
+  // Combined score = normalized_frequency * 0.6 + proximity * 0.4
+  // This weights frequency higher but proximity breaks ties
+  for (const aff of affinity.values()) {
+    const normalizedFreq = maxFrequency > 0 ? aff.frequency / maxFrequency : 0;
+    aff.combinedScore = normalizedFreq * 0.6 + aff.proximityScore * 0.4;
   }
   
   return affinity;
 }
 
+
 /**
  * Match a 2-character prefix to known node hashes.
- * Returns matching hashes and the probability (1/k where k = match count).
+ * Returns matching hashes and the probability based on combined affinity scores.
  * 
  * @param prefix - The 2-char hex prefix to match
  * @param neighbors - Known neighbors
  * @param localHash - Local node's full hash
- * @param neighborAffinity - Optional affinity map for tiebreaking
+ * @param neighborAffinity - Optional affinity map (combined scores) for tiebreaking
  * @param isLastHop - If true and prefix matches local, return local with high confidence
  */
 export function matchPrefix(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
   localHash?: string,
-  neighborAffinity?: Map<string, number>,
+  neighborAffinity?: Map<string, number | NeighborAffinity>,
   isLastHop: boolean = false
 ): { matches: string[]; probability: number; bestMatch: string | null } {
   const normalizedPrefix = prefix.toUpperCase();
@@ -158,19 +256,24 @@ export function matchPrefix(
   }
   
   // Calculate base probability
-  const probability = matches.length > 0 ? 1 / matches.length : 0;
+  const baseProbability = matches.length > 0 ? 1 / matches.length : 0;
   
   // Determine best match using affinity for tiebreaking
   let bestMatch: string | null = null;
+  let bestScore = -1;
+  
   if (matches.length === 1) {
     bestMatch = matches[0];
   } else if (matches.length > 1 && neighborAffinity) {
-    // Use affinity to pick the most likely candidate
-    let bestAffinity = -1;
+    // Use combined affinity scores to pick the most likely candidate
     for (const hash of matches) {
-      const aff = neighborAffinity.get(hash) || 0;
-      if (aff > bestAffinity) {
-        bestAffinity = aff;
+      const affValue = neighborAffinity.get(hash);
+      // Support both old (number) and new (NeighborAffinity) formats
+      const score = affValue 
+        ? (typeof affValue === 'number' ? affValue : affValue.combinedScore)
+        : 0;
+      if (score > bestScore) {
+        bestScore = score;
         bestMatch = hash;
       }
     }
@@ -178,6 +281,23 @@ export function matchPrefix(
     if (!bestMatch) bestMatch = matches[0];
   } else if (matches.length > 0) {
     bestMatch = matches[0];
+  }
+  
+  // Calculate probability - boost if we have strong affinity data
+  let probability = baseProbability;
+  if (matches.length > 1 && neighborAffinity && bestScore > 0) {
+    // Sum all scores for matches
+    let totalScore = 0;
+    for (const hash of matches) {
+      const affValue = neighborAffinity.get(hash);
+      totalScore += affValue 
+        ? (typeof affValue === 'number' ? affValue : affValue.combinedScore)
+        : 0;
+    }
+    if (totalScore > 0) {
+      // Probability based on score ratio (capped at 0.95 for multi-match)
+      probability = Math.min(0.95, bestScore / totalScore);
+    }
   }
   
   return { matches, probability, bestMatch };
@@ -190,14 +310,14 @@ export function matchPrefix(
  * @param prefix - The 2-char prefix to resolve
  * @param neighbors - Known neighbors
  * @param localHash - Local node's full hash  
- * @param neighborAffinity - Affinity map for tiebreaking
+ * @param neighborAffinity - Affinity map (supports both simple and combined formats)
  * @param isLastHop - Whether this is the last element in the path
  */
 function resolveHop(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
   localHash?: string,
-  neighborAffinity?: Map<string, number>,
+  neighborAffinity?: Map<string, number | NeighborAffinity>,
   isLastHop: boolean = false
 ): { hash: string | null; confidence: number } {
   const { matches, probability, bestMatch } = matchPrefix(
@@ -212,20 +332,7 @@ function resolveHop(
     // Exact match - 100% confidence
     return { hash: matches[0], confidence: 1 };
   } else if (matches.length > 1) {
-    // Multiple matches
-    // If we have affinity data and a clear winner, boost confidence
-    if (neighborAffinity && bestMatch) {
-      const bestAffinity = neighborAffinity.get(bestMatch) || 0;
-      const totalAffinity = matches.reduce((sum, h) => sum + (neighborAffinity.get(h) || 0), 0);
-      
-      if (totalAffinity > 0 && bestAffinity > 0) {
-        // Confidence based on affinity ratio (capped at 0.95)
-        const affinityConfidence = Math.min(0.95, bestAffinity / totalAffinity);
-        return { hash: bestMatch, confidence: Math.max(probability, affinityConfidence) };
-      }
-    }
-    
-    // Fall back to probability
+    // matchPrefix already calculates probability based on affinity
     return { hash: bestMatch, confidence: probability };
   }
   
@@ -247,17 +354,27 @@ function makeEdgeKey(hash1: string, hash2: string): string {
  * @param neighbors - Known neighbors with location data
  * @param localHash - Local node's hash
  * @param confidenceThreshold - Minimum per-hop confidence to include (default 0.8)
+ * @param localLat - Local node latitude (for proximity calculations)
+ * @param localLon - Local node longitude (for proximity calculations)
  * @returns MeshTopology with edges that meet the confidence threshold
  */
 export function buildMeshTopology(
   packets: Packet[],
   neighbors: Record<string, NeighborInfo>,
   localHash?: string,
-  confidenceThreshold: number = 0.8
+  confidenceThreshold: number = 0.8,
+  localLat?: number,
+  localLon?: number
 ): MeshTopology {
-  // First pass: build neighbor affinity map for tiebreaking
-  const neighborAffinity = buildNeighborAffinity(packets, neighbors, localHash);
+  // First pass: build neighbor affinity map with proximity scores
+  const neighborAffinity = buildNeighborAffinity(packets, neighbors, localLat, localLon, localHash);
   const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  
+  // Convert to simple number map for backward compatibility in return value
+  const simpleAffinity = new Map<string, number>();
+  for (const [hash, aff] of neighborAffinity) {
+    simpleAffinity.set(hash, aff.combinedScore);
+  }
   
   // Accumulate edge observations
   const accumulators = new Map<string, EdgeAccumulator>();
@@ -414,7 +531,7 @@ export function buildMeshTopology(
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
-  return { edges, edgeMap, maxPacketCount, neighborAffinity, localPrefix };
+  return { edges, edgeMap, maxPacketCount, neighborAffinity: simpleAffinity, localPrefix };
 }
 
 /**
