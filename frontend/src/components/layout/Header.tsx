@@ -1,6 +1,6 @@
-import { useStore, usePacketCacheState } from '@/lib/stores/useStore';
+import { useStore, usePacketCacheState, useClearPacketCache } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
-import { Circle, Clock, Loader2 } from 'lucide-react';
+import { Circle, Clock, Loader2, Database, RefreshCw } from 'lucide-react';
 
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -19,6 +19,7 @@ function formatUptime(seconds: number): string {
 export function Header() {
   const { stats, fetchStats } = useStore();
   const cacheState = usePacketCacheState();
+  const clearCache = useClearPacketCache();
 
   // Poll stats every 5 seconds
   usePolling(fetchStats, 5000);
@@ -48,13 +49,30 @@ export function Header() {
 
       {/* Status indicators */}
       <div className="flex items-center gap-6">
-        {/* Building Topology indicator */}
-        {cacheState.isDeepLoading && (
+        {/* Building Topology indicator or Packet count */}
+        {(cacheState.isBootstrapping || cacheState.isDeepLoading) ? (
           <div className="flex items-center gap-2 px-2 py-1 rounded bg-surface-secondary/50">
             <Loader2 className="w-3.5 h-3.5 text-accent-secondary animate-spin" />
             <span className="type-data-xs text-accent-secondary">
-              Building topology... {cacheState.packetCount.toLocaleString()} packets
+              {cacheState.isBootstrapping 
+                ? 'Loading packets...'
+                : `Building topology... ${cacheState.packetCount.toLocaleString()} packets`
+              }
             </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Database className="w-3.5 h-3.5 text-text-muted" />
+            <span className="type-data-xs text-text-secondary tabular-nums">
+              {cacheState.packetCount.toLocaleString()} pkts
+            </span>
+            <button
+              onClick={clearCache}
+              className="p-1 hover:bg-surface-secondary rounded transition-colors"
+              title="Refresh packet cache"
+            >
+              <RefreshCw className="w-3 h-3 text-text-muted hover:text-text-primary" />
+            </button>
           </div>
         )}
 
