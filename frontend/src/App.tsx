@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import { Component, ReactNode, useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { BackgroundProvider } from '@/components/layout/BackgroundProvider';
+import { ThemeProvider } from '@/lib/theme';
 import { useInitializeApp } from '@/lib/stores/useStore';
 
 // Pages
@@ -57,8 +58,8 @@ export default function App() {
   }, [initializeApp]);
   
   return (
-    <>
-      {/* Dynamic background - controlled by BackgroundSelector */}
+    <ThemeProvider>
+      {/* Dynamic background - controlled by ThemeContext */}
       <BackgroundProvider />
 
       {/* App shell: sidebar + main content */}
@@ -84,6 +85,6 @@ export default function App() {
           </div>
         </main>
       </div>
-    </>
+    </ThemeProvider>
   );
 }
