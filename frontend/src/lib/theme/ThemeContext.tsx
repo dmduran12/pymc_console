@@ -110,7 +110,6 @@ function applyColorSchemeToDOM(scheme: ColorSchemeId): void {
   } else {
     document.documentElement.removeAttribute('data-theme');
   }
-  console.log('[Theme] Color scheme applied:', scheme, colorScheme.dataTheme ? `(data-theme="${colorScheme.dataTheme}")` : '(default)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,12 +144,10 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
 
   // Actions
   const setColorScheme = useCallback((scheme: ColorSchemeId) => {
-    console.log('[Theme] setColorScheme:', scheme);
     setTheme(prev => ({ ...prev, colorScheme: scheme }));
   }, []);
 
   const setBackgroundImage = useCallback((src: string) => {
-    console.log('[Theme] setBackgroundImage:', src);
     setTheme(prev => ({ ...prev, backgroundImage: src }));
   }, []);
 
@@ -162,7 +159,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const setThemePreset = useCallback((presetId: string) => {
     const preset = THEME_PRESETS.find(p => p.id === presetId);
     if (preset) {
-      console.log('[Theme] setThemePreset:', presetId, '→', { colorScheme: preset.colorScheme, backgroundImage: preset.backgroundImage });
       setTheme(prev => ({
         ...prev,
         colorScheme: preset.colorScheme,
