@@ -217,6 +217,8 @@
 
 /* Theme transition - smooth color changes */
 html {
+  /* Fallback background when image not loaded */
+  background: var(--bg-body);
   transition: 
     --accent-primary var(--theme-transition),
     --accent-secondary var(--theme-transition),
@@ -444,6 +446,7 @@ a, button {
 }
 
 body {
+  /* Transparent to allow BackgroundProvider (-z-10) to show through */
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-display), system-ui, -apple-system, sans-serif;
