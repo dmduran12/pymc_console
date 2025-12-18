@@ -23,28 +23,18 @@ export const BackgroundProvider = memo(function BackgroundProvider() {
   useEffect(() => {
     if (backgroundImage === displayedImage) return;
 
-    console.log('[Background] Switching:', displayedImage, '→', backgroundImage);
-    
     // Preload the new image before switching
     const img = new Image();
-    const fullUrl = new URL(backgroundImage, window.location.origin).href;
-    console.log('[Background] Preloading:', fullUrl);
-    
     img.onload = () => {
-      console.log('[Background] Image preloaded successfully, starting transition');
       setIsTransitioning(true);
       // Allow the fade-out to start, then switch image
       requestAnimationFrame(() => {
         setDisplayedImage(backgroundImage);
         // Reset transition state after animation completes
-        setTimeout(() => {
-          setIsTransitioning(false);
-          console.log('[Background] Transition complete');
-        }, 300);
+        setTimeout(() => setIsTransitioning(false), 300);
       });
     };
-    img.onerror = (e) => {
-      console.warn('[Background] Preload failed:', fullUrl, e);
+    img.onerror = () => {
       // Fallback: switch immediately (CSS background-image may still work)
       setDisplayedImage(backgroundImage);
     };

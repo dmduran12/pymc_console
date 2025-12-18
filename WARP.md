@@ -181,6 +181,13 @@ const { stats } = useStore();       // Avoid
 
 The frontend connects to pyMC_Repeater's CherryPy API (port 8000):
 
+**Static file routes (CherryPy):**
+- `/assets/*` - Static files (JS, CSS, images) served from `html/assets/`
+- `/favicon.ico` - Favicon
+- `/*` (default) - Returns `index.html` for client-side routing (SPA)
+
+**IMPORTANT:** CherryPy only serves `/assets/` as static files. Any static assets (images, fonts, etc.) MUST be placed in `public/assets/` during development so they end up in `out/assets/` after build. Do NOT use `/images/` or other paths - they won't be served.
+
 **GET endpoints:**
 - `/api/stats` - System statistics, neighbors, config
 - `/api/recent_packets?limit=N` - Recent packet history
