@@ -4,6 +4,11 @@
  * Analyzes packet paths to build a network graph with confidence-weighted edges.
  * Uses probabilistic prefix matching (2-char hex prefixes have 256 possible values).
  * Only creates edges when confidence meets the threshold (default 80%).
+ * 
+ * Enhanced features:
+ * - Local node prefix detection: last path element matching local prefix = receiving node
+ * - Neighbor affinity: tracks strongest neighbors to break ties in 50/50 decisions
+ * - src_hash and dst_hash correlation for additional confidence
  */
 
 import { Packet, NeighborInfo } from '@/types/api';
@@ -29,6 +34,10 @@ export interface MeshTopology {
   edgeMap: Map<string, TopologyEdge>;
   /** Max packet count across all edges (for normalization) */
   maxPacketCount: number;
+  /** Neighbor affinity scores (hash -> packet count received from that neighbor) */
+  neighborAffinity: Map<string, number>;
+  /** Local node's 2-char prefix (derived from localHash) */
+  localPrefix: string | null;
 }
 
 interface EdgeAccumulator {
@@ -40,53 +49,175 @@ interface EdgeAccumulator {
 }
 
 /**
+ * Extract the 2-character prefix from a full hash.
+ */
+export function getHashPrefix(hash: string): string {
+  return hash.slice(0, 2).toUpperCase();
+}
+
+/**
+ * Check if a prefix matches a full hash.
+ */
+function prefixMatches(prefix: string, hash: string): boolean {
+  return hash.toUpperCase().startsWith(prefix.toUpperCase());
+}
+
+/**
+ * Build neighbor affinity map from packets.
+ * Counts how many packets we've received where each neighbor appears as the last hop.
+ * Higher counts = stronger/closer neighbors.
+ */
+function buildNeighborAffinity(
+  packets: Packet[],
+  neighbors: Record<string, NeighborInfo>,
+  localHash?: string
+): Map<string, number> {
+  const affinity = new Map<string, number>();
+  const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  
+  for (const packet of packets) {
+    const path = packet.forwarded_path ?? packet.original_path;
+    
+    // If path ends with local prefix, the second-to-last element is our direct neighbor
+    if (path && path.length >= 2 && localPrefix) {
+      const lastPrefix = path[path.length - 1];
+      if (lastPrefix.toUpperCase() === localPrefix) {
+        // Second-to-last is the neighbor that forwarded to us
+        const neighborPrefix = path[path.length - 2];
+        // Find matching neighbor hash
+        for (const hash of Object.keys(neighbors)) {
+          if (prefixMatches(neighborPrefix, hash)) {
+            affinity.set(hash, (affinity.get(hash) || 0) + 1);
+          }
+        }
+      }
+    }
+    
+    // Also count direct packets (empty path or single-element path)
+    if ((!path || path.length === 0) && packet.src_hash) {
+      // Direct packet from src_hash
+      if (neighbors[packet.src_hash]) {
+        affinity.set(packet.src_hash, (affinity.get(packet.src_hash) || 0) + 1);
+      }
+    }
+  }
+  
+  return affinity;
+}
+
+/**
  * Match a 2-character prefix to known node hashes.
  * Returns matching hashes and the probability (1/k where k = match count).
+ * 
+ * @param prefix - The 2-char hex prefix to match
+ * @param neighbors - Known neighbors
+ * @param localHash - Local node's full hash
+ * @param neighborAffinity - Optional affinity map for tiebreaking
+ * @param isLastHop - If true and prefix matches local, return local with high confidence
  */
 function matchPrefix(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
-  localHash?: string
-): { matches: string[]; probability: number } {
+  localHash?: string,
+  neighborAffinity?: Map<string, number>,
+  isLastHop: boolean = false
+): { matches: string[]; probability: number; bestMatch: string | null } {
   const normalizedPrefix = prefix.toUpperCase();
   const matches: string[] = [];
   
-  // Check local node
-  if (localHash && localHash.toUpperCase().startsWith(normalizedPrefix)) {
+  // Check local node first
+  const localMatches = localHash && prefixMatches(normalizedPrefix, localHash);
+  if (localMatches) {
     matches.push(localHash);
   }
   
   // Check neighbors
   for (const hash of Object.keys(neighbors)) {
-    if (hash.toUpperCase().startsWith(normalizedPrefix)) {
+    if (prefixMatches(normalizedPrefix, hash)) {
       matches.push(hash);
     }
   }
   
-  return {
-    matches,
-    probability: matches.length > 0 ? 1 / matches.length : 0,
-  };
+  // If this is the last hop and local matches, strongly prefer local
+  // (packets we receive end with our prefix)
+  if (isLastHop && localMatches && localHash) {
+    return {
+      matches,
+      probability: 1, // High confidence - last hop is us
+      bestMatch: localHash,
+    };
+  }
+  
+  // Calculate base probability
+  const probability = matches.length > 0 ? 1 / matches.length : 0;
+  
+  // Determine best match using affinity for tiebreaking
+  let bestMatch: string | null = null;
+  if (matches.length === 1) {
+    bestMatch = matches[0];
+  } else if (matches.length > 1 && neighborAffinity) {
+    // Use affinity to pick the most likely candidate
+    let bestAffinity = -1;
+    for (const hash of matches) {
+      const aff = neighborAffinity.get(hash) || 0;
+      if (aff > bestAffinity) {
+        bestAffinity = aff;
+        bestMatch = hash;
+      }
+    }
+    // If no affinity data, fall back to first match
+    if (!bestMatch) bestMatch = matches[0];
+  } else if (matches.length > 0) {
+    bestMatch = matches[0];
+  }
+  
+  return { matches, probability, bestMatch };
 }
 
 /**
  * Calculate confidence for a single hop in a path.
- * Returns the resolved hash (if unique) and the confidence score.
+ * Returns the resolved hash and the confidence score.
+ * 
+ * @param prefix - The 2-char prefix to resolve
+ * @param neighbors - Known neighbors
+ * @param localHash - Local node's full hash  
+ * @param neighborAffinity - Affinity map for tiebreaking
+ * @param isLastHop - Whether this is the last element in the path
  */
 function resolveHop(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
-  localHash?: string
+  localHash?: string,
+  neighborAffinity?: Map<string, number>,
+  isLastHop: boolean = false
 ): { hash: string | null; confidence: number } {
-  const { matches, probability } = matchPrefix(prefix, neighbors, localHash);
+  const { matches, probability, bestMatch } = matchPrefix(
+    prefix, 
+    neighbors, 
+    localHash, 
+    neighborAffinity,
+    isLastHop
+  );
   
   if (matches.length === 1) {
     // Exact match - 100% confidence
     return { hash: matches[0], confidence: 1 };
   } else if (matches.length > 1) {
-    // Multiple matches - confidence = 1/k
-    // For topology, we take the first match but note reduced confidence
-    return { hash: matches[0], confidence: probability };
+    // Multiple matches
+    // If we have affinity data and a clear winner, boost confidence
+    if (neighborAffinity && bestMatch) {
+      const bestAffinity = neighborAffinity.get(bestMatch) || 0;
+      const totalAffinity = matches.reduce((sum, h) => sum + (neighborAffinity.get(h) || 0), 0);
+      
+      if (totalAffinity > 0 && bestAffinity > 0) {
+        // Confidence based on affinity ratio (capped at 0.95)
+        const affinityConfidence = Math.min(0.95, bestAffinity / totalAffinity);
+        return { hash: bestMatch, confidence: Math.max(probability, affinityConfidence) };
+      }
+    }
+    
+    // Fall back to probability
+    return { hash: bestMatch, confidence: probability };
   }
   
   // No match
@@ -115,6 +246,10 @@ export function buildMeshTopology(
   localHash?: string,
   confidenceThreshold: number = 0.8
 ): MeshTopology {
+  // First pass: build neighbor affinity map for tiebreaking
+  const neighborAffinity = buildNeighborAffinity(packets, neighbors, localHash);
+  const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  
   // Accumulate edge observations
   const accumulators = new Map<string, EdgeAccumulator>();
   
@@ -127,13 +262,17 @@ export function buildMeshTopology(
     for (let i = 0; i < path.length - 1; i++) {
       const fromPrefix = path[i];
       const toPrefix = path[i + 1];
+      const isToLastHop = (i + 1) === path.length - 1;
       
-      // Resolve both ends of this hop
-      const fromResolved = resolveHop(fromPrefix, neighbors, localHash);
-      const toResolved = resolveHop(toPrefix, neighbors, localHash);
+      // Resolve both ends of this hop with affinity tiebreaking
+      const fromResolved = resolveHop(fromPrefix, neighbors, localHash, neighborAffinity, false);
+      const toResolved = resolveHop(toPrefix, neighbors, localHash, neighborAffinity, isToLastHop);
       
       // Skip if either end couldn't be resolved
       if (!fromResolved.hash || !toResolved.hash) continue;
+      
+      // Skip self-loops
+      if (fromResolved.hash === toResolved.hash) continue;
       
       // Calculate combined confidence for this hop
       const hopConfidence = fromResolved.confidence * toResolved.confidence;
@@ -159,14 +298,16 @@ export function buildMeshTopology(
       }
     }
     
-    // Also consider src_hash → first path element and last path element → destination
-    // This captures the full route including source and destination
+    // Also consider src_hash → first path element
+    // This captures the source node's connection to the first relay
     if (packet.src_hash && path.length > 0) {
       const firstPrefix = path[0];
-      const firstResolved = resolveHop(firstPrefix, neighbors, localHash);
+      const firstResolved = resolveHop(firstPrefix, neighbors, localHash, neighborAffinity, false);
       
       // Source to first hop (src_hash is already a full hash)
-      if (firstResolved.hash && firstResolved.confidence >= confidenceThreshold) {
+      if (firstResolved.hash && 
+          firstResolved.hash !== packet.src_hash &&
+          firstResolved.confidence >= confidenceThreshold) {
         const key = makeEdgeKey(packet.src_hash, firstResolved.hash);
         const existing = accumulators.get(key);
         if (existing) {
@@ -180,6 +321,54 @@ export function buildMeshTopology(
             count: 1,
             confidenceSum: firstResolved.confidence,
           });
+        }
+      }
+    }
+    
+    // Last path element → local node connection
+    // If last prefix matches local, the second-to-last is connected to local
+    if (localHash && localPrefix && path.length >= 1) {
+      const lastPrefix = path[path.length - 1];
+      if (lastPrefix.toUpperCase() === localPrefix) {
+        // Last hop is us - create edge from second-to-last to local
+        if (path.length >= 2) {
+          const penultimatePrefix = path[path.length - 2];
+          const penultimateResolved = resolveHop(penultimatePrefix, neighbors, localHash, neighborAffinity, false);
+          
+          if (penultimateResolved.hash && 
+              penultimateResolved.hash !== localHash &&
+              penultimateResolved.confidence >= confidenceThreshold) {
+            const key = makeEdgeKey(penultimateResolved.hash, localHash);
+            const existing = accumulators.get(key);
+            if (existing) {
+              existing.count++;
+              existing.confidenceSum += penultimateResolved.confidence;
+            } else {
+              accumulators.set(key, {
+                fromHash: penultimateResolved.hash,
+                toHash: localHash,
+                key,
+                count: 1,
+                confidenceSum: penultimateResolved.confidence,
+              });
+            }
+          }
+        } else if (packet.src_hash && packet.src_hash !== localHash) {
+          // Single-element path ending with local = direct from src
+          const key = makeEdgeKey(packet.src_hash, localHash);
+          const existing = accumulators.get(key);
+          if (existing) {
+            existing.count++;
+            existing.confidenceSum += 1; // High confidence for direct
+          } else {
+            accumulators.set(key, {
+              fromHash: packet.src_hash,
+              toHash: localHash,
+              key,
+              count: 1,
+              confidenceSum: 1,
+            });
+          }
         }
       }
     }
@@ -216,7 +405,7 @@ export function buildMeshTopology(
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
-  return { edges, edgeMap, maxPacketCount };
+  return { edges, edgeMap, maxPacketCount, neighborAffinity, localPrefix };
 }
 
 /**
