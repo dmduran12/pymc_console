@@ -99,8 +99,14 @@ export function getHashPrefix(hash: string): string {
  * Hashes can be "0xNN" format or full hex strings.
  */
 export function prefixMatches(prefix: string, hash: string): boolean {
-  const hashPrefix = getHashPrefix(hash);
-  return hashPrefix === prefix.toUpperCase();
+  const normalizedPrefix = prefix.toUpperCase();
+  // Handle "0x" prefix
+  if (hash.startsWith('0x') || hash.startsWith('0X')) {
+    const hashHex = hash.slice(2).toUpperCase();
+    return hashHex.startsWith(normalizedPrefix);
+  }
+  // For full hex strings, check if first N chars match
+  return hash.toUpperCase().startsWith(normalizedPrefix);
 }
 
 /**

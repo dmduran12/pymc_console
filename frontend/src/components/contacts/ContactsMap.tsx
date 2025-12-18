@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Users } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
@@ -269,6 +269,52 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Hub-only view toggle
+  const [showHubsOnly, setShowHubsOnly] = useState(false);
+  
+  // Build set of hub nodes and their connected neighbors for filtering
+  const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
+  
+  // Get all nodes connected to hubs (for hub-only view)
+  const hubConnectedNodes = useMemo(() => {
+    const connected = new Set<string>();
+    // Add local node (always show)
+    if (localHash) connected.add(localHash);
+    // Add hub nodes themselves
+    for (const hub of meshTopology.hubNodes) {
+      connected.add(hub);
+    }
+    // Add nodes connected to hubs via edges
+    for (const edge of meshTopology.edges) {
+      if (hubNodeSet.has(edge.fromHash) || hubNodeSet.has(edge.toHash)) {
+        connected.add(edge.fromHash);
+        connected.add(edge.toHash);
+      }
+    }
+    return connected;
+  }, [meshTopology, hubNodeSet, localHash]);
+  
+  // Filtered polylines based on hub-only mode
+  const filteredCertainPolylines = useMemo(() => {
+    if (!showHubsOnly) return certainPolylines;
+    return certainPolylines.filter(({ edge }) => 
+      hubNodeSet.has(edge.fromHash) || hubNodeSet.has(edge.toHash)
+    );
+  }, [certainPolylines, showHubsOnly, hubNodeSet]);
+  
+  const filteredUncertainPolylines = useMemo(() => {
+    if (!showHubsOnly) return uncertainPolylines;
+    return uncertainPolylines.filter(({ edge }) => 
+      hubNodeSet.has(edge.fromHash) || hubNodeSet.has(edge.toHash)
+    );
+  }, [uncertainPolylines, showHubsOnly, hubNodeSet]);
+  
+  // Filtered neighbors based on hub-only mode
+  const filteredNeighbors = useMemo(() => {
+    if (!showHubsOnly) return neighborsWithLocation;
+    return neighborsWithLocation.filter(([hash]) => hubConnectedNodes.has(hash));
+  }, [neighborsWithLocation, showHubsOnly, hubConnectedNodes]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -354,7 +400,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         <FitBoundsOnce positions={allPositions} />
         
         {/* Draw CERTAIN edges as SOLID lines - thickness based on validation count */}
-        {certainPolylines.map(({ from, to, edge }) => {
+        {filteredCertainPolylines.map(({ from, to, edge }) => {
           // Thickness based on how many times this connection was validated
           const weight = getCertainEdgeWeight(edge.certainCount, meshTopology.maxCertainCount);
           // Color based on hop distance from local
@@ -402,7 +448,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         })}
         
         {/* Draw UNCERTAIN edges as DOTTED lines - color based on confidence */}
-        {uncertainPolylines.map(({ from, to, edge }) => {
+        {filteredUncertainPolylines.map(({ from, to, edge }) => {
           // Color based on confidence level
           const color = getUncertainEdgeColor(edge.avgConfidence);
           
@@ -464,7 +510,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         )}
         
         {/* Neighbor markers - matte plastic style with CSS shadows */}
-        {neighborsWithLocation.map(([hash, neighbor]) => {
+        {filteredNeighbors.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
           // Check if this is a zero-hop neighbor or hub node
@@ -579,25 +625,50 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           onCancel={() => setPendingRemove(null)}
         />
         
-        {/* Fullscreen button - top right, matching legend style */}
-        <button
-          onClick={toggleFullscreen}
-          className="absolute top-4 right-4 z-[600] p-2 transition-colors hover:bg-white/10"
-          style={{
-            background: 'rgba(20, 20, 22, 0.85)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            borderRadius: '0.75rem',
-            border: '1px solid rgba(140, 160, 200, 0.2)',
-          }}
-          title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-        >
-          {isFullscreen ? (
-            <Minimize2 className="w-4 h-4 text-text-secondary" />
-          ) : (
-            <Maximize2 className="w-4 h-4 text-text-secondary" />
+        {/* Map controls - top right */}
+        <div className="absolute top-4 right-4 z-[600] flex gap-2">
+          {/* Hub-only toggle - only show if there are hubs */}
+          {meshTopology.hubNodes.length > 0 && (
+            <button
+              onClick={() => setShowHubsOnly(!showHubsOnly)}
+              className="p-2 transition-colors hover:bg-white/10"
+              style={{
+                background: showHubsOnly ? 'rgba(251, 191, 36, 0.2)' : 'rgba(20, 20, 22, 0.85)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                borderRadius: '0.75rem',
+                border: showHubsOnly ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
+              }}
+              title={showHubsOnly ? 'Show all nodes' : 'Show hubs only'}
+            >
+              {showHubsOnly ? (
+                <Users className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Network className="w-4 h-4 text-text-secondary" />
+              )}
+            </button>
           )}
-        </button>
+          
+          {/* Fullscreen button */}
+          <button
+            onClick={toggleFullscreen}
+            className="p-2 transition-colors hover:bg-white/10"
+            style={{
+              background: 'rgba(20, 20, 22, 0.85)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(140, 160, 200, 0.2)',
+            }}
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4 text-text-secondary" />
+            ) : (
+              <Maximize2 className="w-4 h-4 text-text-secondary" />
+            )}
+          </button>
+        </div>
         
         {/* Legend - inside the map card, bottom-left corner */}
         <div 
