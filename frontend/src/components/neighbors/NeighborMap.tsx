@@ -52,7 +52,6 @@ const SIGNAL_COLORS = {
   critical: '#FF5C7A',   // --signal-critical
   unknown: '#767688',    // --signal-unknown
   localNode: '#60A5FA',  // --map-local-node
-  multiHop: '#1E3A8A',   // Deep royal blue for multi-hop nodes
 };
 
 // Calculate mean SNR from packets for a given source hash
@@ -307,30 +306,6 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
           />
         ))}
         
-        {/* Draw solid lines to zero-hop (direct) neighbors, colored by mean SNR */}
-        {localNode && localNode.latitude && localNode.longitude && neighborsWithLocation
-          .filter(([, neighbor]) => neighbor.zero_hop === true)
-          .map(([hash, neighbor]) => {
-            if (!neighbor.latitude || !neighbor.longitude) return null;
-            
-            // Use mean SNR from packets if available, fallback to neighbor's last SNR
-            const meanSnr = calculateMeanSnr(packets, hash);
-            const lineColor = getSignalColor(meanSnr ?? neighbor.snr);
-            
-            return (
-              <Polyline
-                key={`line-${hash}`}
-                positions={[
-                  [localNode.latitude, localNode.longitude],
-                  [neighbor.latitude, neighbor.longitude]
-                ]}
-                color={lineColor}
-                weight={2}
-                opacity={0.5}
-              />
-            );
-          })}
-        
         {/* Local node marker - matte plastic style with CSS shadows */}
         {localNode && localNode.latitude && localNode.longitude && (
           <Marker
@@ -359,18 +334,10 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
-          // Zero-hop nodes: color by mean SNR signal strength
-          // Multi-hop nodes: deep royal blue
-          const isZeroHop = neighbor.zero_hop === true;
-          let color: string;
-          let meanSnr: number | undefined;
-          
-          if (isZeroHop) {
-            meanSnr = calculateMeanSnr(packets, hash);
-            color = getSignalColor(meanSnr ?? neighbor.snr);
-          } else {
-            color = SIGNAL_COLORS.multiHop;
-          }
+          // Color all nodes by signal strength (mean SNR from packets, fallback to last SNR)
+          const meanSnr = calculateMeanSnr(packets, hash);
+          const displaySnr = meanSnr ?? neighbor.snr;
+          const color = getSignalColor(displaySnr);
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
@@ -392,20 +359,14 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
                     <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
                   </div>
                   <hr className="my-2 border-gray-200" />
-                  {isZeroHop ? (
-                    <>
-                      {meanSnr !== undefined && (
-                        <div>Mean SNR: <strong>{meanSnr.toFixed(1)} dB</strong></div>
-                      )}
-                      {neighbor.rssi !== undefined && (
-                        <div>Last RSSI: <strong>{neighbor.rssi} dBm</strong></div>
-                      )}
-                      {neighbor.snr !== undefined && (
-                        <div>Last SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-blue-800">Multi-hop node</div>
+                  {meanSnr !== undefined && (
+                    <div>Mean SNR: <strong>{meanSnr.toFixed(1)} dB</strong></div>
+                  )}
+                  {neighbor.rssi !== undefined && (
+                    <div>Last RSSI: <strong>{neighbor.rssi} dBm</strong></div>
+                  )}
+                  {neighbor.snr !== undefined && (
+                    <div>Last SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
                   )}
                   {neighbor.advert_count !== undefined && (
                     <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
@@ -488,10 +449,6 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
               <span className="text-text-muted">&lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.multiHop, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
-              <span className="text-text-muted">Multi-hop</span>
-            </div>
-            <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
               <span className="text-text-muted">Local</span>
             </div>
