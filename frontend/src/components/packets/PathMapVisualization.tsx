@@ -151,17 +151,15 @@ function matchPrefixToNodes(
     }
   }
   
-  // Recalculate probabilities based on TOTAL matches (not just those with coordinates)
-  // This ensures confidence reflects true ambiguity even if some matches lack coords
+  // Recalculate probabilities based on candidates with coordinates
+  // Use proximity to local node for scoring when we have multiple matches
   const k = candidates.length;
-  const totalK = totalMatches; // Use total matches for probability calculation
   
-  if (totalK === 1 && k === 1) {
-    // Only one match total and it has coords - 100% confidence
+  if (k === 1) {
+    // Single candidate with coords - high confidence
     candidates[0].probability = 1;
-  } else if (totalK > 1 && k > 0 && localHasCoords && localNode) {
-    // Multiple matches exist - use proximity scoring among candidates with coords
-    // But cap probability based on total match count
+  } else if (k > 1 && localHasCoords && localNode) {
+    // Multiple candidates with coords - use proximity scoring
     let totalScore = 0;
     const scores = candidates.map(c => {
       if (c.isLocal) return { candidate: c, score: 1.0 }; // Local always highest
@@ -174,33 +172,28 @@ function matchPrefixToNodes(
       return { candidate: c, score };
     });
     
-    // Assign probabilities based on proximity scores
-    // Cap at 1/totalK as base (can't be more certain than # of matches allows)
+    // Assign probabilities based on proximity scores (normalized)
     if (totalScore > 0) {
-      const maxPossibleProb = Math.min(0.95, 1 - (1 / totalK) * 0.5); // Scale down based on total matches
       scores.forEach(({ candidate, score }) => {
-        candidate.probability = Math.min(maxPossibleProb, score / totalScore);
+        // Cap at 0.95 to indicate some uncertainty with multiple matches
+        candidate.probability = Math.min(0.95, score / totalScore);
       });
     } else {
-      const prob = 1 / totalK;
+      const prob = 1 / k;
       candidates.forEach(c => c.probability = prob);
     }
-  } else if (totalK > 1 && k > 0) {
-    // Multiple matches, no local coords - fall back to direct neighbor boost
+  } else if (k > 1) {
+    // Multiple candidates, no local coords - fall back to direct neighbor boost
     const directNeighbors = candidates.filter(c => c.isDirectNeighbor);
     if (directNeighbors.length === 1) {
-      // Boost direct neighbor but still cap based on total matches
-      const maxProb = Math.min(0.9, 1 - (1 / totalK) * 0.3);
+      // Boost the direct neighbor
       candidates.forEach(c => {
-        c.probability = c.isDirectNeighbor ? maxProb : (1 - maxProb) / (k - 1);
+        c.probability = c.isDirectNeighbor ? 0.9 : 0.1 / (k - 1);
       });
     } else {
-      const prob = 1 / totalK;
+      const prob = 1 / k;
       candidates.forEach(c => c.probability = prob);
     }
-  } else if (k === 1 && totalK > 1) {
-    // Only one candidate has coords but there are other matches - reduce confidence
-    candidates[0].probability = 1 / totalK;
   }
   
   return { candidates, totalMatches };
