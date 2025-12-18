@@ -27,8 +27,11 @@ export const BackgroundProvider = memo(function BackgroundProvider() {
     
     // Preload the new image before switching
     const img = new Image();
+    const fullUrl = new URL(backgroundImage, window.location.origin).href;
+    console.log('[Background] Preloading:', fullUrl);
+    
     img.onload = () => {
-      console.log('[Background] Image loaded, starting transition');
+      console.log('[Background] Image preloaded successfully, starting transition');
       setIsTransitioning(true);
       // Allow the fade-out to start, then switch image
       requestAnimationFrame(() => {
@@ -40,9 +43,9 @@ export const BackgroundProvider = memo(function BackgroundProvider() {
         }, 300);
       });
     };
-    img.onerror = () => {
-      console.warn('[Background] Failed to load image:', backgroundImage);
-      // Fallback: switch immediately if load fails
+    img.onerror = (e) => {
+      console.warn('[Background] Preload failed:', fullUrl, e);
+      // Fallback: switch immediately (CSS background-image may still work)
       setDisplayedImage(backgroundImage);
     };
     img.src = backgroundImage;
