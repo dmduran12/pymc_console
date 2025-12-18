@@ -410,43 +410,58 @@ export default function NeighborMap({ neighbors, localNode, localHash, packets =
           <Polyline
             key={key}
             positions={[from, to]}
-            color={SIGNAL_COLORS.zeroHop}
-            weight={2}
-            opacity={0.7}
+            pathOptions={{
+              color: SIGNAL_COLORS.zeroHop,
+              weight: 2.5,
+              opacity: 0.75,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
           />
         ))}
         
         {/* Draw high-confidence topology connections with strength-based styling */}
-        {topologyPolylines.map(({ from, to, edge }) => (
-          <Polyline
-            key={`topology-${edge.key}`}
-            positions={[from, to]}
-            color={getEdgeColor(edge.strength)}
-            weight={getEdgeWeight(edge.strength)}
-            opacity={1}
-          >
-            <Tooltip
-              permanent={false}
-              direction="center"
-              className="topology-edge-tooltip"
+        {topologyPolylines.map(({ from, to, edge }) => {
+          const weight = getEdgeWeight(edge.strength);
+          const color = getEdgeColor(edge.strength);
+          return (
+            <Polyline
+              key={`topology-${edge.key}`}
+              positions={[from, to]}
+              pathOptions={{
+                color,
+                weight,
+                opacity: 0.85,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
             >
-              <div className="text-xs">
-                <div className="font-medium">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
-                <div className="text-text-muted">Confidence: {(edge.avgConfidence * 100).toFixed(0)}%</div>
-              </div>
-            </Tooltip>
-          </Polyline>
-        ))}
+              <Tooltip
+                permanent={false}
+                direction="center"
+                className="topology-edge-tooltip"
+              >
+                <div className="text-xs">
+                  <div className="font-medium">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
+                  <div className="text-text-muted">Confidence: {(edge.avgConfidence * 100).toFixed(0)}%</div>
+                </div>
+              </Tooltip>
+            </Polyline>
+          );
+        })}
         
         {/* Draw low-confidence connections as faint dotted lines */}
         {fallbackPolylines.map(({ from, to, key }) => (
           <Polyline
             key={`mesh-${key}`}
             positions={[from, to]}
-            color="rgba(255, 255, 255, 0.1)"
-            weight={1}
-            opacity={1}
-            dashArray="3, 8"
+            pathOptions={{
+              color: 'rgba(255, 255, 255, 0.12)',
+              weight: 1,
+              opacity: 1,
+              dashArray: '3, 8',
+              lineCap: 'round',
+            }}
           />
         ))}
         
