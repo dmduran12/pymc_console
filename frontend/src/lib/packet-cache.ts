@@ -32,6 +32,8 @@ export interface PacketCacheState {
   isLoading: boolean;
   isDeepLoading: boolean;
   packetCount: number;
+  /** Status message for UI feedback */
+  statusMessage: string;
 }
 
 type StateListener = (state: PacketCacheState) => void;
@@ -67,6 +69,8 @@ class PacketCache {
     return () => this.listeners.delete(listener);
   }
 
+  private statusMessage = '';
+
   /**
    * Get current cache state
    */
@@ -75,6 +79,7 @@ class PacketCache {
       isLoading: this.isLoading,
       isDeepLoading: this.isDeepLoading,
       packetCount: this.packets.size,
+      statusMessage: this.statusMessage,
     };
   }
 
@@ -117,20 +122,25 @@ class PacketCache {
 
     // No cached data - do quick initial load
     this.isLoading = true;
+    this.statusMessage = 'Fetching recent packets...';
     this.notifyListeners();
 
     try {
       const response = await this.fetchRecentPackets(QUICK_FETCH_LIMIT);
       
       if (response.success && response.data) {
+        this.statusMessage = `Processing ${response.data.length} packets...`;
+        this.notifyListeners();
         this.mergePackets(response.data);
         this.saveToStorage();
         console.log(`[PacketCache] Quick load: ${response.data.length} packets`);
       }
     } catch (error) {
       console.error('[PacketCache] Quick load failed:', error);
+      this.statusMessage = 'Load failed';
     } finally {
       this.isLoading = false;
+      this.statusMessage = '';
       this.notifyListeners();
     }
 
@@ -149,12 +159,25 @@ class PacketCache {
     }
 
     this.isDeepLoading = true;
+    this.statusMessage = 'Fetching topology data...';
     this.notifyListeners();
 
     try {
+      // Update status periodically while fetching (fetch can take 5-15 seconds)
+      const statusInterval = setInterval(() => {
+        if (this.isDeepLoading) {
+          this.statusMessage = `Loading ${DEEP_FETCH_LIMIT.toLocaleString()} packets...`;
+          this.notifyListeners();
+        }
+      }, 500);
+
       const response = await this.fetchRecentPackets(DEEP_FETCH_LIMIT);
+      clearInterval(statusInterval);
       
       if (response.success && response.data) {
+        this.statusMessage = `Processing ${response.data.length.toLocaleString()} packets...`;
+        this.notifyListeners();
+        
         const beforeCount = this.packets.size;
         this.mergePackets(response.data);
         this.meta.deepLoadComplete = true;
@@ -163,8 +186,10 @@ class PacketCache {
       }
     } catch (error) {
       console.error('[PacketCache] Deep load failed:', error);
+      this.statusMessage = 'Deep load failed';
     } finally {
       this.isDeepLoading = false;
+      this.statusMessage = '';
       this.notifyListeners();
     }
   }

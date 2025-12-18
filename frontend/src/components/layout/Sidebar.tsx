@@ -255,14 +255,21 @@ export function Sidebar() {
       <div className="px-3 py-3">
         <div className="bg-white/[0.03] rounded-xl p-3">
           {(cacheState.isLoading || cacheState.isDeepLoading) ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 text-accent-secondary animate-spin" />
-              <span className="type-data-xs text-accent-secondary">
-                {cacheState.isLoading 
-                  ? 'Loading packets...'
-                  : `Building topology... ${cacheState.packetCount.toLocaleString()}`
-                }
-              </span>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 text-accent-secondary animate-spin" />
+                <span className="type-data-xs text-accent-secondary">
+                  {cacheState.statusMessage || (cacheState.isLoading ? 'Loading...' : 'Building topology...')}
+                </span>
+              </div>
+              {cacheState.packetCount > 0 && (
+                <div className="flex items-center justify-between pl-6">
+                  <span className="type-data-xs text-text-muted">Cached</span>
+                  <span className="type-data-xs text-text-secondary tabular-nums">
+                    {cacheState.packetCount.toLocaleString()}
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-between">
