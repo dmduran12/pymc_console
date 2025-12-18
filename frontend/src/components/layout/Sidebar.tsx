@@ -16,12 +16,15 @@ import {
   Play,
   Pause,
   ChevronDown,
-  Sliders
+  Sliders,
+  Loader2,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 import { version } from '../../../package.json';
 import wifiIcon from '@/assets/WCM_Waves.gif';
 import clsx from 'clsx';
-import { useStore, usePrefetchForRoute } from '@/lib/stores/useStore';
+import { useStore, usePrefetchForRoute, usePacketCacheState, useClearPacketCache } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { formatUptime } from '@/lib/format';
 import { POLLING_INTERVALS } from '@/lib/constants';
@@ -42,6 +45,8 @@ export function Sidebar() {
   const { pathname } = useLocation();
   const { stats, fetchStats, setMode, setDutyCycle, sendAdvert } = useStore();
   const prefetchForRoute = usePrefetchForRoute();
+  const cacheState = usePacketCacheState();
+  const clearCache = useClearPacketCache();
   const [isOpen, setIsOpen] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(true);
   const [sending, setSending] = useState(false);
@@ -246,6 +251,42 @@ export function Sidebar() {
   // Status panel renderer (bottom of sidebar)
   const renderStatusPanel = () => (
     <div className="mt-auto border-t border-white/5">
+      {/* Packet Cache Status */}
+      <div className="px-3 py-3">
+        <div className="bg-white/[0.03] rounded-xl p-3">
+          {(cacheState.isBootstrapping || cacheState.isDeepLoading) ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 text-accent-secondary animate-spin" />
+              <span className="type-data-xs text-accent-secondary">
+                {cacheState.isBootstrapping 
+                  ? 'Loading packets...'
+                  : `Building topology... ${cacheState.packetCount.toLocaleString()}`
+                }
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-accent-primary" />
+                <span className="type-data-xs text-text-muted">Packets</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="type-data text-text-primary tabular-nums">
+                  {cacheState.packetCount.toLocaleString()}
+                </span>
+                <button
+                  onClick={clearCache}
+                  className="p-1 hover:bg-white/10 rounded transition-colors"
+                  title="Refresh packet cache"
+                >
+                  <RefreshCw className="w-3 h-3 text-text-muted hover:text-text-primary" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Live status & version */}
       <div className="px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
