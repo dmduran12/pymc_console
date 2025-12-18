@@ -22,13 +22,22 @@ import {
 } from 'recharts';
 
 /** Transform bucket data for AreaChart */
-function transformBucketsForChart(buckets: BucketData[] | undefined): { time: string; received: number }[] {
+function transformBucketsForChart(
+  buckets: BucketData[] | undefined,
+  rangeMinutes: number
+): { time: string; received: number }[] {
   if (!buckets || buckets.length === 0) return [];
+  
+  // For ranges > 24h, show day + time; otherwise just time
+  const showDate = rangeMinutes > 1440;
   
   return buckets.map((bucket) => {
     const date = new Date(bucket.start * 1000);
+    const time = showDate
+      ? date.toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
+      : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     return {
-      time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time,
       received: bucket.count,
     };
   });
@@ -45,11 +54,24 @@ export default function Dashboard() {
   // Debounce time range changes to prevent rapid API calls
   const debouncedRange = useDebounce(selectedRange, 150);
   
+  // Current time range config
+  const currentRange = DASHBOARD_TIME_RANGES[selectedRange];
+  
   // Transform received buckets for the hero chart (must be before early return)
   const receivedChartData = useMemo(
-    () => transformBucketsForChart(bucketedStats?.received),
-    [bucketedStats?.received]
+    () => transformBucketsForChart(bucketedStats?.received, currentRange.minutes),
+    [bucketedStats?.received, currentRange.minutes]
   );
+  
+  // Calculate tick interval based on data length - show ~6-8 labels max
+  const xAxisTickInterval = useMemo(() => {
+    const len = receivedChartData.length;
+    if (len <= 12) return 0; // Show all
+    if (len <= 24) return 2; // Every 3rd
+    if (len <= 48) return 5; // Every 6th
+    if (len <= 72) return 8; // Every 9th (~8 labels)
+    return Math.floor(len / 7); // ~7 labels
+  }, [receivedChartData.length]);
   
   // Fetch bucketed stats
   const fetchBucketedStats = useCallback(async () => {
@@ -93,7 +115,6 @@ export default function Dashboard() {
 
   // Derived values
   const uptime = stats?.uptime_seconds ? formatUptime(stats.uptime_seconds) : '0m';
-  const currentRange = DASHBOARD_TIME_RANGES[selectedRange];
   const nodeName = stats?.node_name || stats?.config?.node_name || 'Unknown Node';
   
   // Calculate totals from bucketed data (time-range specific)
@@ -177,7 +198,8 @@ export default function Dashboard() {
                   tickLine={false}
                   tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
                   dy={8}
-                  interval="preserveStartEnd"
+                  interval={xAxisTickInterval}
+                  minTickGap={20}
                 />
                 <YAxis 
                   axisLine={false}
@@ -194,7 +216,7 @@ export default function Dashboard() {
                       unit=" packets"
                     />
                   }
-                  position={{ y: -60 }}
+                  cursor={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
                 />
                 <Area
                   type="stepAfter"
@@ -203,6 +225,7 @@ export default function Dashboard() {
                   fill="url(#gradient-received)"
                   strokeWidth={1}
                   dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: METRIC_COLORS.received }}
                   isAnimationActive={false}
                 />
               </AreaChart>

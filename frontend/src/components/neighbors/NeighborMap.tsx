@@ -39,6 +39,7 @@ interface LocalNode {
 interface NeighborMapProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
+  localHash?: string;  // Local node's hash for zero-hop detection
   packets?: Packet[];
   onRemoveNode?: (hash: string) => void;
 }
@@ -52,6 +53,7 @@ const SIGNAL_COLORS = {
   critical: '#FF5C7A',   // --signal-critical
   unknown: '#767688',    // --signal-unknown
   localNode: '#60A5FA',  // --map-local-node
+  zeroHop: '#4338CA',    // Deep royal blue for zero-hop/direct neighbors
 };
 
 // Calculate mean SNR from packets for a given source hash
@@ -61,6 +63,50 @@ function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefine
   
   const sum = nodePackets.reduce((acc, p) => acc + (p.snr ?? 0), 0);
   return sum / nodePackets.length;
+}
+
+/**
+ * Analyze packets to determine which neighbors are zero-hop (direct RF contact).
+ * 
+ * A neighbor is considered zero-hop if we've received packets from them that:
+ * 1. Have route_type = 1 (DIRECT) - meaning the packet wasn't relayed
+ * 2. OR have an empty/short path where src_hash is the origin
+ * 3. OR the last element of the path is the src_hash (they were last hop to us)
+ * 
+ * This is inferred from packet analysis similar to meshcoretomqtt's approach.
+ */
+function inferZeroHopNeighbors(packets: Packet[]): Set<string> {
+  const zeroHopNodes = new Set<string>();
+  
+  for (const packet of packets) {
+    // Skip if no source hash
+    if (!packet.src_hash) continue;
+    
+    // Method 1: route_type = 1 (DIRECT) means zero-hop
+    // route_type can be in 'route' or 'route_type' field
+    const routeType = packet.route_type ?? packet.route;
+    if (routeType === 1) {
+      zeroHopNodes.add(packet.src_hash);
+      continue;
+    }
+    
+    // Method 2: Check path - if path is empty or src is at end, it's direct
+    const path = packet.forwarded_path ?? packet.original_path;
+    if (!path || path.length === 0) {
+      // No path means we received directly from source
+      zeroHopNodes.add(packet.src_hash);
+      continue;
+    }
+    
+    // Method 3: If the last element in the path matches src_hash,
+    // it means that node was the last hop to reach us (zero-hop from us)
+    if (path.length > 0) {
+      const lastHop = path[path.length - 1];
+      zeroHopNodes.add(lastHop);
+    }
+  }
+  
+  return zeroHopNodes;
 }
 
 // Get color based on signal strength (SNR is more reliable than RSSI for LoRa)
@@ -122,12 +168,17 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
-export default function NeighborMap({ neighbors, localNode, packets = [], onRemoveNode }: NeighborMapProps) {
+export default function NeighborMap({ neighbors, localNode, localHash: _localHash, packets = [], onRemoveNode }: NeighborMapProps) {
   // Track hover state per marker
   const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
+  
+  // Infer zero-hop neighbors from packet analysis
+  const zeroHopNeighbors = useMemo(() => {
+    return inferZeroHopNeighbors(packets);
+  }, [packets]);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
@@ -185,6 +236,27 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
     
     return lines;
   }, [meshConnections, nodeCoordinates]);
+  
+  // Generate solid lines from local node to zero-hop neighbors
+  const zeroHopLines = useMemo(() => {
+    const lines: Array<{ from: [number, number]; to: [number, number]; key: string }> = [];
+    
+    if (!localNode || !localNode.latitude || !localNode.longitude) return lines;
+    const localCoords: [number, number] = [localNode.latitude, localNode.longitude];
+    
+    // Draw lines from local node to each zero-hop neighbor with location
+    neighborsWithLocation.forEach(([hash, neighbor]) => {
+      if (zeroHopNeighbors.has(hash) && neighbor.latitude && neighbor.longitude) {
+        lines.push({
+          from: localCoords,
+          to: [neighbor.latitude, neighbor.longitude],
+          key: `zerohop-${hash}`,
+        });
+      }
+    });
+    
+    return lines;
+  }, [localNode, neighborsWithLocation, zeroHopNeighbors]);
   
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
@@ -297,6 +369,17 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
         
         <FitBoundsOnce positions={allPositions} />
         
+        {/* Draw zero-hop direct connections as solid blue lines */}
+        {zeroHopLines.map(({ from, to, key }) => (
+          <Polyline
+            key={key}
+            positions={[from, to]}
+            color={SIGNAL_COLORS.zeroHop}
+            weight={2}
+            opacity={0.7}
+          />
+        ))}
+        
         {/* Draw inferred mesh connections as dotted lines */}
         {meshPolylines.map(({ from, to, key }) => (
           <Polyline
@@ -337,10 +420,13 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
         {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
-          // Color all nodes by signal strength (mean SNR from packets, fallback to last SNR)
+          // Check if this is a zero-hop neighbor
+          const isZeroHop = zeroHopNeighbors.has(hash);
+          
+          // Zero-hop neighbors get royal blue; others colored by signal strength
           const meanSnr = calculateMeanSnr(packets, hash);
           const displaySnr = meanSnr ?? neighbor.snr;
-          const color = getSignalColor(displaySnr);
+          const color = isZeroHop ? SIGNAL_COLORS.zeroHop : getSignalColor(displaySnr);
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
@@ -358,10 +444,16 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
               <Popup>
                 <div className="text-sm min-w-[150px]">
                   <strong className="text-base">{name}</strong>
+                  {isZeroHop && (
+                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}>DIRECT</span>
+                  )}
                   <div className="mt-1">
                     <HashBadge hash={hash} size="sm" />
                   </div>
                   <hr className="my-2" />
+                  {isZeroHop && (
+                    <div className="text-text-secondary mb-1">Connection: <strong style={{ color: SIGNAL_COLORS.zeroHop }}>Zero-hop (Direct RF)</strong></div>
+                  )}
                   {meanSnr !== undefined && (
                     <div className="text-text-secondary">Mean SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)} dB</strong></div>
                   )}
@@ -469,6 +561,10 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
               <span className="text-text-muted">&lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <span className="text-text-muted">Direct</span>
+            </div>
+            <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
               <span className="text-text-muted">Local</span>
             </div>

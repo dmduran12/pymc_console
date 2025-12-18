@@ -42,6 +42,9 @@ export default function Neighbors() {
     name: stats.config.node_name || 'Local Node'
   } : undefined;
   
+  // Get local hash for zero-hop detection
+  const localHash = stats?.local_hash;
+  
   // Count neighbors with location data
   const neighborsWithLocation = neighborEntries.filter(
     ([, n]) => n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0
@@ -70,7 +73,8 @@ export default function Neighbors() {
       <div className="relative">
         <NeighborMapWrapper 
           neighbors={visibleNeighbors} 
-          localNode={localNode} 
+          localNode={localNode}
+          localHash={localHash}
           packets={packets}
           onRemoveNode={hideNeighbor}
         />
