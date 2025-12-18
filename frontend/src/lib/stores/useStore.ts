@@ -167,15 +167,26 @@ const store = create<StoreState>((set, get) => ({
     set({ initialized: true, statsLoading: true, packetsLoading: true });
     
     // Subscribe to packet cache state changes
+    // When deep load completes, update packets with the full cache
+    let wasDeepLoading = false;
     packetCache.subscribe((cacheState) => {
       set({ packetCacheState: cacheState });
+      
+      // Detect when deep load just finished
+      if (wasDeepLoading && !cacheState.isDeepLoading) {
+        const allPackets = packetCache.getPackets();
+        if (allPackets.length > 0) {
+          set({ packets: allPackets });
+        }
+      }
+      wasDeepLoading = cacheState.isDeepLoading;
     });
     
-    // Fetch stats and bootstrap packet cache in parallel
+    // Fetch stats and quick load packets in parallel
     try {
       const [stats, packets] = await Promise.all([
         api.getStats(),
-        packetCache.bootstrap(), // Quick 24h load
+        packetCache.quickLoad(), // Fast 1K load, triggers 20K background load
       ]);
       
       set({ stats, statsLoading: false });
@@ -189,17 +200,6 @@ const store = create<StoreState>((set, get) => ({
         });
       } else {
         set({ packetsLoading: false });
-      }
-      
-      // Start deep load in background (fetches entire DB)
-      if (packetCache.needsDeepLoad()) {
-        packetCache.deepLoad().then(() => {
-          // Update packets with full cache after deep load
-          const allPackets = packetCache.getPackets();
-          if (allPackets.length > 0) {
-            set({ packets: allPackets });
-          }
-        });
       }
     } catch (error) {
       set({
@@ -394,19 +394,11 @@ const store = create<StoreState>((set, get) => ({
   clearPacketCache: () => {
     packetCache.clear();
     set({ packets: [], lastPacketTimestamp: 0 });
-    // Re-bootstrap and deep load
-    packetCache.bootstrap().then((packets) => {
+    // Re-load with quick + deep background load
+    packetCache.quickLoad().then((packets) => {
       if (packets.length > 0) {
         const newestTimestamp = Math.max(...packets.map(p => p.timestamp ?? 0));
         set({ packets, lastPacketTimestamp: newestTimestamp });
-      }
-      if (packetCache.needsDeepLoad()) {
-        packetCache.deepLoad().then(() => {
-          const allPackets = packetCache.getPackets();
-          if (allPackets.length > 0) {
-            set({ packets: allPackets });
-          }
-        });
       }
     });
   },
