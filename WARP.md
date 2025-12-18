@@ -135,8 +135,8 @@ src/
 │   ├── charts/            # AirtimeGauge, PacketTypesChart, TrafficStackedChart, NeighborPolarChart
 │   ├── controls/          # ControlPanel (mode/duty cycle)
 │   ├── layout/            # Sidebar, Header, BackgroundProvider
-│   ├── neighbors/         # NeighborMap, NeighborMapWrapper (Leaflet)
-│   ├── packets/           # PacketRow, PacketDetailModal, RecentPackets
+│   ├── contacts/          # ContactsMap (Leaflet neighbor visualization)
+│   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization
 │   ├── shared/            # TimeRangeSelector, BackgroundSelector
 │   ├── stats/             # StatsCard
 │   └── ui/                # HashBadge
@@ -145,6 +145,7 @@ src/
 │   ├── constants.ts       # App constants
 │   ├── format.ts          # Formatting utilities
 │   ├── packet-utils.ts    # Packet processing helpers
+│   ├── mesh-topology.ts   # Mesh network analysis (affinity, topology graph)
 │   ├── hooks/             # usePolling, useDebounce, useThemeColors
 │   ├── stores/useStore.ts # Zustand store (stats, packets, logs, UI)
 │   └── theme/             # Theme system (ThemeContext, config, hooks)
@@ -176,6 +177,13 @@ const { stats } = useStore();       // Avoid
 - Color schemes map to CSS `[data-theme="..."]` selectors in `index.css`
 - Background images and color schemes are decoupled (can be mixed independently)
 - localStorage persistence with automatic migration from legacy keys
+
+**Mesh Topology** (`src/lib/mesh-topology.ts`): Network analysis utilities:
+- `buildNeighborAffinity()` - Builds frequency + proximity scores for neighbor relationships
+- `buildMeshTopology()` - Creates graph edges with confidence-weighted connections
+- `matchPrefix()`, `prefixMatches()`, `getHashPrefix()` - Shared prefix matching logic
+- Uses Haversine distance for proximity scoring (<100m=1.0, <500m=0.9, <1km=0.7, etc.)
+- Combined score = frequency × 0.6 + proximity × 0.4
 
 ### Backend API
 
@@ -264,6 +272,85 @@ import type { Packet } from '@/types/api';
 Packet and stats types in `src/types/api.ts`. Notable constants:
 - `PAYLOAD_TYPES` - Maps packet type numbers to names (REQ, RESPONSE, TXT_MSG, ACK, ADVERT, etc.)
 - `ROUTE_TYPES` - Maps route types (UNKNOWN, DIRECT, FLOOD, TRANSPORT, T_FLOOD, T_DIRECT)
+
+## Design System (Tailwind CSS 4)
+
+The design system is defined in `src/index.css` using CSS custom properties and Tailwind's `@theme inline` block.
+
+### Color Architecture
+
+**IMPORTANT - Dynamic Class Purging:** Tailwind 4 purges classes not statically referenced in templates. If you return a class name from a function (e.g., `getColor(x) => 'text-orange-400'`), that class will NOT be in the production build unless:
+1. It's defined in `@theme inline` block (preferred)
+2. It's statically used elsewhere in the codebase
+3. It's added to a safelist
+
+**Always use theme colors** for dynamic styling:
+```typescript
+// ✓ Good - uses theme color defined in @theme inline
+return 'text-signal-poor';     // #FF8A5C - orange
+return 'text-accent-secondary'; // #F9D26F - yellow
+
+// ✗ Bad - standard Tailwind class, will be purged
+return 'text-orange-400';  // Won't exist in production!
+```
+
+### Semantic Color Tokens
+
+Defined in `:root` and exposed via `@theme inline`:
+
+**Signal Quality** (for SNR, confidence indicators):
+- `--signal-excellent` (#4CFFB5) - SNR ≥ 5
+- `--signal-good` (#39D98A) - SNR 0-5  
+- `--signal-fair` (#F9D26F) - SNR -5 to 0
+- `--signal-poor` (#FF8A5C) - SNR -10 to -5 (orange)
+- `--signal-critical` (#FF5C7A) - SNR < -10
+
+**Accents** (for UI elements):
+- `--accent-primary` (#B49DFF) - Lavender, charts
+- `--accent-secondary` (#F9D26F) - Yellow, highlights
+- `--accent-tertiary` (#71F8E5) - Cyan/mint
+- `--accent-success` (#39D98A) - Green
+- `--accent-danger` (#FF5C7A) - Red
+
+### Theme Variants
+
+Four color schemes via `[data-theme="..."]` CSS selectors:
+- Default (lavender/purple accents)
+- `amber` - Warm orange/gold
+- `grey` - Cool slate/blue
+- `black` - High contrast cyan/white
+
+## Packet Path Analysis
+
+MeshCore packets contain a `path` field with 2-character hex prefixes representing the route:
+
+```typescript
+// Example path: ["FA", "79", "24", "19"]
+// FA → 79 → 24 → 19 (local node)
+```
+
+### Path Resolution (`PathMapVisualization.tsx`)
+
+1. **Prefix Matching**: Each 2-char prefix is matched against known nodes
+   - Full hash `0x19ABCD...` → prefix `19`
+   - Local node hash format is `0xNN` (e.g., `0x19`) → extract with `hash.slice(2)`
+
+2. **Confidence Scoring**:
+   - 1 match = 100% confidence (exact)
+   - N matches = weighted by affinity score (frequency + proximity)
+   - 0 matches = unknown (gray)
+
+3. **Color Coding** (hop badges):
+   - Green (`text-accent-success`): 100% - exact match
+   - Yellow (`text-accent-secondary`): 50-99% - high confidence
+   - Orange (`text-signal-poor`): 25-49% - medium confidence  
+   - Red (`text-accent-danger`): 1-24% - low confidence
+   - Gray (`text-text-muted`): 0% - unknown
+
+4. **Special Cases**:
+   - Last hop verified against local node hash
+   - Zero-hop neighbors (direct) get boosted confidence
+   - Proximity scoring uses Haversine distance when coordinates available
 
 ## Common Tasks
 
