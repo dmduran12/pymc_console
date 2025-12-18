@@ -1,33 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Users, GitBranch, EyeOff, Info } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
-import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, TopologyEdge } from '@/lib/mesh-topology';
 
+// Uniform marker size for all nodes
+const MARKER_SIZE = 16;
+
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
-function createDotIcon(color: string, size: number, isHovered: boolean = false): L.DivIcon {
+function createDotIcon(color: string, isHovered: boolean = false): L.DivIcon {
   return L.divIcon({
     className: 'map-dot-marker',
     html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
+      width: ${MARKER_SIZE}px;
+      height: ${MARKER_SIZE}px;
       background-color: ${color};
       border-radius: 50%;
-      border: 0.75px solid rgba(13, 14, 18, 0.6);
-      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08), inset 0 -2px 3px rgba(0, 0, 0, 0.06)${isHovered ? `, 0 0 12px ${color}` : ''};
-      transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, opacity 0.15s ease-out, filter 0.15s ease-out;
-      transform: scale(${isHovered ? 1.25 : 1});
-      opacity: ${isHovered ? 1 : 0.9};
-      filter: brightness(${isHovered ? 1.1 : 1});
+      border: 1px solid rgba(13, 14, 18, 0.8);
+      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.15), inset 0 -2px 3px rgba(0, 0, 0, 0.1)${isHovered ? `, 0 0 12px ${color}` : ''};
+      transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+      transform: scale(${isHovered ? 1.3 : 1});
     "></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -size / 2],
+    iconSize: [MARKER_SIZE, MARKER_SIZE],
+    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
+    popupAnchor: [0, -MARKER_SIZE / 2],
   });
 }
 
@@ -118,6 +118,145 @@ function getSignalColor(snr?: number): string {
   if (snr >= -5) return SIGNAL_COLORS.fair;
   if (snr >= -10) return SIGNAL_COLORS.poor;
   return SIGNAL_COLORS.critical;
+}
+
+// Glass-style tooltip for legend items
+function LegendTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative cursor-help">
+      <Info className="w-3 h-3 text-text-muted" />
+      <div 
+        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight rounded-lg shadow-lg z-10"
+        style={{
+          background: 'rgba(20, 20, 22, 0.95)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(140, 160, 200, 0.25)',
+        }}
+      >
+        {text}
+      </div>
+    </span>
+  );
+}
+
+// Legend item with hover tooltip
+function LegendItem({ indicator, label, tooltip }: { indicator: React.ReactNode; label: string; tooltip: string }) {
+  return (
+    <div className="flex items-center gap-1.5 group relative">
+      {indicator}
+      <span className="text-text-muted">{label}</span>
+      <div 
+        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight rounded-lg shadow-lg z-10"
+        style={{
+          background: 'rgba(20, 20, 22, 0.95)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(140, 160, 200, 0.25)',
+        }}
+      >
+        {tooltip}
+      </div>
+    </div>
+  );
+}
+
+// Compact node popup content
+interface NodePopupContentProps {
+  hash: string;
+  hashPrefix: string;
+  name: string;
+  isHub: boolean;
+  isZeroHop: boolean;
+  centrality: number;
+  affinity?: { frequency: number; directForwardCount: number; typicalHopPosition: number };
+  meanSnr?: number;
+  neighbor: NeighborInfo;
+  onRemove?: () => void;
+}
+
+function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality, affinity, meanSnr, neighbor, onRemove }: NodePopupContentProps) {
+  const [copied, setCopied] = useState(false);
+  
+  const copyHash = () => {
+    navigator.clipboard.writeText(hash);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  
+  return (
+    <div className="text-sm min-w-[160px]">
+      {/* Header row: Name + pills */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <strong className="text-base leading-tight">{name}</strong>
+          {isHub && (
+            <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-full" style={{ backgroundColor: '#FBBF24', color: '#000' }}>HUB</span>
+          )}
+          {isZeroHop && !isHub && (
+            <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-full" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}>DIRECT</span>
+          )}
+          {affinity && affinity.typicalHopPosition > 0 && !isZeroHop && !isHub && (
+            <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-surface-elevated text-text-secondary">{affinity.typicalHopPosition}-HOP</span>
+          )}
+        </div>
+      </div>
+      
+      {/* Hash row: 2-char prefix + copy button */}
+      <div className="flex items-center gap-1.5 mt-1">
+        <span className="font-mono text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">{hashPrefix}</span>
+        <button
+          onClick={copyHash}
+          className="p-1 hover:bg-surface-elevated rounded transition-colors"
+          title="Copy full hash"
+        >
+          {copied ? <Check className="w-3 h-3 text-accent-success" /> : <Copy className="w-3 h-3 text-text-muted" />}
+        </button>
+        {/* Compact stats in header */}
+        {affinity && affinity.frequency > 0 && (
+          <span className="text-[10px] text-text-muted">{affinity.frequency} pkts</span>
+        )}
+        {neighbor.advert_count !== undefined && neighbor.advert_count > 0 && (
+          <span className="text-[10px] text-text-muted">{neighbor.advert_count} advs</span>
+        )}
+      </div>
+      
+      <hr className="my-2 border-white/10" />
+      
+      {/* Role info */}
+      {isHub && centrality > 0 && (
+        <div className="text-text-secondary text-xs mb-1">
+          <strong style={{ color: '#FBBF24' }}>Hub ({(centrality * 100).toFixed(0)}% centrality)</strong>
+        </div>
+      )}
+      
+      {/* Signal info */}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+        {meanSnr !== undefined && (
+          <div className="text-text-secondary">SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)}</strong></div>
+        )}
+        {neighbor.rssi !== undefined && (
+          <div className="text-text-secondary">RSSI: <strong className="text-text-primary">{neighbor.rssi}</strong></div>
+        )}
+      </div>
+      
+      {/* Last seen */}
+      <div className="text-[10px] text-text-muted mt-1">
+        {formatRelativeTime(neighbor.last_seen)}
+      </div>
+      
+      {/* Remove button */}
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          className="mt-2 w-full flex items-center justify-center gap-1 px-2 py-1 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors border border-red-500/30"
+        >
+          <X className="w-3 h-3" />
+          Remove
+        </button>
+      )}
+    </div>
+  );
 }
 
 // Component to fit bounds only on initial load (not when user navigates)
@@ -270,19 +409,17 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   const [isFullscreen, setIsFullscreen] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   
-  // Hub-only view toggle
-  const [showHubsOnly, setShowHubsOnly] = useState(false);
+  // Solo modes - filter to show only specific node types
+  const [soloHubs, setSoloHubs] = useState(false);
+  const [soloDirect, setSoloDirect] = useState(false);
   
   // Show/hide topology toggle
   const [showTopology, setShowTopology] = useState(true);
   
-  // Show/hide hub markers toggle (independent of topology)
-  const [showHubs, setShowHubs] = useState(true);
-  
-  // Build set of hub nodes and their connected neighbors for filtering
+  // Build set of hub nodes and zero-hop nodes for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
   
-  // Get all nodes connected to hubs (for hub-only view)
+  // Get all nodes connected to hubs (for solo hubs mode)
   const hubConnectedNodes = useMemo(() => {
     const connected = new Set<string>();
     // Add local node (always show)
@@ -301,26 +438,73 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     return connected;
   }, [meshTopology, hubNodeSet, localHash]);
   
-  // Filtered polylines based on hub-only mode
+  // Direct (zero-hop) nodes set
+  const directNodeSet = useMemo(() => {
+    const direct = new Set<string>();
+    if (localHash) direct.add(localHash);
+    for (const hash of zeroHopNeighbors) {
+      direct.add(hash);
+    }
+    return direct;
+  }, [zeroHopNeighbors, localHash]);
+  
+  // Filtered polylines based on solo modes
   const filteredCertainPolylines = useMemo(() => {
-    if (!showHubsOnly) return certainPolylines;
-    return certainPolylines.filter(({ edge }) => 
-      hubNodeSet.has(edge.fromHash) || hubNodeSet.has(edge.toHash)
-    );
-  }, [certainPolylines, showHubsOnly, hubNodeSet]);
+    if (!soloHubs && !soloDirect) return certainPolylines;
+    return certainPolylines.filter(({ edge }) => {
+      const fromHub = hubNodeSet.has(edge.fromHash);
+      const toHub = hubNodeSet.has(edge.toHash);
+      const fromDirect = directNodeSet.has(edge.fromHash);
+      const toDirect = directNodeSet.has(edge.toHash);
+      
+      if (soloHubs && soloDirect) {
+        // Show hub connections OR direct connections
+        return fromHub || toHub || fromDirect || toDirect;
+      } else if (soloHubs) {
+        return fromHub || toHub;
+      } else if (soloDirect) {
+        return fromDirect || toDirect;
+      }
+      return true;
+    });
+  }, [certainPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
   
   const filteredUncertainPolylines = useMemo(() => {
-    if (!showHubsOnly) return uncertainPolylines;
-    return uncertainPolylines.filter(({ edge }) => 
-      hubNodeSet.has(edge.fromHash) || hubNodeSet.has(edge.toHash)
-    );
-  }, [uncertainPolylines, showHubsOnly, hubNodeSet]);
+    if (!soloHubs && !soloDirect) return uncertainPolylines;
+    return uncertainPolylines.filter(({ edge }) => {
+      const fromHub = hubNodeSet.has(edge.fromHash);
+      const toHub = hubNodeSet.has(edge.toHash);
+      const fromDirect = directNodeSet.has(edge.fromHash);
+      const toDirect = directNodeSet.has(edge.toHash);
+      
+      if (soloHubs && soloDirect) {
+        return fromHub || toHub || fromDirect || toDirect;
+      } else if (soloHubs) {
+        return fromHub || toHub;
+      } else if (soloDirect) {
+        return fromDirect || toDirect;
+      }
+      return true;
+    });
+  }, [uncertainPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
   
-  // Filtered neighbors based on hub-only mode
+  // Filtered neighbors based on solo modes
   const filteredNeighbors = useMemo(() => {
-    if (!showHubsOnly) return neighborsWithLocation;
-    return neighborsWithLocation.filter(([hash]) => hubConnectedNodes.has(hash));
-  }, [neighborsWithLocation, showHubsOnly, hubConnectedNodes]);
+    if (!soloHubs && !soloDirect) return neighborsWithLocation;
+    return neighborsWithLocation.filter(([hash]) => {
+      const isHubConnected = hubConnectedNodes.has(hash);
+      const isDirect = directNodeSet.has(hash);
+      
+      if (soloHubs && soloDirect) {
+        return isHubConnected || isDirect;
+      } else if (soloHubs) {
+        return isHubConnected;
+      } else if (soloDirect) {
+        return isDirect;
+      }
+      return true;
+    });
+  }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -410,15 +594,16 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           // Color based on link quality (green=strong, red=weak)
           const color = getLinkQualityColor(edge.certainCount, meshTopology.maxCertainCount);
           // Thickness based on validation frequency (thicker=stronger link)
-          const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+          const baseWeight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
           
           // Calculate link quality percentage
           const linkQuality = meshTopology.maxCertainCount > 0 
             ? (edge.certainCount / meshTopology.maxCertainCount)
             : 0;
           
-          // Weak links (< 30% quality) are dotted
+          // Weak links (< 30% quality) are dotted and 1px thinner
           const isWeak = linkQuality < 0.3;
+          const weight = isWeak ? Math.max(1, baseWeight - 1) : baseWeight;
           
           // Get names for tooltip
           const fromNeighbor = neighbors[edge.fromHash];
@@ -433,7 +618,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               pathOptions={{
                 color,
                 weight,
-                opacity: 0.9,
+                opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
                 dashArray: isWeak ? '4, 6' : undefined,
@@ -459,7 +644,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           );
         })}
         
-        {/* Draw UNCERTAIN/INFERRED edges as DOTTED GREY lines */}
+        {/* Draw UNCERTAIN/INFERRED edges as DOTTED GREY lines - 1px thinner */}
         {showTopology && filteredUncertainPolylines.map(({ from, to, edge }) => {
           // Get names for tooltip
           const fromNeighbor = neighbors[edge.fromHash];
@@ -472,8 +657,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               key={`uncertain-${edge.key}`}
               positions={[from, to]}
               pathOptions={{
-                color: 'rgba(140, 140, 160, 0.6)', // Grey for inferred
-                weight: 1.5,
+                color: 'rgb(140, 140, 160)', // Solid grey for inferred
+                weight: 1,
                 opacity: 1,
                 dashArray: '4, 6',
                 lineCap: 'round',
@@ -498,7 +683,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         {localNode && localNode.latitude && localNode.longitude && (
           <Marker
             position={[localNode.latitude, localNode.longitude]}
-            icon={createDotIcon(SIGNAL_COLORS.localNode, 24, hoveredMarker === 'local')}
+            icon={createDotIcon(SIGNAL_COLORS.localNode, hoveredMarker === 'local')}
             eventHandlers={{
               mouseover: () => setHoveredMarker('local'),
               mouseout: () => setHoveredMarker(null),
@@ -518,7 +703,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           </Marker>
         )}
         
-        {/* Neighbor markers - matte plastic style with CSS shadows */}
+        {/* Neighbor markers - uniform size, color by type */}
         {filteredNeighbors.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
@@ -527,20 +712,14 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           const isHub = meshTopology.hubNodes.includes(hash);
           const centrality = meshTopology.centrality.get(hash) || 0;
           
-          // Skip hub nodes if hubs are hidden
-          if (isHub && !showHubs) return null;
-          
-          // Hub nodes get amber, zero-hop gets blue, others by signal strength
+          // Hub nodes get amber, zero-hop gets the SIGNAL_COLORS.zeroHop (deep blue), others by signal
           const meanSnr = calculateMeanSnr(packets, hash);
           const displaySnr = meanSnr ?? neighbor.snr;
-          const color = (isHub && showHubs)
+          const color = isHub
             ? '#FBBF24' // amber-400 for hub nodes
             : isZeroHop 
-              ? SIGNAL_COLORS.zeroHop 
+              ? SIGNAL_COLORS.zeroHop // Deep royal blue for direct
               : getSignalColor(displaySnr);
-          
-          // Hub nodes get larger markers
-          const markerSize = (isHub && showHubs) ? 22 : 18;
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
@@ -548,72 +727,32 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           // Get full affinity data for this neighbor
           const affinity = meshTopology.fullAffinity.get(hash);
           
+          // Compact hash prefix (2 chars)
+          const hashPrefix = hash.startsWith('0x') ? hash.slice(2, 4).toUpperCase() : hash.slice(0, 2).toUpperCase();
+          
           return (
             <Marker
               key={hash}
               position={[neighbor.latitude, neighbor.longitude]}
-              icon={createDotIcon(color, markerSize, isHovered)}
+              icon={createDotIcon(color, isHovered)}
               eventHandlers={{
                 mouseover: () => setHoveredMarker(hash),
                 mouseout: () => setHoveredMarker(null),
               }}
             >
               <Popup>
-                <div className="text-sm min-w-[150px]">
-                  <strong className="text-base">{name}</strong>
-                  {isHub && (
-                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>HUB</span>
-                  )}
-                  {isZeroHop && !isHub && (
-                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}>DIRECT</span>
-                  )}
-                  {affinity && affinity.typicalHopPosition > 0 && !isZeroHop && !isHub && (
-                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-surface-elevated text-text-secondary">{affinity.typicalHopPosition}-HOP</span>
-                  )}
-                  <div className="mt-1">
-                    <HashBadge hash={hash} size="sm" />
-                  </div>
-                  <hr className="my-2" />
-                  {isHub && centrality > 0 && (
-                    <div className="text-text-secondary mb-1">Role: <strong style={{ color: '#FBBF24' }}>Network Hub ({(centrality * 100).toFixed(0)}% centrality)</strong></div>
-                  )}
-                  {isZeroHop && !isHub && (
-                    <div className="text-text-secondary mb-1">Connection: <strong style={{ color: SIGNAL_COLORS.zeroHop }}>Zero-hop (Direct RF)</strong></div>
-                  )}
-                  {affinity && affinity.frequency > 1 && (
-                    <div className="text-text-secondary">Packets seen: <strong className="text-text-primary">{affinity.frequency}</strong></div>
-                  )}
-                  {affinity && affinity.directForwardCount > 0 && (
-                    <div className="text-text-secondary">Direct forwards: <strong className="text-accent-success">{affinity.directForwardCount}</strong></div>
-                  )}
-                  {meanSnr !== undefined && (
-                    <div className="text-text-secondary">Mean SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)} dB</strong></div>
-                  )}
-                  {neighbor.rssi !== undefined && (
-                    <div className="text-text-secondary">Last RSSI: <strong className="text-text-primary">{neighbor.rssi} dBm</strong></div>
-                  )}
-                  {neighbor.snr !== undefined && (
-                    <div className="text-text-secondary">Last SNR: <strong className="text-text-primary">{neighbor.snr.toFixed(1)} dB</strong></div>
-                  )}
-                  {neighbor.advert_count !== undefined && (
-                    <div className="text-text-secondary">Adverts: <strong className="text-text-primary">{neighbor.advert_count}</strong></div>
-                  )}
-                  <div className="text-xs text-text-muted mt-1">
-                    Last seen: {formatRelativeTime(neighbor.last_seen)}
-                  </div>
-                  <div className="text-xs text-text-muted">
-                    {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
-                  </div>
-                  {onRemoveNode && (
-                    <button
-                      onClick={() => setPendingRemove({ hash, name })}
-                      className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors border border-red-500/30"
-                    >
-                      <X className="w-3 h-3" />
-                      Remove Node
-                    </button>
-                  )}
-                </div>
+                <NodePopupContent
+                  hash={hash}
+                  hashPrefix={hashPrefix}
+                  name={name}
+                  isHub={isHub}
+                  isZeroHop={isZeroHop}
+                  centrality={centrality}
+                  affinity={affinity}
+                  meanSnr={meanSnr}
+                  neighbor={neighbor}
+                  onRemove={onRemoveNode ? () => setPendingRemove({ hash, name }) : undefined}
+                />
               </Popup>
             </Marker>
           );
@@ -661,39 +800,39 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             </button>
           )}
           
-          {/* Hub markers toggle - independent of topology */}
+          {/* Solo Hubs toggle */}
           {meshTopology.hubNodes.length > 0 && (
             <button
-              onClick={() => setShowHubs(!showHubs)}
+              onClick={() => setSoloHubs(!soloHubs)}
               className="p-2 transition-colors hover:bg-white/10"
               style={{
-                background: showHubs ? 'rgba(251, 191, 36, 0.2)' : 'rgba(20, 20, 22, 0.85)',
+                background: soloHubs ? 'rgba(251, 191, 36, 0.2)' : 'rgba(20, 20, 22, 0.85)',
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
                 borderRadius: '0.75rem',
-                border: showHubs ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
+                border: soloHubs ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
-              title={showHubs ? 'Hide hub highlighting' : 'Show hub highlighting'}
+              title={soloHubs ? 'Show all nodes' : 'Solo hubs & connections'}
             >
-              <Network className={`w-4 h-4 ${showHubs ? 'text-amber-400' : 'text-text-secondary'}`} />
+              <Network className={`w-4 h-4 ${soloHubs ? 'text-amber-400' : 'text-text-secondary'}`} />
             </button>
           )}
           
-          {/* Hub-only filter toggle - only show if there are hubs */}
-          {meshTopology.hubNodes.length > 0 && (
+          {/* Solo Direct toggle */}
+          {zeroHopNeighbors.size > 0 && (
             <button
-              onClick={() => setShowHubsOnly(!showHubsOnly)}
+              onClick={() => setSoloDirect(!soloDirect)}
               className="p-2 transition-colors hover:bg-white/10"
               style={{
-                background: showHubsOnly ? 'rgba(139, 92, 246, 0.2)' : 'rgba(20, 20, 22, 0.85)',
+                background: soloDirect ? 'rgba(67, 56, 202, 0.3)' : 'rgba(20, 20, 22, 0.85)',
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
                 borderRadius: '0.75rem',
-                border: showHubsOnly ? '1px solid rgba(139, 92, 246, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
+                border: soloDirect ? '1px solid rgba(67, 56, 202, 0.6)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
-              title={showHubsOnly ? 'Show all nodes' : 'Filter to hub connections only'}
+              title={soloDirect ? 'Show all nodes' : 'Solo direct (0-hop) nodes'}
             >
-              <Users className={`w-4 h-4 ${showHubsOnly ? 'text-violet-400' : 'text-text-secondary'}`} />
+              <Radio className={`w-4 h-4 ${soloDirect ? 'text-indigo-400' : 'text-text-secondary'}`} />
             </button>
           )}
           
@@ -733,40 +872,35 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         >
           <div className="text-text-secondary font-medium mb-1.5 flex items-center gap-1">
             Signal (SNR)
-            <span className="group relative cursor-help">
-              <Info className="w-3 h-3 text-text-muted" />
-              <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-48 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                Node color indicates mean SNR from received packets. Higher SNR = better signal quality.
-              </div>
-            </span>
+            <LegendTooltip text="Node color indicates mean SNR from received packets. Higher SNR = better signal quality." />
           </div>
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Excellent ≥5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Good 0–5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Fair -5–0</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Poor -10–-5</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Critical &lt;-10</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Direct (0-hop)</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '0.75px solid rgba(13,14,18,0.6)', boxShadow: '0 2px 3px rgba(0,0,0,0.08), inset 0 -2px 3px rgba(0,0,0,0.06)' }}></div>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '1px solid rgba(13,14,18,0.8)' }}></div>
               <span className="text-text-muted">Local node</span>
             </div>
           </div>
@@ -775,56 +909,38 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             <>
               <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5 flex items-center gap-1">
                 Links
-                <span className="group relative cursor-help">
-                  <Info className="w-3 h-3 text-text-muted" />
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-48 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                    <strong>Verified:</strong> Both endpoints identified in packet paths. Color/thickness = link frequency.<br/><br/>
-                    <strong>Inferred:</strong> One or both endpoints ambiguous (prefix matched multiple nodes).
-                  </div>
-                </span>
+                <LegendTooltip text="Verified: Both endpoints identified. Inferred: One/both ambiguous (prefix matched multiple nodes)." />
               </div>
               <div className="flex flex-col gap-0.5">
-                {/* Link quality gradient for verified edges */}
-                <div className="flex items-center gap-1.5 group relative">
-                  <div className="w-4 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.9)' }}></div>
-                  <span className="text-text-muted">Strong</span>
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                    ≥70% of max validation count. Thick solid line.
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 group relative">
-                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(250, 204, 21, 0.7)' }}></div>
-                  <span className="text-text-muted">Moderate</span>
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                    30-70% of max validation count. Medium solid line.
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 group relative">
-                  <div className="w-4 h-0.5 flex-shrink-0" style={{ 
-                    background: 'repeating-linear-gradient(90deg, rgba(248, 113, 113, 0.6) 0px, rgba(248, 113, 113, 0.6) 2px, transparent 2px, transparent 4px)'
-                  }}></div>
-                  <span className="text-text-muted">Weak</span>
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                    &lt;30% of max validation count. Thin dotted line.
-                  </div>
-                </div>
-                {/* Inferred edges - dotted grey lines */}
-                <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10 group relative">
-                  <div className="w-4 h-0.5 flex-shrink-0" style={{ 
-                    background: 'repeating-linear-gradient(90deg, rgba(140, 140, 160, 0.6) 0px, rgba(140, 140, 160, 0.6) 2px, transparent 2px, transparent 4px)'
-                  }}></div>
-                  <span className="text-text-muted">Inferred</span>
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                    Connection inferred from path data but one/both nodes ambiguous (multiple prefix matches).
-                  </div>
+                <LegendItem 
+                  indicator={<div className="w-4 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(74, 222, 128)' }} />}
+                  label="Strong"
+                  tooltip="≥70% of max validation count. Thick solid line."
+                />
+                <LegendItem 
+                  indicator={<div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(250, 204, 21)' }} />}
+                  label="Moderate"
+                  tooltip="30-70% of max validation count. Medium solid line."
+                />
+                <LegendItem 
+                  indicator={<div className="w-4 h-0.5 flex-shrink-0" style={{ background: 'repeating-linear-gradient(90deg, rgb(248, 113, 113) 0px, rgb(248, 113, 113) 2px, transparent 2px, transparent 4px)' }} />}
+                  label="Weak"
+                  tooltip="<30% of max validation count. Thin dotted line."
+                />
+                <div className="mt-1 pt-1 border-t border-white/10">
+                  <LegendItem 
+                    indicator={<div className="w-4 h-0.5 flex-shrink-0" style={{ background: 'repeating-linear-gradient(90deg, rgb(140, 140, 160) 0px, rgb(140, 140, 160) 2px, transparent 2px, transparent 4px)' }} />}
+                    label="Inferred"
+                    tooltip="Connection inferred but one/both nodes ambiguous."
+                  />
                 </div>
                 {meshTopology.hubNodes.length > 0 && (
-                  <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10 group relative">
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(251, 191, 36, 0.85)' }}></div>
-                    <span className="text-text-muted">Hub node</span>
-                    <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight bg-surface-elevated border border-border-subtle rounded-lg shadow-lg z-10">
-                      High betweenness centrality (≥50%) AND appears in ≥5% of packet paths. Key routing node.
-                    </div>
+                  <div className="mt-1 pt-1 border-t border-white/10">
+                    <LegendItem 
+                      indicator={<div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(251, 191, 36)', border: '1px solid rgba(13,14,18,0.8)' }} />}
+                      label="Hub node"
+                      tooltip="High betweenness centrality (≥50%) AND appears in ≥5% of packet paths."
+                    />
                   </div>
                 )}
               </div>
