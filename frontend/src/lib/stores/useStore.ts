@@ -161,10 +161,11 @@ const store = create<StoreState>((set, get) => ({
     set({ initialized: true, statsLoading: true, packetsLoading: true });
     
     // Fetch critical data in parallel
+    // Use 500 packets for deeper topology analysis
     try {
       const [stats, packetsResponse] = await Promise.all([
         api.getStats(),
-        api.getRecentPackets(50),
+        api.getRecentPackets(500),
       ]);
       
       set({ stats, statsLoading: false });
@@ -231,7 +232,7 @@ const store = create<StoreState>((set, get) => ({
     }
   },
 
-  fetchPackets: async (limit = 50) => {
+  fetchPackets: async (limit = 500) => {
     const { packets: existingPackets } = get();
     // Only show loading spinner on initial load
     if (existingPackets.length === 0) {
