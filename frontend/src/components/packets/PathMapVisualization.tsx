@@ -1,7 +1,7 @@
 import { useMemo, Suspense, lazy, Component, ReactNode } from 'react';
 import { NeighborInfo } from '@/types/api';
 import { MapPin, AlertTriangle, HelpCircle } from 'lucide-react';
-import { matchPrefix, prefixMatches } from '@/lib/mesh-topology';
+import { matchPrefix, prefixMatches, NeighborAffinity } from '@/lib/mesh-topology';
 
 /**
  * Calculate distance between two coordinates in meters using Haversine formula.
@@ -51,6 +51,8 @@ interface PathMapVisualizationProps {
   localNode?: LocalNode;
   /** Local node's hash (for matching if we're in the path) */
   localHash?: string;
+  /** Pre-computed affinity data for multi-factor scoring */
+  neighborAffinity?: Map<string, NeighborAffinity>;
 }
 
 /** Candidate node for a path prefix with display info */
@@ -101,10 +103,11 @@ function matchPrefixToNodes(
   neighbors: Record<string, NeighborInfo>,
   localNode?: LocalNode,
   localHash?: string,
-  isLastHop: boolean = false
+  isLastHop: boolean = false,
+  neighborAffinity?: Map<string, NeighborAffinity>
 ): PrefixMatchResult {
-  // Use shared matching logic from mesh-topology
-  const { matches, probability } = matchPrefix(prefix, neighbors, localHash, undefined, isLastHop);
+  // Use shared matching logic from mesh-topology (pass affinity for tiebreaking)
+  const { matches, probability } = matchPrefix(prefix, neighbors, localHash, neighborAffinity, isLastHop);
   
   // Store total matches BEFORE filtering by coordinates
   const totalMatches = matches.length;
@@ -151,44 +154,59 @@ function matchPrefixToNodes(
     }
   }
   
-  // Recalculate probabilities based on candidates with coordinates
-  // Use proximity to local node for scoring when we have multiple matches
+  // Recalculate probabilities using multi-factor scoring
   const k = candidates.length;
   
   if (k === 1) {
     // Single candidate with coords - high confidence
     candidates[0].probability = 1;
-  } else if (k > 1 && localHasCoords && localNode) {
-    // Multiple candidates with coords - use proximity scoring
+  } else if (k > 1) {
+    // Multiple candidates - use multi-factor scoring
     let totalScore = 0;
     const scores = candidates.map(c => {
       if (c.isLocal) return { candidate: c, score: 1.0 }; // Local always highest
-      const dist = calculateDistance(
-        localNode.latitude, localNode.longitude,
-        c.latitude, c.longitude
-      );
-      const score = getProximityScore(dist);
+      
+      // Get affinity data if available
+      const aff = neighborAffinity?.get(c.hash);
+      
+      // Calculate Haversine-based proximity score
+      let haversineScore = 0.5; // Default
+      if (localHasCoords && localNode) {
+        const dist = calculateDistance(
+          localNode.latitude, localNode.longitude,
+          c.latitude, c.longitude
+        );
+        haversineScore = getProximityScore(dist);
+      }
+      
+      // Multi-factor score combining:
+      // - Haversine proximity (30%)
+      // - Hop consistency from affinity (30%)
+      // - Frequency from affinity (40%)
+      let score: number;
+      if (aff) {
+        score = 
+          haversineScore * 0.3 +
+          aff.hopConsistencyScore * 0.3 +
+          aff.frequencyScore * 0.4;
+      } else {
+        // Fallback to just Haversine if no affinity data
+        score = haversineScore;
+        // Boost direct neighbors
+        if (c.isDirectNeighbor) {
+          score = Math.max(score, 0.8);
+        }
+      }
+      
       totalScore += score;
       return { candidate: c, score };
     });
     
-    // Assign probabilities based on proximity scores (normalized)
+    // Assign probabilities based on multi-factor scores (normalized)
     if (totalScore > 0) {
       scores.forEach(({ candidate, score }) => {
         // Cap at 0.95 to indicate some uncertainty with multiple matches
         candidate.probability = Math.min(0.95, score / totalScore);
-      });
-    } else {
-      const prob = 1 / k;
-      candidates.forEach(c => c.probability = prob);
-    }
-  } else if (k > 1) {
-    // Multiple candidates, no local coords - fall back to direct neighbor boost
-    const directNeighbors = candidates.filter(c => c.isDirectNeighbor);
-    if (directNeighbors.length === 1) {
-      // Boost the direct neighbor
-      candidates.forEach(c => {
-        c.probability = c.isDirectNeighbor ? 0.9 : 0.1 / (k - 1);
       });
     } else {
       const prob = 1 / k;
@@ -201,17 +219,17 @@ function matchPrefixToNodes(
 
 /**
  * Resolve a full path to candidate nodes with confidence scores.
- * 
- * Confidence logic:
- * - Last hop: Verified against localHash prefix (100% if match)
- * - Second-to-last: Direct neighbor, boosted confidence for zero_hop neighbors  
- * - Other hops: Standard 1/k probability based on prefix collisions
+ * Uses multi-factor scoring when affinity data is available:
+ * - Haversine distance (30%)
+ * - Hop consistency (30%)
+ * - Frequency (40%)
  */
 export function resolvePath(
   path: string[],
   neighbors: Record<string, NeighborInfo>,
   localNode?: LocalNode,
-  localHash?: string
+  localHash?: string,
+  neighborAffinity?: Map<string, NeighborAffinity>
 ): ResolvedPath {
   if (!path || path.length === 0) {
     return { hops: [], overallConfidence: 0, hasValidPath: false };
@@ -221,7 +239,9 @@ export function resolvePath(
   
   const hops: ResolvedHop[] = path.map((prefix, index) => {
     const isLastHop = index === lastIndex;
-    const { candidates, totalMatches } = matchPrefixToNodes(prefix, neighbors, localNode, localHash, isLastHop);
+    const { candidates, totalMatches } = matchPrefixToNodes(
+      prefix, neighbors, localNode, localHash, isLastHop, neighborAffinity
+    );
     const confidence = candidates.length > 0 ? Math.max(...candidates.map(c => c.probability)) : 0;
     return { prefix, candidates, confidence, totalMatches };
   });
@@ -321,11 +341,12 @@ export function PathMapVisualization({
   neighbors,
   localNode,
   localHash,
+  neighborAffinity,
 }: PathMapVisualizationProps) {
-  // Resolve path prefixes to candidate nodes
+  // Resolve path prefixes to candidate nodes (with multi-factor scoring if affinity available)
   const resolvedPath = useMemo(
-    () => resolvePath(path, neighbors, localNode, localHash),
-    [path, neighbors, localNode, localHash]
+    () => resolvePath(path, neighbors, localNode, localHash, neighborAffinity),
+    [path, neighbors, localNode, localHash, neighborAffinity]
   );
   
   // Don't render if no path or no candidates have coordinates

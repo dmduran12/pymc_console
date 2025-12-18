@@ -14,7 +14,8 @@ import {
 import { SignalIndicator, getSignalQualityLabel } from './SignalIndicator';
 import { PacketDirection, getPacketStatusText, getPacketStatusColor } from './PacketDirection';
 import { PathMapVisualization } from './PathMapVisualization';
-import { useStats } from '@/lib/stores/useStore';
+import { useStats, usePackets } from '@/lib/stores/useStore';
+import { buildNeighborAffinity } from '@/lib/mesh-topology';
 
 interface PacketDetailModalProps {
   packet: Packet;
@@ -72,8 +73,9 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
   const [showPathMap, setShowPathMap] = useState(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   
-  // Get neighbors and local node info from store for path visualization
+  // Get neighbors, packets, and local node info from store for path visualization
   const stats = useStats();
+  const packets = usePackets();
 
   const payloadTypeName =
     packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
@@ -98,6 +100,20 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
   }, [stats]);
   
   const neighbors = stats?.neighbors ?? {};
+  
+  // Build affinity data for multi-factor confidence scoring
+  const neighborAffinity = useMemo(() => {
+    if (!packets.length || !neighbors || Object.keys(neighbors).length === 0) {
+      return undefined;
+    }
+    return buildNeighborAffinity(
+      packets,
+      neighbors,
+      stats?.config?.repeater?.latitude,
+      stats?.config?.repeater?.longitude,
+      stats?.local_hash
+    );
+  }, [packets, neighbors, stats?.config?.repeater?.latitude, stats?.config?.repeater?.longitude, stats?.local_hash]);
   
   const payloadDecoded = tryDecodePayload(packet.payload);
   const hasPayload = packet.payload && packet.payload.length > 0;
@@ -242,6 +258,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
                     neighbors={neighbors}
                     localNode={localNode}
                     localHash={stats?.local_hash}
+                    neighborAffinity={neighborAffinity}
                   />
                 </div>
               )}
