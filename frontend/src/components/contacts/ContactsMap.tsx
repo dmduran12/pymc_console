@@ -444,6 +444,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         {topologyPolylines.map(({ from, to, edge }) => {
           const weight = getEdgeWeight(edge.strength);
           const color = getEdgeColor(edge.strength);
+          // Try to get full affinity data for richer tooltips
+          const affinity = meshTopology.fullAffinity.get(edge.fromHash) || meshTopology.fullAffinity.get(edge.toHash);
           return (
             <Polyline
               key={`topology-${edge.key}`}
@@ -464,6 +466,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 <div className="text-xs">
                   <div className="font-medium">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
                   <div className="text-text-muted">Confidence: {(edge.avgConfidence * 100).toFixed(0)}%</div>
+                  {affinity && affinity.typicalHopPosition > 0 && (
+                    <div className="text-text-muted">Typical: {affinity.typicalHopPosition}-hop</div>
+                  )}
+                  {affinity && affinity.directForwardCount > 0 && (
+                    <div className="text-accent-success">Direct: {affinity.directForwardCount}×</div>
+                  )}
                 </div>
               </Tooltip>
             </Polyline>
@@ -524,6 +532,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
           
+          // Get full affinity data for this neighbor
+          const affinity = meshTopology.fullAffinity.get(hash);
+          
           return (
             <Marker
               key={hash}
@@ -540,12 +551,21 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                   {isZeroHop && (
                     <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}>DIRECT</span>
                   )}
+                  {affinity && affinity.typicalHopPosition > 0 && !isZeroHop && (
+                    <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-surface-elevated text-text-secondary">{affinity.typicalHopPosition}-HOP</span>
+                  )}
                   <div className="mt-1">
                     <HashBadge hash={hash} size="sm" />
                   </div>
                   <hr className="my-2" />
                   {isZeroHop && (
                     <div className="text-text-secondary mb-1">Connection: <strong style={{ color: SIGNAL_COLORS.zeroHop }}>Zero-hop (Direct RF)</strong></div>
+                  )}
+                  {affinity && affinity.frequency > 1 && (
+                    <div className="text-text-secondary">Packets seen: <strong className="text-text-primary">{affinity.frequency}</strong></div>
+                  )}
+                  {affinity && affinity.directForwardCount > 0 && (
+                    <div className="text-text-secondary">Direct forwards: <strong className="text-accent-success">{affinity.directForwardCount}</strong></div>
                   )}
                   {meanSnr !== undefined && (
                     <div className="text-text-secondary">Mean SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)} dB</strong></div>

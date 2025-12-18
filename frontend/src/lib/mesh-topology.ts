@@ -34,8 +34,10 @@ export interface MeshTopology {
   edgeMap: Map<string, TopologyEdge>;
   /** Max packet count across all edges (for normalization) */
   maxPacketCount: number;
-  /** Neighbor affinity scores (hash -> packet count received from that neighbor) */
+  /** Neighbor affinity scores (hash -> combined score for backward compat) */
   neighborAffinity: Map<string, number>;
+  /** Full affinity data with hop statistics (hash -> NeighborAffinity) */
+  fullAffinity: Map<string, NeighborAffinity>;
   /** Local node's 2-char prefix (derived from localHash) */
   localPrefix: string | null;
 }
@@ -111,19 +113,34 @@ function getProximityScore(distanceMeters: number): number {
 /** Combined affinity score for a neighbor */
 export interface NeighborAffinity {
   hash: string;
-  /** How often this neighbor appears as direct forwarder (second-to-last hop) */
+  /** How often this neighbor appears in any path position */
   frequency: number;
+  /** How often this neighbor appears as direct forwarder (second-to-last hop = 1-hop) */
+  directForwardCount: number;
   /** Distance to local node in meters (null if unknown) */
   distanceMeters: number | null;
-  /** Proximity score 0-1 based on distance */
+  /** Proximity score 0-1 based on Haversine distance */
   proximityScore: number;
-  /** Combined score (frequency weighted by proximity) */
+  /** Hop position counts: index 0 = 1-hop (second-to-last), 1 = 2-hop, etc. */
+  hopPositionCounts: number[];
+  /** Average hop distance from local (1 = direct neighbor, 2 = 2-hop, etc.) */
+  avgHopDistance: number;
+  /** Most common hop position (1 = direct, 2 = 2-hop, etc.) */
+  typicalHopPosition: number;
+  /** Hop consistency score 0-1 (higher = more consistent hop position) */
+  hopConsistencyScore: number;
+  /** Normalized frequency score 0-1 */
+  frequencyScore: number;
+  /** Combined multi-factor score: haversine (0.3) + hopConsistency (0.3) + frequency (0.4) */
   combinedScore: number;
 }
 
 /**
  * Build neighbor affinity map from packets and proximity.
- * Combines frequency (how often a neighbor forwards to us) with proximity (distance).
+ * Multi-factor scoring combining:
+ * - Haversine distance (physical proximity)
+ * - Hop position (where in paths this node typically appears)
+ * - Frequency (how often this node appears in paths)
  * 
  * @param packets - All packets to analyze
  * @param neighbors - Known neighbors with location data
@@ -143,7 +160,7 @@ export function buildNeighborAffinity(
   const hasLocalCoords = localLat !== undefined && localLon !== undefined &&
     (localLat !== 0 || localLon !== 0);
   
-  // Initialize affinity for all neighbors with coordinates
+  // Initialize affinity for all neighbors
   for (const [hash, neighbor] of Object.entries(neighbors)) {
     let distanceMeters: number | null = null;
     let proximityScore = 0.5; // Default middle score
@@ -157,55 +174,116 @@ export function buildNeighborAffinity(
       proximityScore = getProximityScore(distanceMeters);
     }
     
+    // Boost proximity score for known zero_hop (direct radio contact) neighbors
+    if (neighbor.zero_hop) {
+      proximityScore = Math.max(proximityScore, 0.9);
+    }
+    
     affinity.set(hash, {
       hash,
       frequency: 0,
+      directForwardCount: 0,
       distanceMeters,
       proximityScore,
-      combinedScore: 0, // Will be calculated after frequency
+      hopPositionCounts: [0, 0, 0, 0, 0], // Track up to 5 hop positions
+      avgHopDistance: 0,
+      typicalHopPosition: 0,
+      hopConsistencyScore: 0,
+      frequencyScore: 0,
+      combinedScore: 0,
     });
   }
   
-  // Count frequency from packets
+  // Analyze packets for hop positions and frequency
   for (const packet of packets) {
     const path = packet.forwarded_path ?? packet.original_path;
     
-    // If path ends with local prefix, the second-to-last element is our direct neighbor
-    if (path && path.length >= 2 && localPrefix) {
+    if (path && path.length >= 1 && localPrefix) {
       const lastPrefix = path[path.length - 1];
-      if (lastPrefix.toUpperCase() === localPrefix) {
-        // Second-to-last is the neighbor that forwarded to us
-        const neighborPrefix = path[path.length - 2];
-        // Find matching neighbor hash and increment frequency
-        for (const [hash, aff] of affinity) {
-          if (prefixMatches(neighborPrefix, hash)) {
-            aff.frequency++;
+      const pathEndsWithLocal = lastPrefix.toUpperCase() === localPrefix;
+      
+      if (pathEndsWithLocal) {
+        // Analyze each position in the path (excluding local at end)
+        for (let i = 0; i < path.length - 1; i++) {
+          const prefix = path[i];
+          // hopDistance: 1 = second-to-last (direct forwarder), 2 = third-to-last, etc.
+          const hopDistance = path.length - 1 - i;
+          
+          // Find matching neighbors and update their hop stats
+          for (const [hash, aff] of affinity) {
+            if (prefixMatches(prefix, hash)) {
+              aff.frequency++;
+              
+              // Track hop position (index 0 = 1-hop, index 1 = 2-hop, etc.)
+              const hopIndex = Math.min(hopDistance - 1, 4); // Cap at 5 positions
+              aff.hopPositionCounts[hopIndex]++;
+              
+              // Track direct forwards specifically
+              if (hopDistance === 1) {
+                aff.directForwardCount++;
+              }
+            }
           }
         }
       }
     }
     
-    // Also count direct packets (empty path or single-element path)
+    // Also count direct packets (empty path) from src_hash
     if ((!path || path.length === 0) && packet.src_hash) {
       const srcAff = affinity.get(packet.src_hash);
       if (srcAff) {
         srcAff.frequency++;
+        srcAff.directForwardCount++;
+        srcAff.hopPositionCounts[0]++; // Direct = 1-hop
       }
     }
   }
   
-  // Calculate combined scores
-  // Find max frequency for normalization
+  // Calculate derived scores
   let maxFrequency = 0;
   for (const aff of affinity.values()) {
     maxFrequency = Math.max(maxFrequency, aff.frequency);
   }
   
-  // Combined score = normalized_frequency * 0.6 + proximity * 0.4
-  // This weights frequency higher but proximity breaks ties
   for (const aff of affinity.values()) {
-    const normalizedFreq = maxFrequency > 0 ? aff.frequency / maxFrequency : 0;
-    aff.combinedScore = normalizedFreq * 0.6 + aff.proximityScore * 0.4;
+    // Calculate average hop distance
+    let totalHops = 0;
+    let weightedSum = 0;
+    let maxCount = 0;
+    let typicalPosition = 1;
+    
+    for (let i = 0; i < aff.hopPositionCounts.length; i++) {
+      const count = aff.hopPositionCounts[i];
+      const hopDist = i + 1; // 1-indexed hop distance
+      totalHops += count;
+      weightedSum += count * hopDist;
+      
+      if (count > maxCount) {
+        maxCount = count;
+        typicalPosition = hopDist;
+      }
+    }
+    
+    aff.avgHopDistance = totalHops > 0 ? weightedSum / totalHops : 0;
+    aff.typicalHopPosition = typicalPosition;
+    
+    // Hop consistency score: how concentrated are appearances at typical position?
+    // Higher = more consistent (appears at same hop distance consistently)
+    if (totalHops > 0 && maxCount > 0) {
+      aff.hopConsistencyScore = maxCount / totalHops;
+    }
+    
+    // Frequency score (normalized)
+    aff.frequencyScore = maxFrequency > 0 ? aff.frequency / maxFrequency : 0;
+    
+    // Multi-factor combined score:
+    // - proximityScore (Haversine): 30% weight
+    // - hopConsistencyScore: 30% weight (consistent hop position = more reliable)
+    // - frequencyScore: 40% weight (frequent appearances = more data = more reliable)
+    aff.combinedScore = 
+      aff.proximityScore * 0.3 + 
+      aff.hopConsistencyScore * 0.3 + 
+      aff.frequencyScore * 0.4;
   }
   
   return affinity;
@@ -531,7 +609,7 @@ export function buildMeshTopology(
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
-  return { edges, edgeMap, maxPacketCount, neighborAffinity: simpleAffinity, localPrefix };
+  return { edges, edgeMap, maxPacketCount, neighborAffinity: simpleAffinity, fullAffinity: neighborAffinity, localPrefix };
 }
 
 /**
