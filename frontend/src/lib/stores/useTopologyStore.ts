@@ -1,0 +1,124 @@
+/**
+ * Topology Store
+ * 
+ * Zustand store for mesh topology data computed by the Web Worker.
+ * Provides reactive access to topology edges, hub nodes, and centrality.
+ */
+
+import { create } from 'zustand';
+import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge } from '@/lib/topology-service';
+
+// Re-export types for consumers
+export type { MeshTopology, NeighborAffinity, TopologyEdge };
+
+interface TopologyState {
+  // Topology data
+  topology: MeshTopology;
+  
+  // Metadata
+  isComputing: boolean;
+  lastComputeTimeMs: number;
+  lastUpdated: number;
+  
+  // Actions
+  setTopology: (topology: MeshTopology, computeTimeMs: number) => void;
+  setComputing: (isComputing: boolean) => void;
+}
+
+/** Create empty topology for initial state */
+function createEmptyTopology(): MeshTopology {
+  return {
+    edges: [],
+    validatedEdges: [],
+    certainEdges: [],
+    uncertainEdges: [],
+    edgeMap: new Map(),
+    maxPacketCount: 0,
+    maxCertainCount: 0,
+    neighborAffinity: new Map(),
+    fullAffinity: new Map(),
+    localPrefix: null,
+    centrality: new Map(),
+    hubNodes: [],
+  };
+}
+
+const useTopologyStoreBase = create<TopologyState>((set) => ({
+  topology: createEmptyTopology(),
+  isComputing: false,
+  lastComputeTimeMs: 0,
+  lastUpdated: 0,
+  
+  setTopology: (topology, computeTimeMs) => set({
+    topology,
+    lastComputeTimeMs: computeTimeMs,
+    lastUpdated: Date.now(),
+    isComputing: false,
+  }),
+  
+  setComputing: (isComputing) => set({ isComputing }),
+}));
+
+// Subscribe to topology service updates
+// This connects the worker results to the Zustand store
+if (typeof window !== 'undefined') {
+  topologyService.subscribe((topology, computeTimeMs) => {
+    useTopologyStoreBase.getState().setTopology(topology, computeTimeMs);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Selectors - granular access to prevent unnecessary re-renders
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Full store access (use sparingly) */
+export const useTopologyStore = useTopologyStoreBase;
+
+/** Full topology object */
+export const useTopology = () => useTopologyStoreBase((s) => s.topology);
+
+/** Validated edges (for rendering) */
+export const useValidatedEdges = () => useTopologyStoreBase((s) => s.topology.validatedEdges);
+
+/** All edges (including unvalidated) */
+export const useAllEdges = () => useTopologyStoreBase((s) => s.topology.edges);
+
+/** Hub node hashes */
+export const useHubNodes = () => useTopologyStoreBase((s) => s.topology.hubNodes);
+
+/** Max certain count (for normalization) */
+export const useMaxCertainCount = () => useTopologyStoreBase((s) => s.topology.maxCertainCount);
+
+/** Centrality map */
+export const useCentrality = () => useTopologyStoreBase((s) => s.topology.centrality);
+
+/** Full affinity map (with hop stats) */
+export const useFullAffinity = () => useTopologyStoreBase((s) => s.topology.fullAffinity);
+
+/** Simple affinity map (backward compat) */
+export const useNeighborAffinity = () => useTopologyStoreBase((s) => s.topology.neighborAffinity);
+
+/** Local node prefix */
+export const useLocalPrefix = () => useTopologyStoreBase((s) => s.topology.localPrefix);
+
+/** Whether worker is currently computing */
+export const useIsComputingTopology = () => useTopologyStoreBase((s) => s.isComputing);
+
+/** Last computation time in ms */
+export const useLastComputeTime = () => useTopologyStoreBase((s) => s.lastComputeTimeMs);
+
+/** Timestamp of last update */
+export const useTopologyLastUpdated = () => useTopologyStoreBase((s) => s.lastUpdated);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Computed selectors (derived data)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Hub node set for O(1) lookup */
+export const useHubNodeSet = () => useTopologyStoreBase((s) => new Set(s.topology.hubNodes));
+
+/** Edge count */
+export const useEdgeCount = () => useTopologyStoreBase((s) => s.topology.validatedEdges.length);
+
+/** Has topology data */
+export const useHasTopology = () => useTopologyStoreBase((s) => s.topology.edges.length > 0);

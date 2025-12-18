@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Stats, Packet, LogEntry } from '@/types/api';
 import * as api from '@/lib/api';
 import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
+import { topologyService } from '@/lib/topology-service';
 
 /** Data point for system resource history */
 export interface ResourceDataPoint {
@@ -130,6 +131,7 @@ interface StoreState {
   addResourceDataPoint: (cpu: number, memory: number, maxSlots: number) => void;
   hideContact: (hash: string) => void;
   clearPacketCache: () => void;
+  triggerTopologyCompute: () => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -177,6 +179,8 @@ const store = create<StoreState>((set, get) => ({
         const allPackets = packetCache.getPackets();
         if (allPackets.length > 0) {
           set({ packets: allPackets });
+          // Recompute topology with full packet set
+          get().triggerTopologyCompute();
         }
       }
       wasDeepLoading = cacheState.isDeepLoading;
@@ -198,6 +202,8 @@ const store = create<StoreState>((set, get) => ({
           packetsLoading: false,
           lastPacketTimestamp: newestTimestamp,
         });
+        // Trigger initial topology computation
+        get().triggerTopologyCompute();
       } else {
         set({ packetsLoading: false });
       }
@@ -280,6 +286,8 @@ const store = create<StoreState>((set, get) => ({
         packetsLoading: false,
         lastPacketTimestamp: newestTimestamp || lastPacketTimestamp,
       });
+      // Trigger topology recompute on new packets
+      get().triggerTopologyCompute();
     } catch (error) {
       set({ 
         packetsError: error instanceof Error ? error.message : 'Failed to fetch packets',
@@ -399,8 +407,27 @@ const store = create<StoreState>((set, get) => ({
       if (packets.length > 0) {
         const newestTimestamp = Math.max(...packets.map(p => p.timestamp ?? 0));
         set({ packets, lastPacketTimestamp: newestTimestamp });
+        get().triggerTopologyCompute();
       }
     });
+  },
+  
+  triggerTopologyCompute: () => {
+    const { packets, stats, hiddenContacts } = get();
+    if (packets.length === 0 || !stats) return;
+    
+    // Filter out hidden contacts from neighbors
+    const neighbors = stats.neighbors ?? {};
+    const visibleNeighbors = Object.fromEntries(
+      Object.entries(neighbors).filter(([hash]) => !hiddenContacts.has(hash))
+    );
+    
+    const localHash = stats.local_hash;
+    const localLat = stats.config?.repeater?.latitude;
+    const localLon = stats.config?.repeater?.longitude;
+    
+    // Trigger async computation in worker
+    topologyService.compute(packets, visibleNeighbors, localHash, localLat, localLon);
   },
 }));
 
