@@ -8,11 +8,10 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, TopologyEdge } from '@/lib/mesh-topology';
 
 // Uniform marker size for all nodes
-const MARKER_SIZE = 16;
+const MARKER_SIZE = 14;
 
-// Create a matte dot icon with CSS shadows
-// Uses CSS transform for hover scaling to keep anchor point stable
-function createDotIcon(color: string, isHovered: boolean = false): L.DivIcon {
+// Create a simple dot icon - no shadows/glows for performance
+function createDotIcon(color: string, _isHovered: boolean = false): L.DivIcon {
   return L.divIcon({
     className: 'map-dot-marker',
     html: `<div style="
@@ -20,10 +19,7 @@ function createDotIcon(color: string, isHovered: boolean = false): L.DivIcon {
       height: ${MARKER_SIZE}px;
       background-color: ${color};
       border-radius: 50%;
-      border: 1px solid rgba(13, 14, 18, 0.8);
-      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.15), inset 0 -2px 3px rgba(0, 0, 0, 0.1)${isHovered ? `, 0 0 12px ${color}` : ''};
-      transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
-      transform: scale(${isHovered ? 1.3 : 1});
+      border: 1.5px solid rgba(13, 14, 18, 0.9);
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -120,18 +116,16 @@ function getSignalColor(snr?: number): string {
   return SIGNAL_COLORS.critical;
 }
 
-// Glass-style tooltip for legend items
+// Simple tooltip for legend items - no blur for performance
 function LegendTooltip({ text }: { text: string }) {
   return (
     <span className="group relative cursor-help">
       <Info className="w-3 h-3 text-text-muted" />
       <div 
-        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight rounded-lg shadow-lg z-10"
+        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-44 p-2 text-[10px] leading-tight rounded-lg z-10"
         style={{
-          background: 'rgba(20, 20, 22, 0.95)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(140, 160, 200, 0.25)',
+          background: 'rgba(20, 20, 22, 0.98)',
+          border: '1px solid rgba(140, 160, 200, 0.3)',
         }}
       >
         {text}
@@ -147,12 +141,10 @@ function LegendItem({ indicator, label, tooltip }: { indicator: React.ReactNode;
       {indicator}
       <span className="text-text-muted">{label}</span>
       <div 
-        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight rounded-lg shadow-lg z-10"
+        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight rounded-lg z-10"
         style={{
-          background: 'rgba(20, 20, 22, 0.95)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(140, 160, 200, 0.25)',
+          background: 'rgba(20, 20, 22, 0.98)',
+          border: '1px solid rgba(140, 160, 200, 0.3)',
         }}
       >
         {tooltip}
@@ -510,29 +502,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
       className="relative rounded-[1.125rem] overflow-hidden" 
       style={{ height: isFullscreen ? '100vh' : '500px' }}
     >
-      {/* Map container with glass card styling */}
-      <div className="glass-card h-full relative">
-        {/* Glass overlay effect on top of map */}
-        <div 
-          className="absolute inset-0 z-[500] pointer-events-none"
-          style={{
-            background: 'linear-gradient(180deg, rgba(140, 170, 220, 0.06) 0%, transparent 20%)',
-            boxShadow: 'inset 4px 4px 7px -4px rgba(160, 180, 220, 0.12), inset -4px -4px 7px -4px rgba(100, 140, 180, 0.08)',
-            borderRadius: 'inherit',
-          }}
-        />
-        {/* Directional border overlay */}
-        <div 
-          className="absolute inset-0 z-[501] pointer-events-none"
-          style={{
-            borderRadius: 'inherit',
-            border: '1px solid transparent',
-            borderTopColor: 'rgba(140, 160, 200, 0.38)',
-            borderLeftColor: 'rgba(140, 160, 200, 0.28)',
-            borderRightColor: 'rgba(100, 140, 180, 0.15)',
-            borderBottomColor: 'rgba(100, 140, 180, 0.18)',
-          }}
-        />
+      {/* Map container - simple border, no glass effects */}
+      <div className="h-full relative rounded-[1.125rem] overflow-hidden border border-white/10">
         <MapContainer
           center={defaultCenter}
           zoom={8}
@@ -705,9 +676,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               onClick={() => setShowTopology(!showTopology)}
               className="p-2 transition-colors hover:bg-white/10"
               style={{
-                background: showTopology ? 'rgba(74, 222, 128, 0.15)' : 'rgba(20, 20, 22, 0.85)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
+                background: showTopology ? 'rgba(74, 222, 128, 0.2)' : 'rgba(20, 20, 22, 0.95)',
                 borderRadius: '0.75rem',
                 border: showTopology ? '1px solid rgba(74, 222, 128, 0.4)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
@@ -727,9 +696,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               onClick={() => setSoloHubs(!soloHubs)}
               className="p-2 transition-colors hover:bg-white/10"
               style={{
-                background: soloHubs ? 'rgba(251, 191, 36, 0.2)' : 'rgba(20, 20, 22, 0.85)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
+                background: soloHubs ? 'rgba(251, 191, 36, 0.25)' : 'rgba(20, 20, 22, 0.95)',
                 borderRadius: '0.75rem',
                 border: soloHubs ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
@@ -745,9 +712,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
               onClick={() => setSoloDirect(!soloDirect)}
               className="p-2 transition-colors hover:bg-white/10"
               style={{
-                background: soloDirect ? 'rgba(67, 56, 202, 0.3)' : 'rgba(20, 20, 22, 0.85)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
+                background: soloDirect ? 'rgba(67, 56, 202, 0.35)' : 'rgba(20, 20, 22, 0.95)',
                 borderRadius: '0.75rem',
                 border: soloDirect ? '1px solid rgba(67, 56, 202, 0.6)' : '1px solid rgba(140, 160, 200, 0.2)',
               }}
@@ -762,9 +727,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             onClick={toggleFullscreen}
             className="p-2 transition-colors hover:bg-white/10"
             style={{
-              background: 'rgba(20, 20, 22, 0.85)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
+              background: 'rgba(20, 20, 22, 0.95)',
               borderRadius: '0.75rem',
               border: '1px solid rgba(140, 160, 200, 0.2)',
             }}
@@ -782,9 +745,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         <div 
           className="absolute bottom-4 left-4 z-[600] text-xs"
           style={{
-            background: 'rgba(20, 20, 22, 0.85)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
+            background: 'rgba(20, 20, 22, 0.95)',
             borderRadius: '0.75rem',
             padding: '0.625rem',
             border: '1px solid rgba(140, 160, 200, 0.2)',
