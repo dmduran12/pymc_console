@@ -69,6 +69,7 @@ export interface ResolvedHop {
   prefix: string;
   candidates: PathCandidate[];
   confidence: number;  // Max probability among candidates (0 if none)
+  totalMatches: number;  // Total prefix matches (including those without coordinates)
 }
 
 /** Result of path resolution */
@@ -88,15 +89,25 @@ export interface ResolvedPath {
  * @param localHash - Local node's full hash
  * @param isLastHop - If true, this is the receiving node (us)
  */
+/** Extended result including total match count for confidence display */
+interface PrefixMatchResult {
+  candidates: PathCandidate[];
+  /** Total number of prefix matches (including those without coordinates) */
+  totalMatches: number;
+}
+
 function matchPrefixToNodes(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
   localNode?: LocalNode,
   localHash?: string,
   isLastHop: boolean = false
-): PathCandidate[] {
+): PrefixMatchResult {
   // Use shared matching logic from mesh-topology
   const { matches, probability } = matchPrefix(prefix, neighbors, localHash, undefined, isLastHop);
+  
+  // Store total matches BEFORE filtering by coordinates
+  const totalMatches = matches.length;
   
   const candidates: PathCandidate[] = [];
   const normalizedPrefix = prefix.toUpperCase();
@@ -140,13 +151,17 @@ function matchPrefixToNodes(
     }
   }
   
-  // Recalculate probabilities based on candidates with coordinates
-  // Use proximity to local node for scoring when we have multiple matches
+  // Recalculate probabilities based on TOTAL matches (not just those with coordinates)
+  // This ensures confidence reflects true ambiguity even if some matches lack coords
   const k = candidates.length;
-  if (k === 1) {
+  const totalK = totalMatches; // Use total matches for probability calculation
+  
+  if (totalK === 1 && k === 1) {
+    // Only one match total and it has coords - 100% confidence
     candidates[0].probability = 1;
-  } else if (k > 1 && localHasCoords && localNode) {
-    // Calculate proximity scores for each candidate
+  } else if (totalK > 1 && k > 0 && localHasCoords && localNode) {
+    // Multiple matches exist - use proximity scoring among candidates with coords
+    // But cap probability based on total match count
     let totalScore = 0;
     const scores = candidates.map(c => {
       if (c.isLocal) return { candidate: c, score: 1.0 }; // Local always highest
@@ -160,28 +175,35 @@ function matchPrefixToNodes(
     });
     
     // Assign probabilities based on proximity scores
+    // Cap at 1/totalK as base (can't be more certain than # of matches allows)
     if (totalScore > 0) {
+      const maxPossibleProb = Math.min(0.95, 1 - (1 / totalK) * 0.5); // Scale down based on total matches
       scores.forEach(({ candidate, score }) => {
-        candidate.probability = Math.min(0.95, score / totalScore);
+        candidate.probability = Math.min(maxPossibleProb, score / totalScore);
       });
     } else {
-      const prob = 1 / k;
+      const prob = 1 / totalK;
       candidates.forEach(c => c.probability = prob);
     }
-  } else if (k > 1) {
-    // No local coords - fall back to direct neighbor boost
+  } else if (totalK > 1 && k > 0) {
+    // Multiple matches, no local coords - fall back to direct neighbor boost
     const directNeighbors = candidates.filter(c => c.isDirectNeighbor);
     if (directNeighbors.length === 1) {
+      // Boost direct neighbor but still cap based on total matches
+      const maxProb = Math.min(0.9, 1 - (1 / totalK) * 0.3);
       candidates.forEach(c => {
-        c.probability = c.isDirectNeighbor ? 0.9 : 0.1 / (k - 1);
+        c.probability = c.isDirectNeighbor ? maxProb : (1 - maxProb) / (k - 1);
       });
     } else {
-      const prob = 1 / k;
+      const prob = 1 / totalK;
       candidates.forEach(c => c.probability = prob);
     }
+  } else if (k === 1 && totalK > 1) {
+    // Only one candidate has coords but there are other matches - reduce confidence
+    candidates[0].probability = 1 / totalK;
   }
   
-  return candidates;
+  return { candidates, totalMatches };
 }
 
 /**
@@ -206,9 +228,9 @@ export function resolvePath(
   
   const hops: ResolvedHop[] = path.map((prefix, index) => {
     const isLastHop = index === lastIndex;
-    const candidates = matchPrefixToNodes(prefix, neighbors, localNode, localHash, isLastHop);
+    const { candidates, totalMatches } = matchPrefixToNodes(prefix, neighbors, localNode, localHash, isLastHop);
     const confidence = candidates.length > 0 ? Math.max(...candidates.map(c => c.probability)) : 0;
-    return { prefix, candidates, confidence };
+    return { prefix, candidates, confidence, totalMatches };
   });
   
   // Overall confidence: product of individual confidences
@@ -360,20 +382,20 @@ export function PathMapVisualization({
             key={i}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-elevated text-[10px] font-mono"
             title={
-              hop.candidates.length === 0
+              hop.totalMatches === 0
                 ? 'No matching nodes found'
-                : hop.candidates.length === 1
-                ? `Exact match: ${hop.candidates[0].name}`
-                : `${hop.candidates.length} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
+                : hop.totalMatches === 1
+                ? `Exact match: ${hop.candidates[0]?.name || 'Unknown'}`
+                : `${hop.totalMatches} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
             }
           >
-            <span className={getHopBadgeColor(hop.confidence, hop.candidates.length)}>
+            <span className={getHopBadgeColor(hop.confidence, hop.totalMatches)}>
               {hop.prefix}
             </span>
-            {hop.candidates.length > 1 && (
-              <span className="text-text-muted">×{hop.candidates.length}</span>
+            {hop.totalMatches > 1 && (
+              <span className="text-text-muted">×{hop.totalMatches}</span>
             )}
-            {hop.candidates.length === 0 && (
+            {hop.totalMatches === 0 && (
               <span className="text-text-muted">?</span>
             )}
           </div>
