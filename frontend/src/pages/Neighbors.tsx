@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore, useHiddenNeighbors, useHideNeighbor } from '@/lib/stores/useStore';
 import { Map, Signal, Radio, MapPin, Repeat, Users, X } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import NeighborMapWrapper from '@/components/neighbors/NeighborMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 // Get signal color for card badges based on SNR
 function getSignalColor(snr?: number): string {
@@ -19,6 +20,9 @@ export default function Neighbors() {
   const { stats, packets } = useStore();
   const hiddenNeighbors = useHiddenNeighbors();
   const hideNeighbor = useHideNeighbor();
+  
+  // Confirmation modal state
+  const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
   
   const neighbors = stats?.neighbors ?? {};
   
@@ -142,7 +146,7 @@ export default function Neighbors() {
                     
                     {/* Remove button */}
                     <button
-                      onClick={() => hideNeighbor(hash)}
+                      onClick={() => setPendingRemove({ hash, name: displayName })}
                       className="ml-2 p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
                       title="Remove node"
                     >
@@ -168,6 +172,23 @@ export default function Neighbors() {
           </div>
         )}
       </div>
+      
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!pendingRemove}
+        title="Remove Node"
+        message={`Are you sure you would like to remove ${pendingRemove?.name || 'this node'}?`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingRemove) {
+            hideNeighbor(pendingRemove.hash);
+          }
+          setPendingRemove(null);
+        }}
+        onCancel={() => setPendingRemove(null)}
+      />
     </div>
   );
 }

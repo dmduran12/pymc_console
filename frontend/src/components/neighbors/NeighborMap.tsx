@@ -5,28 +5,28 @@ import { Maximize2, Minimize2, X } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 // Create a matte dot icon with CSS shadows
+// Uses CSS transform for hover scaling to keep anchor point stable
 function createDotIcon(color: string, size: number, isHovered: boolean = false): L.DivIcon {
-  const scale = isHovered ? 1.25 : 1;
-  const actualSize = size * scale;
-  
   return L.divIcon({
     className: 'map-dot-marker',
     html: `<div style="
-      width: ${actualSize}px;
-      height: ${actualSize}px;
+      width: ${size}px;
+      height: ${size}px;
       background-color: ${color};
       border-radius: 50%;
       border: 0.75px solid rgba(13, 14, 18, 0.6);
       box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08), inset 0 -2px 3px rgba(0, 0, 0, 0.06)${isHovered ? `, 0 0 12px ${color}` : ''};
-      transition: all 0.15s ease-out;
+      transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, opacity 0.15s ease-out, filter 0.15s ease-out;
+      transform: scale(${isHovered ? 1.25 : 1});
       opacity: ${isHovered ? 1 : 0.9};
       filter: brightness(${isHovered ? 1.1 : 1});
     "></div>`,
-    iconSize: [actualSize, actualSize],
-    iconAnchor: [actualSize / 2, actualSize / 2],
-    popupAnchor: [0, -actualSize / 2],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 }
 
@@ -125,6 +125,9 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
 export default function NeighborMap({ neighbors, localNode, packets = [], onRemoveNode }: NeighborMapProps) {
   // Track hover state per marker
   const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
+  
+  // Confirmation modal state
+  const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
@@ -317,12 +320,12 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
             }}
           >
             <Popup>
-              <div className="text-gray-900 text-sm">
+              <div className="text-sm">
                 <strong className="text-base">{localNode.name}</strong>
                 <br />
-                <span className="text-cyan-600 font-medium">This Node (Local)</span>
+                <span className="text-accent-tertiary font-medium">This Node (Local)</span>
                 <br />
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-text-muted">
                   {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
                 </span>
               </div>
@@ -353,34 +356,34 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
               }}
             >
               <Popup>
-                <div className="text-gray-900 text-sm min-w-[150px]">
+                <div className="text-sm min-w-[150px]">
                   <strong className="text-base">{name}</strong>
                   <div className="mt-1">
-                    <HashBadge hash={hash} size="sm" className="!bg-gray-100 !border-gray-200 !text-gray-700" />
+                    <HashBadge hash={hash} size="sm" />
                   </div>
-                  <hr className="my-2 border-gray-200" />
+                  <hr className="my-2" />
                   {meanSnr !== undefined && (
-                    <div>Mean SNR: <strong>{meanSnr.toFixed(1)} dB</strong></div>
+                    <div className="text-text-secondary">Mean SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)} dB</strong></div>
                   )}
                   {neighbor.rssi !== undefined && (
-                    <div>Last RSSI: <strong>{neighbor.rssi} dBm</strong></div>
+                    <div className="text-text-secondary">Last RSSI: <strong className="text-text-primary">{neighbor.rssi} dBm</strong></div>
                   )}
                   {neighbor.snr !== undefined && (
-                    <div>Last SNR: <strong>{neighbor.snr.toFixed(1)} dB</strong></div>
+                    <div className="text-text-secondary">Last SNR: <strong className="text-text-primary">{neighbor.snr.toFixed(1)} dB</strong></div>
                   )}
                   {neighbor.advert_count !== undefined && (
-                    <div>Adverts: <strong>{neighbor.advert_count}</strong></div>
+                    <div className="text-text-secondary">Adverts: <strong className="text-text-primary">{neighbor.advert_count}</strong></div>
                   )}
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-text-muted mt-1">
                     Last seen: {formatRelativeTime(neighbor.last_seen)}
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-text-muted">
                     {neighbor.latitude?.toFixed(5)}, {neighbor.longitude?.toFixed(5)}
                   </div>
                   {onRemoveNode && (
                     <button
-                      onClick={() => onRemoveNode(hash)}
-                      className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors border border-red-200"
+                      onClick={() => setPendingRemove({ hash, name })}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors border border-red-500/30"
                     >
                       <X className="w-3 h-3" />
                       Remove Node
@@ -392,6 +395,23 @@ export default function NeighborMap({ neighbors, localNode, packets = [], onRemo
           );
         })}
         </MapContainer>
+        
+        {/* Confirmation Modal */}
+        <ConfirmModal
+          isOpen={!!pendingRemove}
+          title="Remove Node"
+          message={`Are you sure you would like to remove ${pendingRemove?.name || 'this node'}?`}
+          confirmLabel="Remove"
+          cancelLabel="Cancel"
+          variant="danger"
+          onConfirm={() => {
+            if (pendingRemove && onRemoveNode) {
+              onRemoveNode(pendingRemove.hash);
+            }
+            setPendingRemove(null);
+          }}
+          onCancel={() => setPendingRemove(null)}
+        />
         
         {/* Fullscreen button - top right, matching legend style */}
         <button
