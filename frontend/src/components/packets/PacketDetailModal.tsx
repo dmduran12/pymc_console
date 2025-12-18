@@ -1,4 +1,5 @@
 import { memo, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Copy, Check, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
 import type { Packet } from '@/types/api';
@@ -93,7 +94,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
     }
   }, []);
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-end sm:items-center justify-center"
       onClick={onClose}
@@ -276,7 +277,8 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
