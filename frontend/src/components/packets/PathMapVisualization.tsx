@@ -231,13 +231,26 @@ function formatConfidence(confidence: number): string {
 }
 
 /**
- * Get color based on confidence level
+ * Get color based on confidence level for text
  */
 function getConfidenceColor(confidence: number): string {
-  if (confidence >= 0.9) return 'text-accent-success';
-  if (confidence >= 0.5) return 'text-accent-secondary';
-  if (confidence > 0) return 'text-accent-danger';
-  return 'text-text-muted';
+  if (confidence >= 1) return 'text-accent-success';      // 100% - green
+  if (confidence >= 0.5) return 'text-accent-secondary';  // 50-99% - yellow
+  if (confidence >= 0.25) return 'text-orange-400';       // 25-49% - orange
+  if (confidence > 0) return 'text-accent-danger';        // 1-24% - red
+  return 'text-text-muted';                               // 0% - gray
+}
+
+/**
+ * Get color class for hop badge based on confidence
+ */
+function getHopBadgeColor(confidence: number, candidateCount: number): string {
+  if (candidateCount === 0) return 'text-text-muted';     // Unknown - gray
+  if (confidence >= 1) return 'text-accent-success';      // 100% - green
+  if (confidence >= 0.5) return 'text-accent-secondary';  // 50-99% - yellow  
+  if (confidence >= 0.25) return 'text-orange-400';       // 25-49% - orange
+  if (confidence > 0) return 'text-accent-danger';        // 1-24% - red
+  return 'text-text-muted';                               // fallback - gray
 }
 
 // Error boundary for map loading
@@ -351,18 +364,10 @@ export function PathMapVisualization({
                 ? 'No matching nodes found'
                 : hop.candidates.length === 1
                 ? `Exact match: ${hop.candidates[0].name}`
-                : `${hop.candidates.length} possible matches`
+                : `${hop.candidates.length} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
             }
           >
-            <span
-              className={
-                hop.confidence >= 1
-                  ? 'text-accent-success'
-                  : hop.confidence > 0
-                  ? 'text-accent-secondary'
-                  : 'text-text-muted'
-              }
-            >
+            <span className={getHopBadgeColor(hop.confidence, hop.candidates.length)}>
               {hop.prefix}
             </span>
             {hop.candidates.length > 1 && (
