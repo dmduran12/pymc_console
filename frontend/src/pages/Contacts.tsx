@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
+import { useHubNodes } from '@/lib/stores/useTopologyStore';
 import { Signal, Radio, MapPin, Repeat, Users, X, Network } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology } from '@/lib/mesh-topology';
 
 // Get signal color for card badges based on SNR
 function getSignalColor(snr?: number): string {
@@ -18,9 +18,10 @@ function getSignalColor(snr?: number): string {
 }
 
 export default function Contacts() {
-  const { stats, packets } = useStore();
+  const { stats } = useStore();
   const hiddenContacts = useHiddenContacts();
   const hideContact = useHideContact();
+  const hubNodes = useHubNodes();
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
@@ -51,20 +52,8 @@ export default function Contacts() {
     ([, n]) => n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0
   ).length;
   
-  // Build mesh topology to identify hub nodes
-  const meshTopology = useMemo(() => {
-    return buildMeshTopology(
-      packets,
-      visibleContacts,
-      localHash,
-      0.8,
-      localNode?.latitude,
-      localNode?.longitude
-    );
-  }, [packets, visibleContacts, localHash, localNode?.latitude, localNode?.longitude]);
-  
-  // Create set of hub nodes for quick lookup
-  const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
+  // Hub nodes from topology store (computed by worker)
+  const hubNodeSet = useMemo(() => new Set(hubNodes), [hubNodes]);
 
   return (
     <div className="section-gap">
@@ -91,7 +80,6 @@ export default function Contacts() {
           neighbors={visibleContacts} 
           localNode={localNode}
           localHash={localHash}
-          packets={packets}
           onRemoveNode={hideContact}
         />
       </div>

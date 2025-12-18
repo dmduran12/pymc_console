@@ -5,7 +5,9 @@ import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy,
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, TopologyEdge } from '@/lib/mesh-topology';
+import { getLinkQualityColor, getLinkQualityWeight, type TopologyEdge } from '@/lib/mesh-topology';
+import { useTopology } from '@/lib/stores/useTopologyStore';
+import { usePackets } from '@/lib/stores/useStore';
 
 // Uniform marker size for all nodes
 const MARKER_SIZE = 16;
@@ -37,7 +39,6 @@ interface ContactsMapProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
   localHash?: string;  // Local node's hash for zero-hop detection
-  packets?: Packet[];
   onRemoveNode?: (hash: string) => void;
 }
 
@@ -275,12 +276,18 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
-export default function ContactsMap({ neighbors, localNode, localHash, packets = [], onRemoveNode }: ContactsMapProps) {
+export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode }: ContactsMapProps) {
   // Track hover state per marker
   const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
+  
+  // Get topology from store (computed by worker)
+  const meshTopology = useTopology();
+  
+  // Get packets for SNR calculation (lightweight, still needed)
+  const packets = usePackets();
   
   // Infer zero-hop neighbors from packet analysis
   const zeroHopNeighbors = useMemo(() => {
@@ -318,20 +325,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     return coords;
   }, [neighborsWithLocation, localNode, localHash]);
   
-  // Build mesh topology with confidence-weighted edges (80% threshold)
-  // Pass local coordinates for proximity-based scoring
-  const meshTopology = useMemo(() => {
-    return buildMeshTopology(
-      packets, 
-      neighbors, 
-      localHash, 
-      0.8,
-      localNode?.latitude,
-      localNode?.longitude
-    );
-  }, [packets, neighbors, localHash, localNode?.latitude, localNode?.longitude]);
-  
-  // Generate polylines for validated edges (3+ validations)
+  // Generate polylines for validated edges (from topology store)
   const validatedPolylines = useMemo(() => {
     const lines: Array<{
       from: [number, number];

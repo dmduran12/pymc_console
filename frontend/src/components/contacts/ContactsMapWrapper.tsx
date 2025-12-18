@@ -1,5 +1,5 @@
 import { Suspense, lazy, Component, ReactNode } from 'react';
-import { NeighborInfo, Packet } from '@/types/api';
+import { NeighborInfo } from '@/types/api';
 
 interface LocalNode {
   latitude: number;
@@ -11,7 +11,6 @@ interface ContactsMapWrapperProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
   localHash?: string;
-  packets?: Packet[];
   onRemoveNode?: (hash: string) => void;
 }
 
@@ -51,7 +50,7 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
 // Lazy import - Leaflet requires window object
 const ContactsMap = lazy(() => import('./ContactsMap'));
 
-export default function ContactsMapWrapper({ neighbors, localNode, localHash, packets, onRemoveNode }: ContactsMapWrapperProps) {
+export default function ContactsMapWrapper({ neighbors, localNode, localHash, onRemoveNode }: ContactsMapWrapperProps) {
   return (
     <MapErrorBoundary>
       <Suspense fallback={
@@ -59,7 +58,7 @@ export default function ContactsMapWrapper({ neighbors, localNode, localHash, pa
           <div className="text-white/50">Loading map...</div>
         </div>
       }>
-        <ContactsMap neighbors={neighbors} localNode={localNode} localHash={localHash} packets={packets} onRemoveNode={onRemoveNode} />
+        <ContactsMap neighbors={neighbors} localNode={localNode} localHash={localHash} onRemoveNode={onRemoveNode} />
       </Suspense>
     </MapErrorBoundary>
   );
