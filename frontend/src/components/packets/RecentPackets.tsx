@@ -1,77 +1,11 @@
-import { memo, useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { usePackets, usePacketsLoading, useLiveMode, useFetchPackets, useFlashAdvert } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { Radio, Circle, ArrowRight } from 'lucide-react';
-import clsx from 'clsx';
-import { formatTime } from '@/lib/format';
 import { POLLING_INTERVALS } from '@/lib/constants';
-import {
-  getPayloadTypeName,
-  getRouteTypeName,
-  getPacketTypeColor,
-  isTruthy,
-} from '@/lib/packet-utils';
-import type { Packet } from '@/types/api';
-
-/** Memoized recent packet row */
-const RecentPacketRow = memo(function RecentPacketRow({ 
-  packet, 
-  isNew = false,
-  isAdvert = false,
-}: { 
-  packet: Packet; 
-  isNew?: boolean;
-  isAdvert?: boolean;
-}) {
-  const payloadTypeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
-  const routeTypeName = packet.route_type_name || getRouteTypeName(packet.route_type ?? packet.route);
-  const payloadLength = packet.payload_length ?? packet.length ?? 0;
-  const snr = packet.snr ?? 0;
-  
-  return (
-    <div
-      className={clsx(
-        'roster-row',
-        isTruthy(packet.transmitted) && 'bg-accent-success/5',
-        isTruthy(packet.is_duplicate) && 'opacity-50'
-      )}
-    >
-      <div className="roster-icon-sm">
-        <Radio className={clsx('w-4 h-4', isNew && isAdvert ? 'flash-icon' : 'text-text-muted')} />
-      </div>
-      <div className="roster-content">
-        <div className="flex items-center gap-2">
-          <span className={clsx('pill-tag', getPacketTypeColor(payloadTypeName))}>
-            {payloadTypeName}
-          </span>
-          <span className="pill-tag" style={{ background: 'var(--bg-subtle)' }}>
-            {routeTypeName}
-          </span>
-        </div>
-        <div className="flex items-center gap-3 type-data-xs text-text-muted mt-1">
-          <span className="tabular-nums">{packet.rssi} dBm</span>
-          <span className="tabular-nums">{snr.toFixed(1)} dB</span>
-          <span className="tabular-nums">{payloadLength}B</span>
-          {isTruthy(packet.transmitted) ? (
-            <span className="text-accent-success">✓ TX</span>
-          ) : isTruthy(packet.is_duplicate) ? (
-            <span>duplicate</span>
-          ) : packet.drop_reason === 'No transport keys configured' ? (
-            <span className="text-accent-secondary">monitor</span>
-          ) : packet.drop_reason ? (
-            <span className="text-accent-danger">{packet.drop_reason}</span>
-          ) : (
-            <span>RX</span>
-          )}
-        </div>
-      </div>
-      <div className="roster-metric text-text-muted">
-        {formatTime(packet.timestamp)}
-      </div>
-    </div>
-  );
-});
+import { getPayloadTypeName } from '@/lib/packet-utils';
+import { PacketListItem } from './PacketRow';
 
 export function RecentPackets() {
   const packets = usePackets();
@@ -135,28 +69,38 @@ export function RecentPackets() {
         </div>
       </div>
 
-      <div className="roster-list max-h-[400px] overflow-y-auto p-2">
+      {/* Column headers */}
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border-subtle/50 bg-bg-elevated/20">
+        <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider w-14 flex-shrink-0">Dir</span>
+        <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider w-7 flex-shrink-0">Time</span>
+        <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider w-9 flex-shrink-0">Src</span>
+        <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider flex-1 min-w-0">Type</span>
+        <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider w-14 flex-shrink-0">Route</span>
+        <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider w-10 text-right flex-shrink-0">Signal</span>
+      </div>
+
+      {/* Packet list */}
+      <div className="max-h-[360px] overflow-y-auto divide-y divide-border-subtle/30">
         {packetsLoading && packets.length === 0 ? (
-          <div className="roster-empty">
-            <div className="roster-empty-text">Loading packets...</div>
+          <div className="p-8 text-center text-text-muted">
+            Loading packets...
           </div>
         ) : packets.length === 0 ? (
-          <div className="roster-empty">
-            <Radio className="roster-empty-icon" />
-            <div className="roster-empty-title">No packets received</div>
-            <div className="roster-empty-text">Packets will appear here as they are received</div>
+          <div className="p-8 text-center">
+            <Radio className="w-8 h-8 text-text-muted mx-auto mb-2" />
+            <div className="text-sm text-text-primary">No packets received</div>
+            <div className="text-xs text-text-muted">Packets will appear here as they are received</div>
           </div>
         ) : (
           packets.slice(0, 15).map((packet, index) => {
-            const packetId = packet.id ?? packet.packet_hash ?? String(index);
+            const packetId = String(packet.id ?? packet.packet_hash ?? index);
             const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
             const isAdvert = typeName.toLowerCase().includes('advert');
             return (
-              <RecentPacketRow
+              <PacketListItem
                 key={packetId}
                 packet={packet}
-                isNew={flashingAdvertId === packetId}
-                isAdvert={isAdvert}
+                isFlashing={isAdvert && flashingAdvertId === packetId}
               />
             );
           })
