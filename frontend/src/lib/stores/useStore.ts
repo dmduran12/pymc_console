@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Stats, Packet, LogEntry } from '@/types/api';
 import * as api from '@/lib/api';
+import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
 
 /** Data point for system resource history */
 export interface ResourceDataPoint {
@@ -111,6 +112,9 @@ interface StoreState {
   // Initialization flag
   initialized: boolean;
   
+  // Packet cache state (for topology building UX)
+  packetCacheState: PacketCacheState;
+  
   // Actions
   initializeApp: () => Promise<void>;
   prefetchForRoute: (route: string) => void;
@@ -125,6 +129,7 @@ interface StoreState {
   triggerFlashAdvert: () => void;
   addResourceDataPoint: (cpu: number, memory: number, maxSlots: number) => void;
   hideContact: (hash: string) => void;
+  clearPacketCache: () => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -150,6 +155,7 @@ const store = create<StoreState>((set, get) => ({
   lastResourceFetch: loadLastResourceFetch(),
   hiddenContacts: loadHiddenContacts(),
   initialized: false,
+  packetCacheState: packetCache.getState(),
 
   // Actions
   
@@ -160,27 +166,40 @@ const store = create<StoreState>((set, get) => ({
     
     set({ initialized: true, statsLoading: true, packetsLoading: true });
     
-    // Fetch critical data in parallel
-    // Use 500 packets for deeper topology analysis
+    // Subscribe to packet cache state changes
+    packetCache.subscribe((cacheState) => {
+      set({ packetCacheState: cacheState });
+    });
+    
+    // Fetch stats and bootstrap packet cache in parallel
     try {
-      const [stats, packetsResponse] = await Promise.all([
+      const [stats, packets] = await Promise.all([
         api.getStats(),
-        api.getRecentPackets(500),
+        packetCache.bootstrap(), // Quick 24h load
       ]);
       
       set({ stats, statsLoading: false });
       
-      if (packetsResponse.success && packetsResponse.data) {
-        const newestTimestamp = packetsResponse.data.length > 0
-          ? Math.max(...packetsResponse.data.map(p => p.timestamp ?? 0))
-          : 0;
+      if (packets.length > 0) {
+        const newestTimestamp = Math.max(...packets.map(p => p.timestamp ?? 0));
         set({
-          packets: packetsResponse.data,
+          packets,
           packetsLoading: false,
           lastPacketTimestamp: newestTimestamp,
         });
       } else {
         set({ packetsLoading: false });
+      }
+      
+      // Start deep load in background (fetches entire DB)
+      if (packetCache.needsDeepLoad()) {
+        packetCache.deepLoad().then(() => {
+          // Update packets with full cache after deep load
+          const allPackets = packetCache.getPackets();
+          if (allPackets.length > 0) {
+            set({ packets: allPackets });
+          }
+        });
       }
     } catch (error) {
       set({
@@ -232,7 +251,7 @@ const store = create<StoreState>((set, get) => ({
     }
   },
 
-  fetchPackets: async (limit = 500) => {
+  fetchPackets: async (_limit?: number) => {
     const { packets: existingPackets } = get();
     // Only show loading spinner on initial load
     if (existingPackets.length === 0) {
@@ -241,30 +260,26 @@ const store = create<StoreState>((set, get) => ({
     set({ packetsError: null });
     
     try {
-      const response = await api.getRecentPackets(limit);
-      if (response.success && response.data) {
-        const newPackets = response.data;
-        const { lastPacketTimestamp } = get();
-        
-        // Find newest packet timestamp from response
-        const newestTimestamp = newPackets.length > 0 
-          ? Math.max(...newPackets.map(p => p.timestamp ?? 0))
-          : 0;
-        
-        // Trigger flash only if we have new packets (newer than last seen)
-        // and this isn't the initial load (lastPacketTimestamp > 0)
-        if (newestTimestamp > lastPacketTimestamp && lastPacketTimestamp > 0) {
-          set({ flashReceived: get().flashReceived + 1 });
-        }
-        
-        set({ 
-          packets: newPackets, 
-          packetsLoading: false,
-          lastPacketTimestamp: newestTimestamp || lastPacketTimestamp,
-        });
-      } else {
-        set({ packetsError: response.error || 'Failed to fetch packets', packetsLoading: false });
+      // Use packet cache for incremental polling
+      const newPackets = await packetCache.poll();
+      const { lastPacketTimestamp } = get();
+      
+      // Find newest packet timestamp from response
+      const newestTimestamp = newPackets.length > 0 
+        ? Math.max(...newPackets.map(p => p.timestamp ?? 0))
+        : 0;
+      
+      // Trigger flash only if we have new packets (newer than last seen)
+      // and this isn't the initial load (lastPacketTimestamp > 0)
+      if (newestTimestamp > lastPacketTimestamp && lastPacketTimestamp > 0) {
+        set({ flashReceived: get().flashReceived + 1 });
       }
+      
+      set({ 
+        packets: newPackets, 
+        packetsLoading: false,
+        lastPacketTimestamp: newestTimestamp || lastPacketTimestamp,
+      });
     } catch (error) {
       set({ 
         packetsError: error instanceof Error ? error.message : 'Failed to fetch packets',
@@ -375,6 +390,26 @@ const store = create<StoreState>((set, get) => ({
     set({ hiddenContacts: updated });
     saveHiddenContacts(updated);
   },
+
+  clearPacketCache: () => {
+    packetCache.clear();
+    set({ packets: [], lastPacketTimestamp: 0 });
+    // Re-bootstrap and deep load
+    packetCache.bootstrap().then((packets) => {
+      if (packets.length > 0) {
+        const newestTimestamp = Math.max(...packets.map(p => p.timestamp ?? 0));
+        set({ packets, lastPacketTimestamp: newestTimestamp });
+      }
+      if (packetCache.needsDeepLoad()) {
+        packetCache.deepLoad().then(() => {
+          const allPackets = packetCache.getPackets();
+          if (allPackets.length > 0) {
+            set({ packets: allPackets });
+          }
+        });
+      }
+    });
+  },
 }));
 
 // Main store hook (full access)
@@ -408,3 +443,5 @@ export const useResourceHistory = () => store((s) => s.resourceHistory);
 export const useAddResourceDataPoint = () => store((s) => s.addResourceDataPoint);
 export const useHiddenContacts = () => store((s) => s.hiddenContacts);
 export const useHideContact = () => store((s) => s.hideContact);
+export const usePacketCacheState = () => store((s) => s.packetCacheState);
+export const useClearPacketCache = () => store((s) => s.clearPacketCache);
