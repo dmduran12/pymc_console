@@ -8,7 +8,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { buildMeshTopology, getLinkQualityColor, getLinkQualityWeight, TopologyEdge } from '@/lib/mesh-topology';
 
 // Uniform marker size for all nodes
-const MARKER_SIZE = 14;
+const MARKER_SIZE = 16;
 
 // Create a simple dot icon - no shadows/glows for performance
 function createDotIcon(color: string, _isHovered: boolean = false): L.DivIcon {
@@ -19,7 +19,7 @@ function createDotIcon(color: string, _isHovered: boolean = false): L.DivIcon {
       height: ${MARKER_SIZE}px;
       background-color: ${color};
       border-radius: 50%;
-      border: 1.5px solid rgba(13, 14, 18, 0.9);
+      border: 1px solid rgba(13, 14, 18, 0.8);
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
