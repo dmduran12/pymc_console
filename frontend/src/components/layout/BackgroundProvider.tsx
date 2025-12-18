@@ -41,14 +41,14 @@ const [brightness, setBrightness] = useState(80);
     <>
       {/* Background image */}
       <div 
-        className="fixed inset-0 -z-10 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: `url(${backgroundSrc})` }}
+        className="fixed -z-10 bg-cover bg-center bg-no-repeat"
+        style={{ inset: 0, backgroundImage: `url(${backgroundSrc})` }}
       />
       {/* Dark overlay for brightness control */}
       {overlayOpacity > 0 && (
         <div 
-          className="fixed inset-0 -z-10 bg-black pointer-events-none transition-opacity duration-150"
-          style={{ opacity: overlayOpacity }}
+          className="fixed -z-10 bg-black pointer-events-none transition-opacity duration-150"
+          style={{ inset: 0, opacity: overlayOpacity }}
         />
       )}
     </>

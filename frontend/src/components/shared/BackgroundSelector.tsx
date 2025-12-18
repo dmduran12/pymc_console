@@ -169,8 +169,9 @@ const [brightness, setBrightness] = useState(80); // 0-100, default 80%
           >
             {/* Background image - dims when adjusting */}
             <div 
-              className="absolute inset-0 bg-cover bg-center transition-opacity duration-200"
+              className="absolute bg-cover bg-center transition-opacity duration-200"
               style={{ 
+                inset: 0,
                 backgroundImage: `url(${bg.src})`,
                 opacity: showOverlay ? 0.4 : 1 
               }}
