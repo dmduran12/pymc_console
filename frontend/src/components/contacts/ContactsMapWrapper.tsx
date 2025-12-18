@@ -7,7 +7,7 @@ interface LocalNode {
   name: string;
 }
 
-interface NeighborMapWrapperProps {
+interface ContactsMapWrapperProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
   localHash?: string;
@@ -49,9 +49,9 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
 }
 
 // Lazy import - Leaflet requires window object
-const NeighborMap = lazy(() => import('./NeighborMap'));
+const ContactsMap = lazy(() => import('./ContactsMap'));
 
-export default function NeighborMapWrapper({ neighbors, localNode, localHash, packets, onRemoveNode }: NeighborMapWrapperProps) {
+export default function ContactsMapWrapper({ neighbors, localNode, localHash, packets, onRemoveNode }: ContactsMapWrapperProps) {
   return (
     <MapErrorBoundary>
       <Suspense fallback={
@@ -59,7 +59,7 @@ export default function NeighborMapWrapper({ neighbors, localNode, localHash, pa
           <div className="text-white/50">Loading map...</div>
         </div>
       }>
-        <NeighborMap neighbors={neighbors} localNode={localNode} localHash={localHash} packets={packets} onRemoveNode={onRemoveNode} />
+        <ContactsMap neighbors={neighbors} localNode={localNode} localHash={localHash} packets={packets} onRemoveNode={onRemoveNode} />
       </Suspense>
     </MapErrorBoundary>
   );

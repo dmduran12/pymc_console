@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
-  Radio, 
+  Radio,
+  Users,
   Settings, 
   FileText,
-  Users,
   BarChart3,
   Cpu,
   Gauge,
@@ -28,8 +28,8 @@ import { POLLING_INTERVALS } from '@/lib/constants';
 
 const navigation = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
+  { name: 'Contacts', to: '/contacts', icon: Users },
   { name: 'Packets', to: '/packets', icon: Radio },
-  { name: 'Map', to: '/neighbors', icon: Users },
   { name: 'Statistics', to: '/statistics', icon: BarChart3 },
   { name: 'System', to: '/system', icon: Cpu },
   { name: 'Logs', to: '/logs', icon: FileText },

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { useStore, useHiddenNeighbors, useHideNeighbor } from '@/lib/stores/useStore';
-import { Map, Signal, Radio, MapPin, Repeat, Users, X } from 'lucide-react';
+import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
+import { Signal, Radio, MapPin, Repeat, Users, X } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
-import NeighborMapWrapper from '@/components/neighbors/NeighborMapWrapper';
+import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
@@ -16,24 +16,24 @@ function getSignalColor(snr?: number): string {
   return 'bg-[var(--signal-critical)]';
 }
 
-export default function Neighbors() {
+export default function Contacts() {
   const { stats, packets } = useStore();
-  const hiddenNeighbors = useHiddenNeighbors();
-  const hideNeighbor = useHideNeighbor();
+  const hiddenContacts = useHiddenContacts();
+  const hideContact = useHideContact();
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
   
-  const neighbors = stats?.neighbors ?? {};
+  const contacts = stats?.neighbors ?? {};
   
-  // Filter out hidden neighbors
-  const visibleNeighbors = useMemo(() => {
+  // Filter out hidden contacts
+  const visibleContacts = useMemo(() => {
     return Object.fromEntries(
-      Object.entries(neighbors).filter(([hash]) => !hiddenNeighbors.has(hash))
+      Object.entries(contacts).filter(([hash]) => !hiddenContacts.has(hash))
     );
-  }, [neighbors, hiddenNeighbors]);
+  }, [contacts, hiddenContacts]);
   
-  const neighborEntries = Object.entries(visibleNeighbors);
+  const contactEntries = Object.entries(visibleContacts);
   
   // Get local node info from config
   const localNode = stats?.config?.repeater ? {
@@ -45,8 +45,8 @@ export default function Neighbors() {
   // Get local hash for zero-hop detection
   const localHash = stats?.local_hash;
   
-  // Count neighbors with location data
-  const neighborsWithLocation = neighborEntries.filter(
+  // Count contacts with location data
+  const contactsWithLocation = contactEntries.filter(
     ([, n]) => n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0
   ).length;
 
@@ -55,15 +55,15 @@ export default function Neighbors() {
       {/* Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
         <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Map className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          Map
+          <Users className="w-6 h-6 text-accent-primary flex-shrink-0" />
+          Contacts
         </h1>
         <div className="flex items-baseline gap-3 sm:gap-4">
-          <span className="roster-title tabular-nums">{neighborEntries.length} node{neighborEntries.length !== 1 ? 's' : ''}</span>
-          {neighborsWithLocation > 0 && (
+          <span className="roster-title tabular-nums">{contactEntries.length} node{contactEntries.length !== 1 ? 's' : ''}</span>
+          {contactsWithLocation > 0 && (
             <span className="roster-title flex items-baseline gap-1.5 tabular-nums">
               <MapPin className="w-3.5 h-3.5 relative top-[2px]" />
-              {neighborsWithLocation} with location
+              {contactsWithLocation} with location
             </span>
           )}
         </div>
@@ -71,16 +71,16 @@ export default function Neighbors() {
       
       {/* Map */}
       <div className="relative">
-        <NeighborMapWrapper 
-          neighbors={visibleNeighbors} 
+        <ContactsMapWrapper 
+          neighbors={visibleContacts} 
           localNode={localNode}
           localHash={localHash}
           packets={packets}
-          onRemoveNode={hideNeighbor}
+          onRemoveNode={hideContact}
         />
       </div>
 
-      {/* Neighbors List */}
+      {/* Contacts List */}
       <div className="chart-container">
         <div className="chart-header">
           <div className="chart-title">
@@ -88,16 +88,16 @@ export default function Neighbors() {
             Discovered Nodes
           </div>
           <span className="type-data-xs text-text-muted tabular-nums">
-            {neighborEntries.length} total
+            {contactEntries.length} total
           </span>
         </div>
         
-        {neighborEntries.length > 0 ? (
+        {contactEntries.length > 0 ? (
           <div className="roster-list">
-            {neighborEntries.map(([hash, neighbor], index) => {
-              const hasLocation = neighbor.latitude && neighbor.longitude && 
-                                  neighbor.latitude !== 0 && neighbor.longitude !== 0;
-              const displayName = neighbor.node_name || neighbor.name || 'Unknown';
+            {contactEntries.map(([hash, contact], index) => {
+              const hasLocation = contact.latitude && contact.longitude && 
+                                  contact.latitude !== 0 && contact.longitude !== 0;
+              const displayName = contact.node_name || contact.name || 'Unknown';
               
               return (
                 <div key={hash}>
@@ -105,20 +105,20 @@ export default function Neighbors() {
                     {/* Icon with signal indicator */}
                     <div className="relative">
                       <div className="roster-icon">
-                        {neighbor.is_repeater ? (
+                        {contact.is_repeater ? (
                           <Repeat className="w-5 h-5 text-accent-primary" />
                         ) : (
                           <Radio className="w-5 h-5 text-text-muted" />
                         )}
                       </div>
-                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(neighbor.snr)} border-2 border-bg-surface`} />
+                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(contact.snr)} border-2 border-bg-surface`} />
                     </div>
                     
                     {/* Main content */}
                     <div className="roster-content">
                       <div className="flex items-center gap-2">
                         <span className="roster-title">{displayName}</span>
-                        {neighbor.is_repeater && (
+                        {contact.is_repeater && (
                           <span className="pill-tag">RPT</span>
                         )}
                       </div>
@@ -127,15 +127,15 @@ export default function Neighbors() {
                     
                     {/* Metrics row */}
                     <div className="roster-metrics">
-                      {neighbor.rssi !== undefined && (
+                      {contact.rssi !== undefined && (
                         <div className="flex items-center gap-1.5">
                           <Signal className="w-3.5 h-3.5" />
-                          <span className="type-data-xs tabular-nums">{neighbor.rssi}</span>
+                          <span className="type-data-xs tabular-nums">{contact.rssi}</span>
                         </div>
                       )}
-                      {neighbor.snr !== undefined && (
+                      {contact.snr !== undefined && (
                         <div className="flex items-center gap-1.5">
-                          <span className="type-data-xs tabular-nums">{neighbor.snr.toFixed(1)} dB</span>
+                          <span className="type-data-xs tabular-nums">{contact.snr.toFixed(1)} dB</span>
                         </div>
                       )}
                       {hasLocation && (
@@ -145,7 +145,7 @@ export default function Neighbors() {
                     
                     {/* Last seen */}
                     <div className="roster-metric">
-                      {neighbor.last_seen ? formatRelativeTime(neighbor.last_seen) : '—'}
+                      {contact.last_seen ? formatRelativeTime(contact.last_seen) : '—'}
                     </div>
                     
                     {/* Remove button */}
@@ -159,7 +159,7 @@ export default function Neighbors() {
                   </div>
                   
                   {/* Separator between rows */}
-                  {index < neighborEntries.length - 1 && (
+                  {index < contactEntries.length - 1 && (
                     <div className="roster-separator" />
                   )}
                 </div>
@@ -169,9 +169,9 @@ export default function Neighbors() {
         ) : (
           <div className="roster-empty">
             <Users className="roster-empty-icon" />
-            <div className="roster-empty-title">No Neighbors Discovered</div>
+            <div className="roster-empty-title">No Contacts Discovered</div>
             <div className="roster-empty-text">
-              Neighbors will appear here as they advertise on the mesh network.
+              Contacts will appear here as they advertise on the mesh network.
             </div>
           </div>
         )}
@@ -180,14 +180,14 @@ export default function Neighbors() {
       {/* Confirmation Modal */}
       <ConfirmModal
         isOpen={!!pendingRemove}
-        title="Remove Node"
-        message={`Are you sure you would like to remove ${pendingRemove?.name || 'this node'}?`}
+        title="Remove Contact"
+        message={`Are you sure you would like to remove ${pendingRemove?.name || 'this contact'}?`}
         confirmLabel="Remove"
         cancelLabel="Cancel"
         variant="danger"
         onConfirm={() => {
           if (pendingRemove) {
-            hideNeighbor(pendingRemove.hash);
+            hideContact(pendingRemove.hash);
           }
           setPendingRemove(null);
         }}
