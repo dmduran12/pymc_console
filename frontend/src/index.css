@@ -189,6 +189,14 @@
   --color-accent-danger: var(--accent-danger);
   --color-accent-success: var(--accent-success);
   
+  /* Signal quality colors (for Tailwind classes like text-signal-poor) */
+  --color-signal-excellent: var(--signal-excellent);
+  --color-signal-good: var(--signal-good);
+  --color-signal-fair: var(--signal-fair);
+  --color-signal-poor: var(--signal-poor);
+  --color-signal-critical: var(--signal-critical);
+  --color-signal-unknown: var(--signal-unknown);
+  
   /* Legacy compatibility */
   --color-background: var(--bg-body);
   --color-foreground: var(--text-secondary);

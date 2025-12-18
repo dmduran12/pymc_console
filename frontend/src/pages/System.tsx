@@ -94,9 +94,9 @@ const TemperatureGauge = memo(function TemperatureGauge({
     };
     if (value < TEMP_THRESHOLDS.hot) return { 
       text: 'Hot', 
-      bg: 'bg-orange-500/20', 
-      text_color: 'text-orange-400',
-      border: 'border-orange-500/30'
+      bg: 'bg-signal-poor/20', 
+      text_color: 'text-signal-poor',
+      border: 'border-signal-poor/30'
     };
     return { 
       text: 'DANGER', 
