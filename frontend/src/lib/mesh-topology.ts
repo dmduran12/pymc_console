@@ -377,14 +377,33 @@ export function matchPrefix(
     }
   }
   
-  // If this is the last hop and local matches, strongly prefer local
-  // (packets we receive end with our prefix)
-  if (isLastHop && localMatches && localHash) {
+  // IMPORTANT: For last hop detection, we need to be careful about prefix collisions.
+  // If local matches AND a neighbor also matches, we should NOT auto-prefer local
+  // because the last hop in a path is our direct neighbor who forwarded to us.
+  // Local can't forward packets to itself!
+  //
+  // Only return local as bestMatch if it's the ONLY match (no collision).
+  if (isLastHop && localMatches && localHash && matches.length === 1) {
     return {
       matches,
-      probability: 1, // High confidence - last hop is us
+      probability: 1, // High confidence - only local matches, this is us receiving
       bestMatch: localHash,
     };
+  }
+  
+  // If last hop with collision: prefer the neighbor (non-local match)
+  // This is the node that forwarded the packet to us
+  if (isLastHop && localMatches && matches.length > 1) {
+    const nonLocalMatches = matches.filter(h => h !== localHash);
+    if (nonLocalMatches.length === 1) {
+      // Only one neighbor matches - that's our direct forwarder
+      return {
+        matches,
+        probability: 1, // High confidence - this neighbor forwarded to us
+        bestMatch: nonLocalMatches[0],
+      };
+    }
+    // Multiple neighbors match - use affinity to pick best one (handled below)
   }
   
   // Calculate base probability
@@ -634,8 +653,15 @@ export function buildMeshTopology(
       
       if (lastHopResolved.hash && lastHopResolved.hash !== localHash) {
         // This edge touches local directly - hop distance = 0
-        // Certainty depends on whether last hop uniquely resolves
-        const isCertain = lastHopMatches.matches.length === 1;
+        //
+        // CERTAINTY LOGIC for last hop:
+        // - If only 1 match: 100% certain
+        // - If collision with local (local + 1 neighbor match): still certain!
+        //   Because we KNOW the last hop isn't us (we received the packet),
+        //   so it must be the neighbor.
+        // - If collision with multiple neighbors: uncertain (need affinity to pick)
+        const nonLocalMatches = lastHopMatches.matches.filter(h => h !== localHash);
+        const isCertain = lastHopMatches.matches.length === 1 || nonLocalMatches.length === 1;
         const confidence = isCertain ? 1 : lastHopResolved.confidence;
         
         addEdgeObservation(lastHopResolved.hash, localHash, confidence, isCertain, 0);
