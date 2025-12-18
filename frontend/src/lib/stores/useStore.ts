@@ -13,7 +13,7 @@ export interface ResourceDataPoint {
 // localStorage key for resource history persistence
 const RESOURCE_HISTORY_KEY = 'pymc-resource-history';
 const RESOURCE_LAST_FETCH_KEY = 'pymc-resource-last-fetch';
-const HIDDEN_NEIGHBORS_KEY = 'pymc-hidden-neighbors';
+const HIDDEN_CONTACTS_KEY = 'pymc-hidden-contacts';
 
 /** Load resource history from localStorage */
 function loadResourceHistory(): ResourceDataPoint[] {
@@ -29,11 +29,11 @@ function loadResourceHistory(): ResourceDataPoint[] {
   return [];
 }
 
-/** Load hidden neighbors set from localStorage */
-function loadHiddenNeighbors(): Set<string> {
+/** Load hidden contacts set from localStorage */
+function loadHiddenContacts(): Set<string> {
   if (typeof window === 'undefined') return new Set();
   try {
-    const stored = localStorage.getItem(HIDDEN_NEIGHBORS_KEY);
+    const stored = localStorage.getItem(HIDDEN_CONTACTS_KEY);
     if (stored) {
       return new Set(JSON.parse(stored) as string[]);
     }
@@ -43,11 +43,11 @@ function loadHiddenNeighbors(): Set<string> {
   return new Set();
 }
 
-/** Save hidden neighbors set to localStorage */
-function saveHiddenNeighbors(hidden: Set<string>): void {
+/** Save hidden contacts set to localStorage */
+function saveHiddenContacts(hidden: Set<string>): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(HIDDEN_NEIGHBORS_KEY, JSON.stringify([...hidden]));
+    localStorage.setItem(HIDDEN_CONTACTS_KEY, JSON.stringify([...hidden]));
   } catch {
     // Ignore localStorage errors
   }
@@ -105,8 +105,8 @@ interface StoreState {
   resourceHistory: ResourceDataPoint[];
   lastResourceFetch: number; // Prevent duplicate entries
 
-  // Hidden neighbors (user-removed nodes, persisted to localStorage)
-  hiddenNeighbors: Set<string>;
+  // Hidden contacts (user-removed nodes, persisted to localStorage)
+  hiddenContacts: Set<string>;
 
   // Initialization flag
   initialized: boolean;
@@ -124,7 +124,7 @@ interface StoreState {
   triggerFlashReceived: () => void;
   triggerFlashAdvert: () => void;
   addResourceDataPoint: (cpu: number, memory: number, maxSlots: number) => void;
-  hideNeighbor: (hash: string) => void;
+  hideContact: (hash: string) => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -148,7 +148,7 @@ const store = create<StoreState>((set, get) => ({
 
   resourceHistory: loadResourceHistory(),
   lastResourceFetch: loadLastResourceFetch(),
-  hiddenNeighbors: loadHiddenNeighbors(),
+  hiddenContacts: loadHiddenContacts(),
   initialized: false,
 
   // Actions
@@ -208,7 +208,7 @@ const store = create<StoreState>((set, get) => ({
       case '/settings':
         api.getRadioPresets().catch(() => {});
         break;
-      // Dashboard, Neighbors, Packets all use stats which is already loaded
+      // Dashboard, Contacts, Packets all use stats which is already loaded
     }
   },
 
@@ -367,12 +367,12 @@ const store = create<StoreState>((set, get) => ({
     saveResourceHistory(trimmed, now);
   },
 
-  hideNeighbor: (hash: string) => {
-    const { hiddenNeighbors } = get();
-    const updated = new Set(hiddenNeighbors);
+  hideContact: (hash: string) => {
+    const { hiddenContacts } = get();
+    const updated = new Set(hiddenContacts);
     updated.add(hash);
-    set({ hiddenNeighbors: updated });
-    saveHiddenNeighbors(updated);
+    set({ hiddenContacts: updated });
+    saveHiddenContacts(updated);
   },
 }));
 
@@ -405,5 +405,5 @@ export const useTriggerFlashReceived = () => store((s) => s.triggerFlashReceived
 export const useTriggerFlashAdvert = () => store((s) => s.triggerFlashAdvert);
 export const useResourceHistory = () => store((s) => s.resourceHistory);
 export const useAddResourceDataPoint = () => store((s) => s.addResourceDataPoint);
-export const useHiddenNeighbors = () => store((s) => s.hiddenNeighbors);
-export const useHideNeighbor = () => store((s) => s.hideNeighbor);
+export const useHiddenContacts = () => store((s) => s.hiddenContacts);
+export const useHideContact = () => store((s) => s.hideContact);

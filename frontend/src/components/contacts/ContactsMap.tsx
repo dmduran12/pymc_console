@@ -37,7 +37,7 @@ interface LocalNode {
   name: string;
 }
 
-interface NeighborMapProps {
+interface ContactsMapProps {
   neighbors: Record<string, NeighborInfo>;
   localNode?: LocalNode;
   localHash?: string;  // Local node's hash for zero-hop detection
@@ -169,7 +169,7 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
-export default function NeighborMap({ neighbors, localNode, localHash, packets = [], onRemoveNode }: NeighborMapProps) {
+export default function ContactsMap({ neighbors, localNode, localHash, packets = [], onRemoveNode }: ContactsMapProps) {
   // Track hover state per marker
   const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
   

@@ -8,7 +8,7 @@ import { useInitializeApp } from '@/lib/stores/useStore';
 // Pages
 import Dashboard from '@/pages/Dashboard';
 import Packets from '@/pages/Packets';
-import Neighbors from '@/pages/Neighbors';
+import Contacts from '@/pages/Contacts';
 import Statistics from '@/pages/Statistics';
 import System from '@/pages/System';
 import Logs from '@/pages/Logs';
@@ -74,7 +74,7 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/packets" element={<Packets />} />
-                  <Route path="/neighbors" element={<Neighbors />} />
+                  <Route path="/contacts" element={<Contacts />} />
                   <Route path="/statistics" element={<Statistics />} />
                   <Route path="/system" element={<System />} />
                   <Route path="/logs" element={<Logs />} />
