@@ -48,9 +48,18 @@ export interface ResolvedPath {
 }
 
 /**
- * Get the 2-character prefix from a hash.
+ * Get the 2-character prefix from a local hash.
+ * Local hash format is "0xNN" - we need the NN part.
  */
 function getLocalPrefix(hash: string): string {
+  // Handle "0x" prefix - extract the hex part after it
+  if (hash.startsWith('0x') || hash.startsWith('0X')) {
+    return hash.slice(2).toUpperCase();
+  }
+  // Fallback: take last 2 chars if it's a short hash, or first 2 if longer
+  if (hash.length <= 4) {
+    return hash.slice(-2).toUpperCase();
+  }
   return hash.slice(0, 2).toUpperCase();
 }
 
@@ -89,9 +98,9 @@ function matchPrefixToNodes(
   // Check if prefix matches local node
   const prefixMatchesLocal = localPrefix === normalizedPrefix;
   
-  // LAST HOP: Verify it matches local prefix
+  // LAST HOP: Verify prefix matches our local hash
+  // Local hash is "0xNN" format, path prefix is "NN" format
   if (hopType === 'last' && prefixMatchesLocal && localHasCoords && localNode && localHash) {
-    // Prefix from packet matches our local hash - confirmed as us
     candidates.push({
       hash: localHash,
       name: localNode.name || 'Local Node',
@@ -100,7 +109,7 @@ function matchPrefixToNodes(
       probability: 1, // 100% confidence - verified match
       isLocal: true,
     });
-    return candidates; // Verified - no other candidates needed
+    return candidates; // Verified as us
   }
   
   // For non-last hops, check if prefix matches local node

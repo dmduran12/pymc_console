@@ -131,8 +131,11 @@ export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
     resolvedPath.hops.forEach((hop, hopIndex) => {
       if (hop.candidates.length === 0) return;
       
-      // For path line, use the most likely candidate (first one)
-      const primaryCandidate = hop.candidates[0];
+      // Sort candidates by probability (highest first)
+      const sortedCandidates = [...hop.candidates].sort((a, b) => b.probability - a.probability);
+      
+      // For path line, use the most likely candidate
+      const primaryCandidate = sortedCandidates[0];
       pathLine.push([primaryCandidate.latitude, primaryCandidate.longitude]);
       
       // Add markers for all candidates (with opacity based on probability)
