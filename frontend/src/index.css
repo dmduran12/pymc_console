@@ -217,8 +217,6 @@
 
 /* Theme transition - smooth color changes */
 html {
-  /* Fallback background when image not loaded */
-  background: var(--bg-body);
   transition: 
     --accent-primary var(--theme-transition),
     --accent-secondary var(--theme-transition),
@@ -394,7 +392,7 @@ html {
    Setting transition-duration: 0s on :hover makes the "in" instant.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* Apply to interactive elements - buttons, links, cards, rows */
+/* Apply to interactive elements - buttons, links, cards */
 a,
 button,
 [role="button"],
@@ -406,9 +404,7 @@ button,
 .pill-subtle,
 .toggle-group-item,
 .roster-row,
-.nav-item,
-tbody tr,
-.packet-row {
+.nav-item {
   transition: all 0.15s ease-out;
 }
 
@@ -423,9 +419,7 @@ button:hover,
 .pill-subtle:hover,
 .toggle-group-item:hover,
 .roster-row:hover,
-.nav-item:hover,
-tbody tr:hover,
-.packet-row:hover {
+.nav-item:hover {
   transition-duration: 0s;
 }
 
@@ -446,8 +440,7 @@ a, button {
 }
 
 body {
-  /* Transparent to allow BackgroundProvider (-z-10) to show through */
-  background: transparent;
+  background: var(--bg-body);
   color: var(--text-secondary);
   font-family: var(--font-display), system-ui, -apple-system, sans-serif;
   font-weight: var(--font-normal);
