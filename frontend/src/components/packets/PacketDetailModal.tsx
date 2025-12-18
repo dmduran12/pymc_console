@@ -1,6 +1,6 @@
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Copy, Check, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react';
+import { X, Copy, Check, ChevronDown, ChevronRight, ArrowRight, Map } from 'lucide-react';
 import clsx from 'clsx';
 import type { Packet } from '@/types/api';
 import { formatTimestamp } from '@/lib/format';
@@ -13,6 +13,8 @@ import {
 } from '@/lib/packet-utils';
 import { SignalIndicator, getSignalQualityLabel } from './SignalIndicator';
 import { PacketDirection, getPacketStatusText, getPacketStatusColor } from './PacketDirection';
+import { PathMapVisualization } from './PathMapVisualization';
+import { useStats } from '@/lib/stores/useStore';
 
 interface PacketDetailModalProps {
   packet: Packet;
@@ -67,7 +69,11 @@ function tryDecodePayload(payload: string | undefined): { text: string | null; i
  */
 function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps) {
   const [showRawHex, setShowRawHex] = useState(false);
+  const [showPathMap, setShowPathMap] = useState(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  
+  // Get neighbors and local node info from store for path visualization
+  const stats = useStats();
 
   const payloadTypeName =
     packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
@@ -79,6 +85,19 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
   const originalPath = parsePath(packet.original_path);
   const forwardedPath = parsePath(packet.forwarded_path);
   const hasPath = originalPath.length > 0 || forwardedPath.length > 0;
+  const activePath = forwardedPath.length > 0 ? forwardedPath : originalPath;
+  
+  // Get local node info for path map
+  const localNode = useMemo(() => {
+    if (!stats?.config?.repeater) return undefined;
+    return {
+      latitude: stats.config.repeater.latitude,
+      longitude: stats.config.repeater.longitude,
+      name: stats.config.node_name || 'Local Node',
+    };
+  }, [stats]);
+  
+  const neighbors = stats?.neighbors ?? {};
   
   const payloadDecoded = tryDecodePayload(packet.payload);
   const hasPayload = packet.payload && packet.payload.length > 0;
@@ -196,6 +215,36 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
                 originalPath={originalPath}
                 forwardedPath={forwardedPath}
               />
+            </div>
+          )}
+          
+          {/* Path Map visualization (collapsible) */}
+          {hasPath && activePath.length > 0 && (
+            <div className="glass-card bg-bg-elevated/50 overflow-hidden">
+              <button
+                onClick={() => setShowPathMap(!showPathMap)}
+                className="w-full p-3 flex items-center justify-between text-left hover:bg-bg-subtle transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Map className="w-4 h-4 text-accent-primary" />
+                  <span className="text-xs text-text-secondary font-medium">Path Map</span>
+                </div>
+                {showPathMap ? (
+                  <ChevronDown className="w-4 h-4 text-text-muted" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-text-muted" />
+                )}
+              </button>
+              {showPathMap && (
+                <div className="px-3 pb-3">
+                  <PathMapVisualization
+                    path={activePath}
+                    neighbors={neighbors}
+                    localNode={localNode}
+                    localHash={stats?.local_hash}
+                  />
+                </div>
+              )}
             </div>
           )}
 

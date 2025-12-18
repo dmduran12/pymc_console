@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { buildMeshTopology, getEdgeWeight, getEdgeColor, TopologyEdge } from '@/lib/mesh-topology';
 
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
@@ -168,7 +169,7 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
-export default function NeighborMap({ neighbors, localNode, localHash: _localHash, packets = [], onRemoveNode }: NeighborMapProps) {
+export default function NeighborMap({ neighbors, localNode, localHash, packets = [], onRemoveNode }: NeighborMapProps) {
   // Track hover state per marker
   const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
   
@@ -194,8 +195,12 @@ export default function NeighborMap({ neighbors, localNode, localHash: _localHas
     const coords = new Map<string, [number, number]>();
     
     if (localNode && localNode.latitude && localNode.longitude) {
-      // Local node uses public key hash from stats - we'll try matching with neighbor hashes
+      // Store local node by 'local' key for legacy code
       coords.set('local', [localNode.latitude, localNode.longitude]);
+      // Also store by actual hash for topology matching
+      if (localHash) {
+        coords.set(localHash, [localNode.latitude, localNode.longitude]);
+      }
     }
     
     neighborsWithLocation.forEach(([hash, neighbor]) => {
@@ -205,26 +210,57 @@ export default function NeighborMap({ neighbors, localNode, localHash: _localHas
     });
     
     return coords;
-  }, [neighborsWithLocation, localNode]);
+  }, [neighborsWithLocation, localNode, localHash]);
   
-  // Infer mesh connections from packet paths
+  // Build mesh topology with confidence-weighted edges (80% threshold)
+  const meshTopology = useMemo(() => {
+    return buildMeshTopology(packets, neighbors, localHash, 0.8);
+  }, [packets, neighbors, localHash]);
+  
+  // Generate polylines for high-confidence topology connections
+  const topologyPolylines = useMemo(() => {
+    const lines: Array<{
+      from: [number, number];
+      to: [number, number];
+      edge: TopologyEdge;
+    }> = [];
+    
+    for (const edge of meshTopology.edges) {
+      const fromCoords = nodeCoordinates.get(edge.fromHash);
+      const toCoords = nodeCoordinates.get(edge.toHash);
+      
+      // Only draw if both nodes have coordinates
+      if (!fromCoords || !toCoords) continue;
+      
+      lines.push({ from: fromCoords, to: toCoords, edge });
+    }
+    
+    return lines;
+  }, [meshTopology, nodeCoordinates]);
+  
+  // Legacy mesh connections for fallback (low-confidence dotted lines)
   const meshConnections = useMemo(() => {
     return inferMeshConnections(packets);
   }, [packets]);
   
-  // Generate polylines for mesh connections (only where we have coordinates for both endpoints)
-  const meshPolylines = useMemo(() => {
+  // Generate polylines for low-confidence mesh connections (not in topology)
+  const fallbackPolylines = useMemo(() => {
     const lines: Array<{ from: [number, number]; to: [number, number]; key: string }> = [];
     const drawnConnections = new Set<string>();
+    
+    // Skip connections already in topology
+    const topologyKeys = new Set(meshTopology.edges.map(e => e.key));
     
     meshConnections.forEach((connectedNodes, nodeHash) => {
       const fromCoords = nodeCoordinates.get(nodeHash);
       if (!fromCoords) return;
       
       connectedNodes.forEach(connectedHash => {
-        // Create consistent key to avoid duplicate lines
         const connectionKey = [nodeHash, connectedHash].sort().join('-');
+        
+        // Skip if already drawn or in high-confidence topology
         if (drawnConnections.has(connectionKey)) return;
+        if (topologyKeys.has(connectionKey)) return;
         drawnConnections.add(connectionKey);
         
         const toCoords = nodeCoordinates.get(connectedHash);
@@ -235,7 +271,7 @@ export default function NeighborMap({ neighbors, localNode, localHash: _localHas
     });
     
     return lines;
-  }, [meshConnections, nodeCoordinates]);
+  }, [meshConnections, meshTopology, nodeCoordinates]);
   
   // Generate solid lines from local node to zero-hop neighbors
   const zeroHopLines = useMemo(() => {
@@ -380,15 +416,37 @@ export default function NeighborMap({ neighbors, localNode, localHash: _localHas
           />
         ))}
         
-        {/* Draw inferred mesh connections as dotted lines */}
-        {meshPolylines.map(({ from, to, key }) => (
+        {/* Draw high-confidence topology connections with strength-based styling */}
+        {topologyPolylines.map(({ from, to, edge }) => (
+          <Polyline
+            key={`topology-${edge.key}`}
+            positions={[from, to]}
+            color={getEdgeColor(edge.strength)}
+            weight={getEdgeWeight(edge.strength)}
+            opacity={1}
+          >
+            <Tooltip
+              permanent={false}
+              direction="center"
+              className="topology-edge-tooltip"
+            >
+              <div className="text-xs">
+                <div className="font-medium">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
+                <div className="text-text-muted">Confidence: {(edge.avgConfidence * 100).toFixed(0)}%</div>
+              </div>
+            </Tooltip>
+          </Polyline>
+        ))}
+        
+        {/* Draw low-confidence connections as faint dotted lines */}
+        {fallbackPolylines.map(({ from, to, key }) => (
           <Polyline
             key={`mesh-${key}`}
             positions={[from, to]}
-            color="rgba(255, 255, 255, 0.15)"
-            weight={1.5}
+            color="rgba(255, 255, 255, 0.1)"
+            weight={1}
             opacity={1}
-            dashArray="4, 6"
+            dashArray="3, 8"
           />
         ))}
         
@@ -569,6 +627,26 @@ export default function NeighborMap({ neighbors, localNode, localHash: _localHas
               <span className="text-text-muted">Local</span>
             </div>
           </div>
+          {/* Topology legend */}
+          {topologyPolylines.length > 0 && (
+            <>
+              <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5">Links</div>
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(74, 222, 128, 0.8)' }}></div>
+                  <span className="text-text-muted">Strong</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(34, 211, 238, 0.6)' }}></div>
+                  <span className="text-text-muted">Medium</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(255, 255, 255, 0.35)' }}></div>
+                  <span className="text-text-muted">Weak</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
