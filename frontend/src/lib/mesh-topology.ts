@@ -39,7 +39,10 @@ export interface TopologyEdge {
 }
 
 /** Minimum validations required for an edge to be rendered */
-export const MIN_EDGE_VALIDATIONS = 3;
+export const MIN_EDGE_VALIDATIONS = 5;
+
+/** Maximum edges to render (performance cap) */
+export const MAX_RENDERED_EDGES = 100;
 
 /** Result of topology analysis */
 export interface MeshTopology {
@@ -788,13 +791,16 @@ export function buildMeshTopology(
   edges.sort((a, b) => b.certainCount - a.certainCount);
   validatedEdges.sort((a, b) => b.certainCount - a.certainCount);
   
+  // Cap rendered edges for performance (keep top N by validation count)
+  const cappedEdges = validatedEdges.slice(0, MAX_RENDERED_EDGES);
+  
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
   return { 
     edges, 
-    validatedEdges,
-    certainEdges: validatedEdges, // Legacy alias
+    validatedEdges: cappedEdges,
+    certainEdges: cappedEdges, // Legacy alias
     uncertainEdges: [], // No longer rendered
     edgeMap, 
     maxPacketCount, 

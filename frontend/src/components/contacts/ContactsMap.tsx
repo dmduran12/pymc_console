@@ -830,7 +830,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             <>
               <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1 flex items-center gap-1">
                 Topology
-                <LegendTooltip text="Only showing connections validated 3+ times. Line thickness = validation count." />
+                <LegendTooltip text="Top 100 links with 5+ validations. Line thickness = validation count." />
               </div>
               <div className="flex flex-col gap-0.5 text-text-muted">
                 <div className="flex justify-between tabular-nums">
