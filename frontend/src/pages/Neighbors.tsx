@@ -4,22 +4,9 @@ import { Map, Signal, Radio, MapPin, Repeat, Users, X } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import NeighborMapWrapper from '@/components/neighbors/NeighborMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
-import type { Packet } from '@/types/api';
-
-// Calculate mean SNR from packets for a given source hash (for zero-hop nodes)
-function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefined {
-  const nodePackets = packets.filter(p => p.src_hash === srcHash && p.snr !== undefined);
-  if (nodePackets.length === 0) return undefined;
-  
-  const sum = nodePackets.reduce((acc, p) => acc + (p.snr ?? 0), 0);
-  return sum / nodePackets.length;
-}
 
 // Get signal color for card badges based on SNR
-function getSignalColor(snr?: number, isMultiHop: boolean = false): string {
-  // Multi-hop nodes get deep royal blue
-  if (isMultiHop) return 'bg-[#1E3A8A]';
-  
+function getSignalColor(snr?: number): string {
   if (snr === undefined) return 'bg-[var(--signal-unknown)]';
   if (snr >= 5) return 'bg-[var(--signal-excellent)]';
   if (snr >= 0) return 'bg-[var(--signal-good)]';
@@ -103,11 +90,6 @@ export default function Neighbors() {
               const hasLocation = neighbor.latitude && neighbor.longitude && 
                                   neighbor.latitude !== 0 && neighbor.longitude !== 0;
               const displayName = neighbor.node_name || neighbor.name || 'Unknown';
-              const isZeroHop = neighbor.zero_hop === true;
-              
-              // For zero-hop nodes, use mean SNR from packets; for multi-hop, show special color
-              const meanSnr = isZeroHop ? calculateMeanSnr(packets, hash) : undefined;
-              const displaySnr = isZeroHop ? (meanSnr ?? neighbor.snr) : neighbor.snr;
               
               return (
                 <div key={hash}>
@@ -121,7 +103,7 @@ export default function Neighbors() {
                           <Radio className="w-5 h-5 text-text-muted" />
                         )}
                       </div>
-                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(displaySnr, !isZeroHop)} border-2 border-bg-surface`} />
+                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(neighbor.snr)} border-2 border-bg-surface`} />
                     </div>
                     
                     {/* Main content */}
@@ -137,22 +119,16 @@ export default function Neighbors() {
                     
                     {/* Metrics row */}
                     <div className="roster-metrics">
-                      {isZeroHop ? (
-                        <>
-                          {neighbor.rssi !== undefined && (
-                            <div className="flex items-center gap-1.5">
-                              <Signal className="w-3.5 h-3.5" />
-                              <span className="type-data-xs tabular-nums">{neighbor.rssi}</span>
-                            </div>
-                          )}
-                          {displaySnr !== undefined && (
-                            <div className="flex items-center gap-1.5">
-                              <span className="type-data-xs tabular-nums">{displaySnr.toFixed(1)} dB</span>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="type-data-xs text-text-muted">Multi-hop</span>
+                      {neighbor.rssi !== undefined && (
+                        <div className="flex items-center gap-1.5">
+                          <Signal className="w-3.5 h-3.5" />
+                          <span className="type-data-xs tabular-nums">{neighbor.rssi}</span>
+                        </div>
+                      )}
+                      {neighbor.snr !== undefined && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="type-data-xs tabular-nums">{neighbor.snr.toFixed(1)} dB</span>
+                        </div>
                       )}
                       {hasLocation && (
                         <MapPin className="w-3.5 h-3.5 text-accent-tertiary" />
