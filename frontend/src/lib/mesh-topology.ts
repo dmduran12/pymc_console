@@ -929,6 +929,7 @@ export function getUncertainEdgeColor(confidence: number): string {
 /**
  * Get color for a CERTAIN edge based on link quality (validation frequency).
  * Green = strong/frequent, Yellow = moderate, Orange/Red = weak/infrequent.
+ * All colors are fully opaque.
  * 
  * @param certainCount - Number of certain observations
  * @param maxCertainCount - Maximum certain count for normalization
@@ -938,19 +939,19 @@ export function getLinkQualityColor(certainCount: number, maxCertainCount: numbe
   
   if (normalized >= 0.7) {
     // Strong link - bright green
-    return 'rgba(74, 222, 128, 0.9)'; // green-400
+    return 'rgb(74, 222, 128)'; // green-400
   } else if (normalized >= 0.4) {
     // Moderate link - lime/yellow-green
-    return 'rgba(163, 230, 53, 0.8)'; // lime-400
+    return 'rgb(163, 230, 53)'; // lime-400
   } else if (normalized >= 0.2) {
     // Weaker link - yellow
-    return 'rgba(250, 204, 21, 0.7)'; // yellow-400
+    return 'rgb(250, 204, 21)'; // yellow-400
   } else if (normalized >= 0.1) {
     // Weak link - orange
-    return 'rgba(251, 146, 60, 0.6)'; // orange-400
+    return 'rgb(251, 146, 60)'; // orange-400
   } else {
     // Very weak link - red/coral
-    return 'rgba(248, 113, 113, 0.5)'; // red-400
+    return 'rgb(248, 113, 113)'; // red-400
   }
 }
 
