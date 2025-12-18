@@ -11,14 +11,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     
-    <!-- Theme initialization - prevent flash -->
+    <!-- Theme initialization - prevent flash of unstyled content -->
     <script>
       (function() {
         try {
-          var stored = localStorage.getItem('pymc-background');
-          var themeMap = { amber: 'amber', grey: 'grey', black: 'black', flora: 'flora' };
-          if (stored && themeMap[stored]) {
-            document.documentElement.setAttribute('data-theme', themeMap[stored]);
+          // Try new key first, fall back to legacy key for migration
+          var scheme = localStorage.getItem('pymc-color-scheme');
+          if (!scheme) {
+            // Migration: read legacy key and map to color scheme
+            var legacy = localStorage.getItem('pymc-background');
+            if (legacy && legacy !== 'default') {
+              scheme = legacy; // Legacy stored preset ID which matches scheme ID
+            }
+          }
+          // Apply theme if not default (default uses :root styles)
+          if (scheme && scheme !== 'default') {
+            document.documentElement.setAttribute('data-theme', scheme);
           }
         } catch (e) {}
       })();

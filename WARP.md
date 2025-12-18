@@ -146,7 +146,8 @@ src/
 │   ├── format.ts          # Formatting utilities
 │   ├── packet-utils.ts    # Packet processing helpers
 │   ├── hooks/             # usePolling, useDebounce, useThemeColors
-│   └── stores/useStore.ts # Zustand store (stats, packets, logs, UI)
+│   ├── stores/useStore.ts # Zustand store (stats, packets, logs, UI)
+│   └── theme/             # Theme system (ThemeContext, config, hooks)
 └── types/api.ts           # TypeScript interfaces for API responses
 ```
 
@@ -167,6 +168,14 @@ const { stats } = useStore();       // Avoid
 ```
 
 **Polling**: Use `usePolling` hook from `src/lib/hooks/` for live data updates.
+
+**Theme System** (`src/lib/theme/`): Centralized theme management via React Context:
+- `ThemeContext.tsx` - Single source of truth for color scheme, background image, brightness
+- `theme-config.ts` - Theme definitions (color schemes, background images, presets)
+- `use-theme.ts` - Consumer hook with typed API
+- Color schemes map to CSS `[data-theme="..."]` selectors in `index.css`
+- Background images and color schemes are decoupled (can be mixed independently)
+- localStorage persistence with automatic migration from legacy keys
 
 ### Backend API
 

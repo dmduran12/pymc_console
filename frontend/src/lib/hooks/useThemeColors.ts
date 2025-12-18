@@ -89,8 +89,8 @@ const DEFAULT_PACKET_COLORS: PacketColors = {
 };
 
 /**
- * Hook to get theme-aware chart colors
- * Re-reads CSS variables when theme changes
+ * Hook to get theme-aware chart colors.
+ * Re-reads CSS variables when data-theme attribute changes.
  */
 export function useChartColors(): ChartColors {
   const [colors, setColors] = useState<ChartColors>(DEFAULT_CHART_COLORS);
@@ -113,16 +113,11 @@ export function useChartColors(): ChartColors {
     // Initial read
     updateColors();
 
-    // Listen for theme changes via custom event
-    const handleThemeChange = () => {
-      // Delay to let CSS variables update after data-theme attribute changes
-      setTimeout(updateColors, 100);
-    };
-
-    // Also observe data-theme attribute changes directly
+    // Observe data-theme attribute changes on document root
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.attributeName === 'data-theme') {
+          // Delay slightly to let CSS variables update
           setTimeout(updateColors, 50);
           break;
         }
@@ -130,11 +125,9 @@ export function useChartColors(): ChartColors {
     });
     
     observer.observe(document.documentElement, { attributes: true });
-    window.addEventListener('background-change', handleThemeChange);
     
     return () => {
       observer.disconnect();
-      window.removeEventListener('background-change', handleThemeChange);
     };
   }, []);
 
@@ -142,7 +135,7 @@ export function useChartColors(): ChartColors {
 }
 
 /**
- * Hook to get theme-aware metric colors
+ * Hook to get theme-aware metric colors.
  */
 export function useMetricColors(): MetricColors {
   const [colors, setColors] = useState<MetricColors>(DEFAULT_METRIC_COLORS);
@@ -159,8 +152,6 @@ export function useMetricColors(): MetricColors {
     };
 
     updateColors();
-
-    const handleThemeChange = () => setTimeout(updateColors, 100);
     
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
@@ -172,11 +163,9 @@ export function useMetricColors(): MetricColors {
     });
     
     observer.observe(document.documentElement, { attributes: true });
-    window.addEventListener('background-change', handleThemeChange);
     
     return () => {
       observer.disconnect();
-      window.removeEventListener('background-change', handleThemeChange);
     };
   }, []);
 
@@ -184,7 +173,7 @@ export function useMetricColors(): MetricColors {
 }
 
 /**
- * Hook to get theme-aware packet type colors
+ * Hook to get theme-aware packet type colors.
  */
 export function usePacketColors(): PacketColors {
   const [colors, setColors] = useState<PacketColors>(DEFAULT_PACKET_COLORS);
@@ -208,8 +197,6 @@ export function usePacketColors(): PacketColors {
     };
 
     updateColors();
-
-    const handleThemeChange = () => setTimeout(updateColors, 100);
     
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
@@ -221,11 +208,9 @@ export function usePacketColors(): PacketColors {
     });
     
     observer.observe(document.documentElement, { attributes: true });
-    window.addEventListener('background-change', handleThemeChange);
     
     return () => {
       observer.disconnect();
-      window.removeEventListener('background-change', handleThemeChange);
     };
   }, []);
 
