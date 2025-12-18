@@ -236,7 +236,7 @@ function formatConfidence(confidence: number): string {
 function getConfidenceColor(confidence: number): string {
   if (confidence >= 1) return 'text-accent-success';      // 100% - green
   if (confidence >= 0.5) return 'text-accent-secondary';  // 50-99% - yellow
-  if (confidence >= 0.25) return 'text-orange-400';       // 25-49% - orange
+  if (confidence >= 0.25) return 'text-signal-poor';      // 25-49% - orange (uses theme var)
   if (confidence > 0) return 'text-accent-danger';        // 1-24% - red
   return 'text-text-muted';                               // 0% - gray
 }
@@ -248,7 +248,7 @@ function getHopBadgeColor(confidence: number, candidateCount: number): string {
   if (candidateCount === 0) return 'text-text-muted';     // Unknown - gray
   if (confidence >= 1) return 'text-accent-success';      // 100% - green
   if (confidence >= 0.5) return 'text-accent-secondary';  // 50-99% - yellow  
-  if (confidence >= 0.25) return 'text-orange-400';       // 25-49% - orange
+  if (confidence >= 0.25) return 'text-signal-poor';      // 25-49% - orange (uses theme var)
   if (confidence > 0) return 'text-accent-danger';        // 1-24% - red
   return 'text-text-muted';                               // fallback - gray
 }
