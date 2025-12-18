@@ -3,6 +3,36 @@ import { NeighborInfo } from '@/types/api';
 import { MapPin, AlertTriangle, HelpCircle } from 'lucide-react';
 import { matchPrefix, prefixMatches } from '@/lib/mesh-topology';
 
+/**
+ * Calculate distance between two coordinates in meters using Haversine formula.
+ */
+function calculateDistance(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number
+): number {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Get proximity score (0-1) based on distance to local node.
+ */
+function getProximityScore(distanceMeters: number): number {
+  if (distanceMeters < 100) return 1.0;
+  if (distanceMeters < 500) return 0.9;
+  if (distanceMeters < 1000) return 0.7;
+  if (distanceMeters < 5000) return 0.5;
+  if (distanceMeters < 10000) return 0.3;
+  return 0.1;
+}
+
 // Lazy load Leaflet map component
 const PathMap = lazy(() => import('./PathMap'));
 
@@ -111,11 +141,35 @@ function matchPrefixToNodes(
   }
   
   // Recalculate probabilities based on candidates with coordinates
+  // Use proximity to local node for scoring when we have multiple matches
   const k = candidates.length;
   if (k === 1) {
     candidates[0].probability = 1;
+  } else if (k > 1 && localHasCoords && localNode) {
+    // Calculate proximity scores for each candidate
+    let totalScore = 0;
+    const scores = candidates.map(c => {
+      if (c.isLocal) return { candidate: c, score: 1.0 }; // Local always highest
+      const dist = calculateDistance(
+        localNode.latitude, localNode.longitude,
+        c.latitude, c.longitude
+      );
+      const score = getProximityScore(dist);
+      totalScore += score;
+      return { candidate: c, score };
+    });
+    
+    // Assign probabilities based on proximity scores
+    if (totalScore > 0) {
+      scores.forEach(({ candidate, score }) => {
+        candidate.probability = Math.min(0.95, score / totalScore);
+      });
+    } else {
+      const prob = 1 / k;
+      candidates.forEach(c => c.probability = prob);
+    }
   } else if (k > 1) {
-    // Boost direct neighbors for better accuracy
+    // No local coords - fall back to direct neighbor boost
     const directNeighbors = candidates.filter(c => c.isDirectNeighbor);
     if (directNeighbors.length === 1) {
       candidates.forEach(c => {

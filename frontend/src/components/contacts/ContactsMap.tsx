@@ -6,7 +6,7 @@ import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { buildMeshTopology, getEdgeWeight, getEdgeColor, TopologyEdge } from '@/lib/mesh-topology';
+import { buildMeshTopology, getEdgeWeight, getEdgeColor, TopologyEdge, getHashPrefix } from '@/lib/mesh-topology';
 
 // Create a matte dot icon with CSS shadows
 // Uses CSS transform for hover scaling to keep anchor point stable
@@ -282,20 +282,32 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   }, [meshConnections, meshTopology, nodeCoordinates]);
   
   // Generate solid lines from local node to zero-hop neighbors
+  // Also draw line to closest neighbor by proximity
   const zeroHopLines = useMemo(() => {
     const lines: Array<{ from: [number, number]; to: [number, number]; key: string }> = [];
+    const drawnKeys = new Set<string>();
     
     if (!localNode || !localNode.latitude || !localNode.longitude) return lines;
     const localCoords: [number, number] = [localNode.latitude, localNode.longitude];
     
     // Draw lines from local node to each zero-hop neighbor with location
+    // zeroHopNeighbors contains PREFIXES, so we need to match by prefix
     neighborsWithLocation.forEach(([hash, neighbor]) => {
-      if (zeroHopNeighbors.has(hash) && neighbor.latitude && neighbor.longitude) {
-        lines.push({
-          from: localCoords,
-          to: [neighbor.latitude, neighbor.longitude],
-          key: `zerohop-${hash}`,
-        });
+      if (!neighbor.latitude || !neighbor.longitude) return;
+      
+      const neighborPrefix = getHashPrefix(hash);
+      const isZeroHop = zeroHopNeighbors.has(hash) || zeroHopNeighbors.has(neighborPrefix);
+      
+      if (isZeroHop) {
+        const key = `zerohop-${hash}`;
+        if (!drawnKeys.has(key)) {
+          drawnKeys.add(key);
+          lines.push({
+            from: localCoords,
+            to: [neighbor.latitude, neighbor.longitude],
+            key,
+          });
+        }
       }
     });
     
