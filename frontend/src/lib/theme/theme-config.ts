@@ -41,11 +41,11 @@ export interface BackgroundImage {
 }
 
 export const BACKGROUND_IMAGES: readonly BackgroundImage[] = [
-  { id: 'default', src: '/images/bg.jpg', suggestedScheme: 'default' },
-  { id: 'amber', src: '/images/bg-amber.jpg', suggestedScheme: 'amber' },
-  { id: 'grey', src: '/images/bg-grey.jpg', suggestedScheme: 'grey' },
-  { id: 'black', src: '/images/bg-black.jpg', suggestedScheme: 'black' },
-  { id: 'flora', src: '/images/bg-flora.jpg', suggestedScheme: 'flora' },
+  { id: 'default', src: '/assets/bg.jpg', suggestedScheme: 'default' },
+  { id: 'amber', src: '/assets/bg-amber.jpg', suggestedScheme: 'amber' },
+  { id: 'grey', src: '/assets/bg-grey.jpg', suggestedScheme: 'grey' },
+  { id: 'black', src: '/assets/bg-black.jpg', suggestedScheme: 'black' },
+  { id: 'flora', src: '/assets/bg-flora.jpg', suggestedScheme: 'flora' },
 ] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,11 +61,11 @@ export interface ThemePreset {
 
 /** Pre-configured theme combinations for quick selection */
 export const THEME_PRESETS: readonly ThemePreset[] = [
-  { id: 'default', name: 'Default', colorScheme: 'default', backgroundImage: '/images/bg.jpg' },
-  { id: 'amber', name: 'Amber', colorScheme: 'amber', backgroundImage: '/images/bg-amber.jpg' },
-  { id: 'grey', name: 'Steel', colorScheme: 'grey', backgroundImage: '/images/bg-grey.jpg' },
-  { id: 'black', name: 'Neon', colorScheme: 'black', backgroundImage: '/images/bg-black.jpg' },
-  { id: 'flora', name: 'Flora', colorScheme: 'flora', backgroundImage: '/images/bg-flora.jpg' },
+  { id: 'default', name: 'Default', colorScheme: 'default', backgroundImage: '/assets/bg.jpg' },
+  { id: 'amber', name: 'Amber', colorScheme: 'amber', backgroundImage: '/assets/bg-amber.jpg' },
+  { id: 'grey', name: 'Steel', colorScheme: 'grey', backgroundImage: '/assets/bg-grey.jpg' },
+  { id: 'black', name: 'Neon', colorScheme: 'black', backgroundImage: '/assets/bg-black.jpg' },
+  { id: 'flora', name: 'Flora', colorScheme: 'flora', backgroundImage: '/assets/bg-flora.jpg' },
 ] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ export interface ThemeState {
 
 export const DEFAULT_THEME_STATE: ThemeState = {
   colorScheme: 'default',
-  backgroundImage: '/images/bg.jpg',
+  backgroundImage: '/assets/bg.jpg',
   brightness: 80,
 };
 
