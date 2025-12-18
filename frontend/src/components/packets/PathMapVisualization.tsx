@@ -1,6 +1,7 @@
 import { useMemo, Suspense, lazy, Component, ReactNode } from 'react';
 import { NeighborInfo } from '@/types/api';
 import { MapPin, AlertTriangle, HelpCircle } from 'lucide-react';
+import { matchPrefix, prefixMatches } from '@/lib/mesh-topology';
 
 // Lazy load Leaflet map component
 const PathMap = lazy(() => import('./PathMap'));
@@ -22,7 +23,7 @@ interface PathMapVisualizationProps {
   localHash?: string;
 }
 
-/** Candidate node for a path prefix */
+/** Candidate node for a path prefix with display info */
 export interface PathCandidate {
   hash: string;
   name: string;
@@ -48,46 +49,27 @@ export interface ResolvedPath {
 }
 
 /**
- * Get the 2-character prefix from a local hash.
- * Local hash format is "0xNN" - we need the NN part.
- */
-function getLocalPrefix(hash: string): string {
-  // Handle "0x" prefix - extract the hex part after it
-  if (hash.startsWith('0x') || hash.startsWith('0X')) {
-    return hash.slice(2).toUpperCase();
-  }
-  // Fallback: take last 2 chars if it's a short hash, or first 2 if longer
-  if (hash.length <= 4) {
-    return hash.slice(-2).toUpperCase();
-  }
-  return hash.slice(0, 2).toUpperCase();
-}
-
-/**
- * Match a 2-character prefix to known nodes.
- * Returns all nodes whose hash starts with this prefix.
- * 
- * Confidence logic:
- * - LAST HOP: If prefix matches localHash prefix → 100% confidence (verified as us)
- * - SECOND-TO-LAST HOP: Direct neighbor - boost confidence for zero_hop neighbors
- * - OTHER HOPS: Standard 1/k probability
+ * Match a prefix to nodes with display coordinates.
+ * Uses shared matchPrefix from mesh-topology, then enriches with location data.
  * 
  * @param prefix - The 2-char hex prefix to match
  * @param neighbors - Known neighbors
  * @param localNode - Local node info (for coordinates)
  * @param localHash - Local node's full hash
- * @param hopType - 'last' | 'secondToLast' | 'other'
+ * @param isLastHop - If true, this is the receiving node (us)
  */
 function matchPrefixToNodes(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
   localNode?: LocalNode,
   localHash?: string,
-  hopType: 'last' | 'secondToLast' | 'other' = 'other'
+  isLastHop: boolean = false
 ): PathCandidate[] {
+  // Use shared matching logic from mesh-topology
+  const { matches, probability } = matchPrefix(prefix, neighbors, localHash, undefined, isLastHop);
+  
   const candidates: PathCandidate[] = [];
   const normalizedPrefix = prefix.toUpperCase();
-  const localPrefix = localHash ? getLocalPrefix(localHash) : null;
   
   // Check if local node has valid coordinates
   const localHasCoords = localNode && 
@@ -95,80 +77,54 @@ function matchPrefixToNodes(
     localNode.longitude !== undefined &&
     (localNode.latitude !== 0 || localNode.longitude !== 0);
   
-  // Check if prefix matches local node
-  const prefixMatchesLocal = localPrefix === normalizedPrefix;
-  
-  // LAST HOP: Verify prefix matches our local hash
-  // Local hash is "0xNN" format, path prefix is "NN" format
-  if (hopType === 'last' && prefixMatchesLocal && localHasCoords && localNode && localHash) {
-    candidates.push({
-      hash: localHash,
-      name: localNode.name || 'Local Node',
-      latitude: localNode.latitude,
-      longitude: localNode.longitude,
-      probability: 1, // 100% confidence - verified match
-      isLocal: true,
-    });
-    return candidates; // Verified as us
-  }
-  
-  // For non-last hops, check if prefix matches local node
-  if (prefixMatchesLocal && localHasCoords && localNode && localHash) {
-    candidates.push({
-      hash: localHash,
-      name: localNode.name || 'Local Node',
-      latitude: localNode.latitude,
-      longitude: localNode.longitude,
-      probability: 0, // Will be calculated after
-      isLocal: true,
-    });
-  }
-  
-  // Check all neighbors
-  for (const [hash, neighbor] of Object.entries(neighbors)) {
-    // Only include neighbors with valid coordinates
-    if (!neighbor.latitude || !neighbor.longitude) continue;
-    if (neighbor.latitude === 0 && neighbor.longitude === 0) continue;
+  // Build candidates with coordinates from matches
+  for (const hash of matches) {
+    // Check if this is the local node
+    if (localHash && prefixMatches(normalizedPrefix, localHash)) {
+      if (hash === localHash && localHasCoords && localNode) {
+        candidates.push({
+          hash,
+          name: localNode.name || 'Local Node',
+          latitude: localNode.latitude,
+          longitude: localNode.longitude,
+          probability: isLastHop ? 1 : probability,
+          isLocal: true,
+        });
+        continue;
+      }
+    }
     
-    if (hash.toUpperCase().startsWith(normalizedPrefix)) {
+    // Check neighbors for coordinates
+    const neighbor = neighbors[hash];
+    if (neighbor?.latitude && neighbor?.longitude && 
+        !(neighbor.latitude === 0 && neighbor.longitude === 0)) {
       candidates.push({
         hash,
         name: neighbor.node_name || neighbor.name || 'Unknown',
         latitude: neighbor.latitude,
         longitude: neighbor.longitude,
-        probability: 0, // Will be calculated after
+        probability,
         isLocal: false,
-        // Track if this is a direct (zero-hop) neighbor
         isDirectNeighbor: neighbor.zero_hop === true,
       });
     }
   }
   
-  // Calculate probabilities
+  // Recalculate probabilities based on candidates with coordinates
   const k = candidates.length;
-  if (k === 0) return candidates;
-  
   if (k === 1) {
-    // Single match = 100% confidence
     candidates[0].probability = 1;
-  } else if (hopType === 'secondToLast') {
-    // Second-to-last hop is our direct neighbor
-    // Boost confidence for zero_hop neighbors (they're confirmed direct)
-    const directNeighbors = candidates.filter(c => (c as PathCandidate & { isDirectNeighbor?: boolean }).isDirectNeighbor);
+  } else if (k > 1) {
+    // Boost direct neighbors for better accuracy
+    const directNeighbors = candidates.filter(c => c.isDirectNeighbor);
     if (directNeighbors.length === 1) {
-      // One direct neighbor matches - high confidence
       candidates.forEach(c => {
-        c.probability = (c as PathCandidate & { isDirectNeighbor?: boolean }).isDirectNeighbor ? 0.9 : 0.1 / (k - 1);
+        c.probability = c.isDirectNeighbor ? 0.9 : 0.1 / (k - 1);
       });
     } else {
-      // Standard distribution
       const prob = 1 / k;
       candidates.forEach(c => c.probability = prob);
     }
-  } else {
-    // Standard 1/k probability
-    const prob = 1 / k;
-    candidates.forEach(c => c.probability = prob);
   }
   
   return candidates;
@@ -193,18 +149,10 @@ export function resolvePath(
   }
   
   const lastIndex = path.length - 1;
-  const secondToLastIndex = path.length - 2;
   
   const hops: ResolvedHop[] = path.map((prefix, index) => {
-    // Determine hop type for confidence calculation
-    let hopType: 'last' | 'secondToLast' | 'other' = 'other';
-    if (index === lastIndex) {
-      hopType = 'last';
-    } else if (index === secondToLastIndex && path.length >= 2) {
-      hopType = 'secondToLast';
-    }
-    
-    const candidates = matchPrefixToNodes(prefix, neighbors, localNode, localHash, hopType);
+    const isLastHop = index === lastIndex;
+    const candidates = matchPrefixToNodes(prefix, neighbors, localNode, localHash, isLastHop);
     const confidence = candidates.length > 0 ? Math.max(...candidates.map(c => c.probability)) : 0;
     return { prefix, candidates, confidence };
   });

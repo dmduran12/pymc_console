@@ -49,17 +49,26 @@ interface EdgeAccumulator {
 }
 
 /**
- * Extract the 2-character prefix from a full hash.
+ * Extract the 2-character prefix from a hash.
+ * Handles both "0xNN" format (local hash) and full hex strings (neighbor hashes).
  */
 export function getHashPrefix(hash: string): string {
+  // Handle "0x" prefix - extract the hex part after it
+  if (hash.startsWith('0x') || hash.startsWith('0X')) {
+    return hash.slice(2).toUpperCase();
+  }
+  // For full hex strings, take first 2 characters
   return hash.slice(0, 2).toUpperCase();
 }
 
 /**
- * Check if a prefix matches a full hash.
+ * Check if a path prefix matches a hash.
+ * Path prefixes are 2-char hex (e.g., "19").
+ * Hashes can be "0xNN" format or full hex strings.
  */
-function prefixMatches(prefix: string, hash: string): boolean {
-  return hash.toUpperCase().startsWith(prefix.toUpperCase());
+export function prefixMatches(prefix: string, hash: string): boolean {
+  const hashPrefix = getHashPrefix(hash);
+  return hashPrefix === prefix.toUpperCase();
 }
 
 /**
@@ -115,7 +124,7 @@ function buildNeighborAffinity(
  * @param neighborAffinity - Optional affinity map for tiebreaking
  * @param isLastHop - If true and prefix matches local, return local with high confidence
  */
-function matchPrefix(
+export function matchPrefix(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
   localHash?: string,
