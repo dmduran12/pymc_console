@@ -1,6 +1,7 @@
 import { useMemo, Suspense, lazy, Component, ReactNode } from 'react';
 import { NeighborInfo } from '@/types/api';
 import { MapPin, AlertTriangle, HelpCircle } from 'lucide-react';
+import { getHashPrefix } from '@/lib/mesh-topology';
 
 // Lazy load Leaflet map component
 const PathMap = lazy(() => import('./PathMap'));
@@ -49,18 +50,29 @@ export interface ResolvedPath {
 /**
  * Match a 2-character prefix to known nodes.
  * Returns all nodes whose hash starts with this prefix.
+ * 
+ * @param prefix - The 2-char hex prefix to match
+ * @param neighbors - Known neighbors
+ * @param localNode - Local node info (for coordinates)
+ * @param localHash - Local node's full hash
+ * @param isLastHop - If true and prefix matches local, boost local's probability
  */
 function matchPrefixToNodes(
   prefix: string,
   neighbors: Record<string, NeighborInfo>,
   localNode?: LocalNode,
-  localHash?: string
+  localHash?: string,
+  isLastHop: boolean = false
 ): PathCandidate[] {
   const candidates: PathCandidate[] = [];
   const normalizedPrefix = prefix.toUpperCase();
+  const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  
+  // Check if this prefix matches the local node
+  const localMatches = localHash && localHash.toUpperCase().startsWith(normalizedPrefix) && localNode;
   
   // Check local node first
-  if (localHash && localHash.toUpperCase().startsWith(normalizedPrefix) && localNode) {
+  if (localMatches) {
     candidates.push({
       hash: localHash,
       name: localNode.name || 'Local Node',
@@ -89,11 +101,20 @@ function matchPrefixToNodes(
     }
   }
   
-  // Calculate probabilities: 1/k for each candidate
+  // Calculate probabilities
   const k = candidates.length;
   if (k > 0) {
-    const prob = 1 / k;
-    candidates.forEach(c => c.probability = prob);
+    // If this is the last hop and local matches, give local 100% probability
+    // (packets we receive end with our prefix)
+    if (isLastHop && localMatches && localPrefix === normalizedPrefix) {
+      candidates.forEach(c => {
+        c.probability = c.isLocal ? 1 : 0;
+      });
+    } else {
+      // Standard 1/k probability
+      const prob = 1 / k;
+      candidates.forEach(c => c.probability = prob);
+    }
   }
   
   return candidates;
@@ -101,6 +122,7 @@ function matchPrefixToNodes(
 
 /**
  * Resolve a full path to candidate nodes with confidence scores.
+ * Enhanced with local prefix detection - last hop matching local prefix gets 100% confidence.
  */
 export function resolvePath(
   path: string[],
@@ -112,8 +134,9 @@ export function resolvePath(
     return { hops: [], overallConfidence: 0, hasValidPath: false };
   }
   
-  const hops: ResolvedHop[] = path.map(prefix => {
-    const candidates = matchPrefixToNodes(prefix, neighbors, localNode, localHash);
+  const hops: ResolvedHop[] = path.map((prefix, index) => {
+    const isLastHop = index === path.length - 1;
+    const candidates = matchPrefixToNodes(prefix, neighbors, localNode, localHash, isLastHop);
     const confidence = candidates.length > 0 ? Math.max(...candidates.map(c => c.probability)) : 0;
     return { prefix, candidates, confidence };
   });
