@@ -38,13 +38,18 @@ export interface TopologyEdge {
   certainCount: number;
 }
 
+/** Minimum validations required for an edge to be rendered */
+export const MIN_EDGE_VALIDATIONS = 3;
+
 /** Result of topology analysis */
 export interface MeshTopology {
-  /** All edges (both certain and uncertain) */
+  /** All edges with 3+ validations */
   edges: TopologyEdge[];
-  /** 100% certain edges only (both endpoints uniquely identified) - solid lines */
+  /** Edges meeting validation threshold (for rendering) */
+  validatedEdges: TopologyEdge[];
+  /** Legacy: certain edges (alias for validatedEdges) */
   certainEdges: TopologyEdge[];
-  /** Uncertain/inferred edges (at least one ambiguous endpoint) - dotted lines */
+  /** Legacy: uncertain edges (empty - we no longer render these) */
   uncertainEdges: TopologyEdge[];
   /** Map from edge key to edge for quick lookup */
   edgeMap: Map<string, TopologyEdge>;
@@ -718,8 +723,9 @@ export function buildMeshTopology(
     }
   }
   
-  // Identify hub nodes (top 20% centrality and minimum path count)
-  const minPathsForHub = Math.max(3, packets.length * 0.05); // At least 5% of packets or 3
+  // Identify hub nodes using the 3+ validation baseline
+  // Hub = appears in at least 3 validated paths AND has high centrality
+  const minPathsForHub = Math.max(MIN_EDGE_VALIDATIONS, Math.floor(packets.length * 0.01)); // At least 3 or 1% of packets
   const hubNodes: string[] = [];
   const sortedByCentrality = [...centrality.entries()]
     .filter(([hash, _]) => (nodePathCounts.get(hash) || 0) >= minPathsForHub)
@@ -733,9 +739,9 @@ export function buildMeshTopology(
   }
   
   // Convert accumulators to edges
+  // Only include edges with MIN_EDGE_VALIDATIONS (3+) certain observations
   const edges: TopologyEdge[] = [];
-  const certainEdges: TopologyEdge[] = [];
-  const uncertainEdges: TopologyEdge[] = [];
+  const validatedEdges: TopologyEdge[] = [];
   let maxPacketCount = 0;
   let maxCertainCount = 0;
   const hubSet = new Set(hubNodes);
@@ -748,8 +754,8 @@ export function buildMeshTopology(
     // Check if either end is a hub node
     const isHubConnection = hubSet.has(acc.fromHash) || hubSet.has(acc.toHash);
     
-    // An edge is "certain" if it has at least one 100% certain observation
-    const isCertain = acc.certainCount > 0;
+    // An edge meets the validation threshold if it has 3+ certain observations
+    const meetsThreshold = acc.certainCount >= MIN_EDGE_VALIDATIONS;
     
     const edge: TopologyEdge = {
       fromHash: acc.fromHash,
@@ -760,17 +766,15 @@ export function buildMeshTopology(
       strength: 0, // Will be calculated below
       hopDistanceFromLocal: acc.minHopDistance,
       isHubConnection,
-      isCertain,
+      isCertain: meetsThreshold, // Now means "meets validation threshold"
       certainCount: acc.certainCount,
     };
     
     edges.push(edge);
     
-    // Separate into certain vs uncertain lists
-    if (isCertain) {
-      certainEdges.push(edge);
-    } else {
-      uncertainEdges.push(edge);
+    // Only include edges that meet the 3+ validation threshold
+    if (meetsThreshold) {
+      validatedEdges.push(edge);
     }
   }
   
@@ -780,18 +784,18 @@ export function buildMeshTopology(
     edge.strength = normalizedCount * edge.avgConfidence;
   }
   
-  // Sort all lists by strength descending
-  edges.sort((a, b) => b.strength - a.strength);
-  certainEdges.sort((a, b) => b.certainCount - a.certainCount); // Sort certain by frequency
-  uncertainEdges.sort((a, b) => b.avgConfidence - a.avgConfidence); // Sort uncertain by confidence
+  // Sort by validation count (most validated = strongest topology signal)
+  edges.sort((a, b) => b.certainCount - a.certainCount);
+  validatedEdges.sort((a, b) => b.certainCount - a.certainCount);
   
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
   return { 
     edges, 
-    certainEdges,
-    uncertainEdges,
+    validatedEdges,
+    certainEdges: validatedEdges, // Legacy alias
+    uncertainEdges: [], // No longer rendered
     edgeMap, 
     maxPacketCount, 
     maxCertainCount,

@@ -339,36 +339,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
     );
   }, [packets, neighbors, localHash, localNode?.latitude, localNode?.longitude]);
   
-  // Generate polylines for CERTAIN edges (100% validated connections)
-  const certainPolylines = useMemo(() => {
+  // Generate polylines for validated edges (3+ validations)
+  const validatedPolylines = useMemo(() => {
     const lines: Array<{
       from: [number, number];
       to: [number, number];
       edge: TopologyEdge;
     }> = [];
     
-    for (const edge of meshTopology.certainEdges) {
-      const fromCoords = nodeCoordinates.get(edge.fromHash);
-      const toCoords = nodeCoordinates.get(edge.toHash);
-      
-      // Only draw if both nodes have coordinates
-      if (!fromCoords || !toCoords) continue;
-      
-      lines.push({ from: fromCoords, to: toCoords, edge });
-    }
-    
-    return lines;
-  }, [meshTopology, nodeCoordinates]);
-  
-  // Generate polylines for UNCERTAIN edges (inferred connections)
-  const uncertainPolylines = useMemo(() => {
-    const lines: Array<{
-      from: [number, number];
-      to: [number, number];
-      edge: TopologyEdge;
-    }> = [];
-    
-    for (const edge of meshTopology.uncertainEdges) {
+    for (const edge of meshTopology.validatedEdges) {
       const fromCoords = nodeCoordinates.get(edge.fromHash);
       const toCoords = nodeCoordinates.get(edge.toHash);
       
@@ -450,8 +429,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
   
   // Filtered polylines based on solo modes
   const filteredCertainPolylines = useMemo(() => {
-    if (!soloHubs && !soloDirect) return certainPolylines;
-    return certainPolylines.filter(({ edge }) => {
+    if (!soloHubs && !soloDirect) return validatedPolylines;
+    return validatedPolylines.filter(({ edge }) => {
       const fromHub = hubNodeSet.has(edge.fromHash);
       const toHub = hubNodeSet.has(edge.toHash);
       const fromDirect = directNodeSet.has(edge.fromHash);
@@ -467,26 +446,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
       }
       return true;
     });
-  }, [certainPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
-  
-  const filteredUncertainPolylines = useMemo(() => {
-    if (!soloHubs && !soloDirect) return uncertainPolylines;
-    return uncertainPolylines.filter(({ edge }) => {
-      const fromHub = hubNodeSet.has(edge.fromHash);
-      const toHub = hubNodeSet.has(edge.toHash);
-      const fromDirect = directNodeSet.has(edge.fromHash);
-      const toDirect = directNodeSet.has(edge.toHash);
-      
-      if (soloHubs && soloDirect) {
-        return fromHub || toHub || fromDirect || toDirect;
-      } else if (soloHubs) {
-        return fromHub || toHub;
-      } else if (soloDirect) {
-        return fromDirect || toDirect;
-      }
-      return true;
-    });
-  }, [uncertainPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
+  }, [validatedPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
   
   // Filtered neighbors based on solo modes
   const filteredNeighbors = useMemo(() => {
@@ -589,21 +549,17 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw CERTAIN edges - SOLID if strong, DOTTED if weak */}
+        {/* Draw validated topology edges - solid lines, color by link quality */}
         {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
           // Color based on link quality (green=strong, red=weak)
           const color = getLinkQualityColor(edge.certainCount, meshTopology.maxCertainCount);
           // Thickness based on validation frequency (thicker=stronger link)
-          const baseWeight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+          const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
           
           // Calculate link quality percentage
           const linkQuality = meshTopology.maxCertainCount > 0 
             ? (edge.certainCount / meshTopology.maxCertainCount)
             : 0;
-          
-          // Weak links (< 30% quality) are dotted and 1px thinner
-          const isWeak = linkQuality < 0.3;
-          const weight = isWeak ? Math.max(1, baseWeight - 1) : baseWeight;
           
           // Get names for tooltip
           const fromNeighbor = neighbors[edge.fromHash];
@@ -613,7 +569,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           
           return (
             <Polyline
-              key={`certain-${edge.key}`}
+              key={`edge-${edge.key}`}
               positions={[from, to]}
               pathOptions={{
                 color,
@@ -621,7 +577,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
-                dashArray: isWeak ? '4, 6' : undefined,
               }}
             >
               <Tooltip
@@ -632,9 +587,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
                   <div style={{ color }}>
-                    Link quality: {Math.round(linkQuality * 100)}% ({edge.certainCount} validations)
+                    {Math.round(linkQuality * 100)}% ({edge.certainCount} validations)
                   </div>
-                  <div className="text-text-muted">{edge.packetCount} total packet{edge.packetCount !== 1 ? 's' : ''}</div>
                   {edge.isHubConnection && (
                     <div className="text-amber-400">Hub connection</div>
                   )}
@@ -644,40 +598,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
           );
         })}
         
-        {/* Draw UNCERTAIN/INFERRED edges as DOTTED GREY lines - 1px thinner */}
-        {showTopology && filteredUncertainPolylines.map(({ from, to, edge }) => {
-          // Get names for tooltip
-          const fromNeighbor = neighbors[edge.fromHash];
-          const toNeighbor = neighbors[edge.toHash];
-          const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
-          const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
-          
-          return (
-            <Polyline
-              key={`uncertain-${edge.key}`}
-              positions={[from, to]}
-              pathOptions={{
-                color: 'rgb(140, 140, 160)', // Solid grey for inferred
-                weight: 1,
-                opacity: 1,
-                dashArray: '4, 6',
-                lineCap: 'round',
-              }}
-            >
-              <Tooltip
-                permanent={false}
-                direction="center"
-                className="topology-edge-tooltip"
-              >
-                <div className="text-xs">
-                  <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
-                  <div className="text-text-muted">Inferred ({(edge.avgConfidence * 100).toFixed(0)}% confidence)</div>
-                  <div className="text-text-muted">{edge.packetCount} packet{edge.packetCount !== 1 ? 's' : ''}</div>
-                </div>
-              </Tooltip>
-            </Polyline>
-          );
-        })}
+        {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
         {/* Local node marker - matte plastic style with CSS shadows */}
         {localNode && localNode.latitude && localNode.longitude && (
@@ -779,7 +700,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
         {/* Map controls - top right */}
         <div className="absolute top-4 right-4 z-[600] flex gap-2">
           {/* Show/hide topology toggle */}
-          {(certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
+          {validatedPolylines.length > 0 && (
             <button
               onClick={() => setShowTopology(!showTopology)}
               className="p-2 transition-colors hover:bg-white/10"
@@ -905,11 +826,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
             </div>
           </div>
           {/* Topology legend - link quality based (only show when topology visible) */}
-          {showTopology && (certainPolylines.length > 0 || uncertainPolylines.length > 0) && (
+          {showTopology && validatedPolylines.length > 0 && (
             <>
               <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1.5 flex items-center gap-1">
-                Links
-                <LegendTooltip text="Verified: Both endpoints identified. Inferred: One/both ambiguous (prefix matched multiple nodes)." />
+                Links (3+ validations)
+                <LegendTooltip text="Only showing connections validated 3+ times. Line thickness = validation count." />
               </div>
               <div className="flex flex-col gap-0.5">
                 <LegendItem 
@@ -920,26 +841,19 @@ export default function ContactsMap({ neighbors, localNode, localHash, packets =
                 <LegendItem 
                   indicator={<div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(250, 204, 21)' }} />}
                   label="Moderate"
-                  tooltip="30-70% of max validation count. Medium solid line."
+                  tooltip="30-70% of max validation count. Medium line."
                 />
                 <LegendItem 
-                  indicator={<div className="w-4 h-0.5 flex-shrink-0" style={{ background: 'repeating-linear-gradient(90deg, rgb(248, 113, 113) 0px, rgb(248, 113, 113) 2px, transparent 2px, transparent 4px)' }} />}
+                  indicator={<div className="w-4 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(248, 113, 113)' }} />}
                   label="Weak"
-                  tooltip="<30% of max validation count. Thin dotted line."
+                  tooltip="<30% of max validation count. Thin line."
                 />
-                <div className="mt-1 pt-1 border-t border-white/10">
-                  <LegendItem 
-                    indicator={<div className="w-4 h-0.5 flex-shrink-0" style={{ background: 'repeating-linear-gradient(90deg, rgb(140, 140, 160) 0px, rgb(140, 140, 160) 2px, transparent 2px, transparent 4px)' }} />}
-                    label="Inferred"
-                    tooltip="Connection inferred but one/both nodes ambiguous."
-                  />
-                </div>
                 {meshTopology.hubNodes.length > 0 && (
                   <div className="mt-1 pt-1 border-t border-white/10">
                     <LegendItem 
                       indicator={<div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(251, 191, 36)', border: '1px solid rgba(13,14,18,0.8)' }} />}
                       label="Hub node"
-                      tooltip="High betweenness centrality (≥50%) AND appears in ≥5% of packet paths."
+                      tooltip="High betweenness centrality (≥50%) AND appears in ≥1% of packet paths."
                     />
                   </div>
                 )}
