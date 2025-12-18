@@ -788,10 +788,17 @@ export function buildMeshTopology(
   }
   
   // Sort by validation count (most validated = strongest topology signal)
+  // Hub connections get priority boost to ensure they're never dropped
   edges.sort((a, b) => b.certainCount - a.certainCount);
-  validatedEdges.sort((a, b) => b.certainCount - a.certainCount);
+  validatedEdges.sort((a, b) => {
+    // Hub connections get +1000 boost to always appear first
+    const aScore = a.certainCount + (a.isHubConnection ? 1000 : 0);
+    const bScore = b.certainCount + (b.isHubConnection ? 1000 : 0);
+    return bScore - aScore;
+  });
   
-  // Cap rendered edges for performance (keep top N by validation count)
+  // Cap rendered edges for performance
+  // Priority: Hub connections first, then by validation count (strong > moderate > weak)
   const cappedEdges = validatedEdges.slice(0, MAX_RENDERED_EDGES);
   
   // Build lookup map
