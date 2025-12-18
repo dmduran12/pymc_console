@@ -24,12 +24,10 @@ const PATH_COLORS = {
 };
 
 /**
- * Create a labeled marker icon showing the prefix
+ * Create a simple dot marker icon
  */
-function createPrefixIcon(
-  prefix: string,
+function createDotIcon(
   confidence: number,
-  hopIndex: number,
   isLocal: boolean = false
 ): L.DivIcon {
   const color = isLocal
@@ -40,39 +38,22 @@ function createPrefixIcon(
     ? PATH_COLORS.multi
     : PATH_COLORS.unknown;
   
+  const size = 14;
+  
   return L.divIcon({
     className: 'path-marker',
     html: `
       <div style="
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        transform: translate(-50%, -50%);
-      ">
-        <div style="
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 9px;
-          font-weight: 600;
-          color: white;
-          background: ${color};
-          padding: 2px 4px;
-          border-radius: 3px;
-          white-space: nowrap;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        ">${hopIndex + 1}. ${prefix}</div>
-        <div style="
-          width: 12px;
-          height: 12px;
-          background: ${color};
-          border-radius: 50%;
-          border: 2px solid rgba(255,255,255,0.8);
-          margin-top: 2px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        "></div>
-      </div>
+        width: ${size}px;
+        height: ${size}px;
+        background: ${color};
+        border-radius: 50%;
+        border: 2px solid rgba(255,255,255,0.9);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      "></div>
     `,
-    iconSize: [40, 30],
-    iconAnchor: [20, 30],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
@@ -98,28 +79,34 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
 }
 
 /**
- * Animated path line component
+ * Path line component with layered styling
  */
-function AnimatedPathLine({ positions }: { positions: [number, number][] }) {
+function PathLine({ positions }: { positions: [number, number][] }) {
   if (positions.length < 2) return null;
   
   return (
     <>
-      {/* Background line */}
+      {/* Background glow */}
       <Polyline
         positions={positions}
-        color={PATH_COLORS.line}
-        weight={3}
-        opacity={0.3}
+        pathOptions={{
+          color: PATH_COLORS.line,
+          weight: 4,
+          opacity: 0.25,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }}
       />
-      {/* Animated dashed line */}
+      {/* Main line */}
       <Polyline
         positions={positions}
-        color={PATH_COLORS.line}
-        weight={2}
-        opacity={0.8}
-        dashArray="8, 8"
-        dashOffset="0"
+        pathOptions={{
+          color: PATH_COLORS.line,
+          weight: 2.5,
+          opacity: 0.85,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }}
       />
     </>
   );
@@ -203,17 +190,15 @@ export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
       <FitBounds positions={positions} />
       
       {/* Path line */}
-      <AnimatedPathLine positions={pathLine} />
+      <PathLine positions={pathLine} />
       
       {/* Markers for each hop */}
       {markers.map((marker) => (
         <Marker
           key={`${marker.hopIndex}-${marker.candidate.hash}`}
           position={marker.position}
-          icon={createPrefixIcon(
-            marker.prefix,
+          icon={createDotIcon(
             marker.confidence,
-            marker.hopIndex,
             marker.candidate.isLocal
           )}
           opacity={marker.candidate.probability}
@@ -221,7 +206,7 @@ export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
           <Tooltip
             permanent={false}
             direction="top"
-            offset={[0, -20]}
+            offset={[0, -10]}
           >
             <div className="text-xs">
               <div className="font-semibold">{marker.candidate.name}</div>
