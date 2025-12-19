@@ -557,13 +557,16 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const [showTopology, setShowTopology] = useState(false);
   
   // ═══════════════════════════════════════════════════════════════════════════════
-  // Node Fade Animation System (for Direct toggle)
+  // Node Fade Animation System (for Solo modes: Direct and Hubs)
   // Staggered fade with randomized delays for organic feel
   // ═══════════════════════════════════════════════════════════════════════════════
   const [nodeOpacities, setNodeOpacities] = useState<Map<string, number>>(new Map());
   const NODE_FADE_DURATION = 500; // 0.5s
+  const MAX_NODE_STAGGER_DELAY = 250; // Max 250ms stagger spread
   const prevSoloDirectRef = useRef(soloDirect);
+  const prevSoloHubsRef = useRef(soloHubs);
   const nodeStaggerDelaysRef = useRef<Map<string, number>>(new Map());
+  const nodeAnimationFrameRef = useRef<number | null>(null);
   
   // ═══════════════════════════════════════════════════════════════════════════════
   // Deep Analysis System
@@ -806,18 +809,54 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     });
   }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet, showTopology, localConnectedNodes]);
   
-  // ─── Node Fade Animation Effect (for Direct toggle) ───
-  // Staggered fade in/out with randomized delays
+  // Keep refs for visibility computation (to avoid stale closures in animation)
+  const hubConnectedNodesRef = useRef(hubConnectedNodes);
+  const directNodeSetRef = useRef(directNodeSet);
+  const localConnectedNodesRef = useRef(localConnectedNodes);
+  const showTopologyRef = useRef(showTopology);
+  const neighborsWithLocationRef = useRef(neighborsWithLocation);
+  
+  // Update refs when values change
+  useEffect(() => {
+    hubConnectedNodesRef.current = hubConnectedNodes;
+    directNodeSetRef.current = directNodeSet;
+    localConnectedNodesRef.current = localConnectedNodes;
+    showTopologyRef.current = showTopology;
+    neighborsWithLocationRef.current = neighborsWithLocation;
+  }, [hubConnectedNodes, directNodeSet, localConnectedNodes, showTopology, neighborsWithLocation]);
+  
+  // ─── Node Fade Animation Effect (for Solo modes: Direct and Hubs) ───
+  // Staggered fade in/out with randomized delays for organic feel
   useEffect(() => {
     const wasDirectMode = prevSoloDirectRef.current;
+    const wasHubsMode = prevSoloHubsRef.current;
     const isDirectMode = soloDirect;
+    const isHubsMode = soloHubs;
     prevSoloDirectRef.current = soloDirect;
+    prevSoloHubsRef.current = soloHubs;
     
-    // Skip if no change or if not in a mode where we care about animating
-    if (wasDirectMode === isDirectMode) return;
+    // Detect which mode changed
+    const directChanged = wasDirectMode !== isDirectMode;
+    const hubsChanged = wasHubsMode !== isHubsMode;
+    
+    // Skip if no change
+    if (!directChanged && !hubsChanged) return;
+    
+    // Cancel any existing animation
+    if (nodeAnimationFrameRef.current) {
+      cancelAnimationFrame(nodeAnimationFrameRef.current);
+      nodeAnimationFrameRef.current = null;
+    }
+    
+    // Use refs to get current values (avoids stale closures)
+    const hubConnected = hubConnectedNodesRef.current;
+    const directNodes = directNodeSetRef.current;
+    const localConnected = localConnectedNodesRef.current;
+    const topologyOn = showTopologyRef.current;
+    const neighbors = neighborsWithLocationRef.current;
     
     // Get all neighbor hashes
-    const allNeighborHashes = neighborsWithLocation.map(([hash]) => hash);
+    const allNeighborHashes = neighbors.map(([hash]) => hash);
     
     // Generate random stagger delays (only once per node, persisted across toggles)
     for (const hash of allNeighborHashes) {
@@ -826,40 +865,62 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       }
     }
     
-    // Determine which nodes are being hidden/shown
-    const animatingNodes = allNeighborHashes.filter(hash => {
-      const isDirect = directNodeSet.has(hash);
-      // Nodes that would be filtered OUT by direct mode
-      return !isDirect;
-    });
+    // Helper: determine if node should be visible given mode state
+    const isVisibleInMode = (hash: string, directMode: boolean, hubsMode: boolean): boolean => {
+      const isHubConnected = hubConnected.has(hash);
+      const isDirect = directNodes.has(hash);
+      const isLocalConnected = topologyOn && localConnected.has(hash);
+      
+      if (!directMode && !hubsMode) return true;
+      if (directMode && hubsMode) return isHubConnected || isDirect || isLocalConnected;
+      if (hubsMode) return isHubConnected;
+      if (directMode) return isDirect || isLocalConnected;
+      return true;
+    };
     
-    if (animatingNodes.length === 0) return;
+    // Build animation targets - only for nodes whose visibility actually changed
+    const animationTargets: Array<{ hash: string; startOpacity: number; targetOpacity: number }> = [];
     
-    // Toggling Direct ON: fade OUT non-direct nodes (1 → 0)
-    // Toggling Direct OFF: fade IN non-direct nodes (0 → 1)
-    const targetOpacity = isDirectMode ? 0 : 1;
-    const startOpacity = isDirectMode ? 1 : 0;
-    const maxStaggerDelay = 200; // Max 200ms stagger spread
+    for (const hash of allNeighborHashes) {
+      const wasVisible = isVisibleInMode(hash, wasDirectMode, wasHubsMode);
+      const nowVisible = isVisibleInMode(hash, isDirectMode, isHubsMode);
+      
+      // Only animate if visibility changed
+      if (wasVisible !== nowVisible) {
+        animationTargets.push({
+          hash,
+          startOpacity: wasVisible ? 1 : 0,
+          targetOpacity: nowVisible ? 1 : 0,
+        });
+      }
+    }
     
-    // Initialize all animating nodes to their start opacity
+    if (animationTargets.length === 0) return;
+    
+    // Initialize animating nodes to their start opacity
     setNodeOpacities(prev => {
       const next = new Map(prev);
-      for (const hash of animatingNodes) {
+      for (const { hash, startOpacity } of animationTargets) {
         next.set(hash, startOpacity);
       }
       return next;
     });
+    
+    // Capture targets for animation closure
+    const targets = animationTargets;
     
     let startTime: number | null = null;
     const animateNodes = (timestamp: number) => {
       if (!startTime) startTime = timestamp;
       const elapsed = timestamp - startTime;
       
-      setNodeOpacities(prev => {
-        const next = new Map(prev);
+      let allComplete = true;
+      
+      setNodeOpacities(() => {
+        const next = new Map<string, number>();
         
-        for (const hash of animatingNodes) {
-          const staggerDelay = (nodeStaggerDelaysRef.current.get(hash) ?? 0) * maxStaggerDelay;
+        for (const { hash, startOpacity, targetOpacity } of targets) {
+          const staggerDelay = (nodeStaggerDelaysRef.current.get(hash) ?? 0) * MAX_NODE_STAGGER_DELAY;
           const nodeElapsed = Math.max(0, elapsed - staggerDelay);
           const progress = Math.min(nodeElapsed / NODE_FADE_DURATION, 1);
           const eased = easeInOutCubic(progress);
@@ -867,19 +928,34 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Interpolate between start and target
           const opacity = startOpacity + (targetOpacity - startOpacity) * eased;
           next.set(hash, opacity);
+          
+          if (progress < 1) allComplete = false;
         }
         
         return next;
       });
       
-      const totalDuration = NODE_FADE_DURATION + maxStaggerDelay;
-      if (elapsed < totalDuration) {
-        requestAnimationFrame(animateNodes);
+      const totalDuration = NODE_FADE_DURATION + MAX_NODE_STAGGER_DELAY;
+      if (elapsed < totalDuration && !allComplete) {
+        nodeAnimationFrameRef.current = requestAnimationFrame(animateNodes);
+      } else {
+        nodeAnimationFrameRef.current = null;
+        // Animation complete - clear opacity map so nodes use default visibility
+        setNodeOpacities(new Map());
       }
     };
     
-    requestAnimationFrame(animateNodes);
-  }, [soloDirect, neighborsWithLocation, directNodeSet, easeInOutCubic, NODE_FADE_DURATION]);
+    nodeAnimationFrameRef.current = requestAnimationFrame(animateNodes);
+    
+    // Cleanup on unmount
+    return () => {
+      if (nodeAnimationFrameRef.current) {
+        cancelAnimationFrame(nodeAnimationFrameRef.current);
+        nodeAnimationFrameRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soloDirect, soloHubs]);
   
   // ─── Edge Animation Effect (must be after filteredCertainPolylines) ───
   // Track "snapshot" of weights at animation start for smooth interpolation
@@ -1275,36 +1351,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
-        {/* Local node marker - yellow house, always on top */}
-        {localNode && localNode.latitude && localNode.longitude && (
-          <Marker
-            position={[localNode.latitude, localNode.longitude]}
-            icon={createLocalIcon()}
-            zIndexOffset={10000}
-            eventHandlers={{
-              mouseover: () => setHoveredMarker('local'),
-              mouseout: () => setHoveredMarker(null),
-            }}
-          >
-            <Popup>
-              <div className="text-sm">
-                <strong className="text-base">{localNode.name}</strong>
-                {localHash && (
-                  <span className="ml-2 font-mono text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">
-                    {localHash.startsWith('0x') ? localHash.slice(2).toUpperCase() : localHash.slice(0, 2).toUpperCase()}
-                  </span>
-                )}
-                <br />
-                <span style={{ color: DESIGN.localColor }} className="font-medium">This Node (Local)</span>
-                <br />
-                <span className="text-xs text-text-muted">
-                  {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
-                </span>
-              </div>
-            </Popup>
-          </Marker>
-        )}
-        
         {/* Neighbor markers - rings for standard nodes, filled for hubs */}
         {/* Use neighborsWithLocation for fade animation, but apply visibility rules */}
         {neighborsWithLocation.map(([hash, neighbor]) => {
@@ -1331,20 +1377,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             }
           }
           
-          // Calculate opacity for fade animation
-          // - Nodes that should be shown get full opacity (or animated opacity)
-          // - Nodes being hidden get their animated opacity
-          let nodeOpacity = 1;
-          if (soloDirect && !isDirect && !isLocalConnected) {
-            // Non-direct nodes in direct mode: use animated opacity (fading out)
-            nodeOpacity = nodeOpacities.get(hash) ?? 0;
-          } else if (!soloDirect && nodeOpacities.has(hash)) {
-            // Nodes returning from direct mode: use animated opacity (fading in)
-            nodeOpacity = nodeOpacities.get(hash) ?? 1;
-          }
+          // Get animated opacity from state
+          // - If node is in animation state, use that opacity
+          // - If no animation active, use 1 for visible nodes, 0 for hidden
+          const nodeOpacity = nodeOpacities.has(hash) 
+            ? nodeOpacities.get(hash)! 
+            : (shouldShow ? 1 : 0);
           
-          // Don't render if completely invisible (and not animating in)
-          if (!shouldShow && nodeOpacity <= 0) return null;
+          // Don't render if opacity is effectively 0 (hidden)
+          if (nodeOpacity <= 0.01) return null;
           
           // Calculate SNR (only meaningful for zero-hop neighbors)
           const meanSnr = calculateMeanSnr(packets, hash);
@@ -1391,6 +1432,36 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             </Marker>
           );
         })}
+        
+        {/* Local node marker - yellow house, rendered LAST to always be on top */}
+        {localNode && localNode.latitude && localNode.longitude && (
+          <Marker
+            position={[localNode.latitude, localNode.longitude]}
+            icon={createLocalIcon()}
+            zIndexOffset={10000}
+            eventHandlers={{
+              mouseover: () => setHoveredMarker('local'),
+              mouseout: () => setHoveredMarker(null),
+            }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <strong className="text-base">{localNode.name}</strong>
+                {localHash && (
+                  <span className="ml-2 font-mono text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">
+                    {localHash.startsWith('0x') ? localHash.slice(2).toUpperCase() : localHash.slice(0, 2).toUpperCase()}
+                  </span>
+                )}
+                <br />
+                <span style={{ color: DESIGN.localColor }} className="font-medium">This Node (Local)</span>
+                <br />
+                <span className="text-xs text-text-muted">
+                  {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
+                </span>
+              </div>
+            </Popup>
+          </Marker>
+        )}
         </MapContainer>
         
         {/* Confirmation Modal */}
