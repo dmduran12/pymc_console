@@ -588,6 +588,53 @@ export function buildPrefixLookup(
         }
       }
       
+      // ═══ SCORE-WEIGHTED APPEARANCE REDISTRIBUTION ════════════════════════════
+      // The raw position/co-occurrence counts are shared across all candidates
+      // because we can't know which candidate was actually present when we see
+      // prefix "24" in a path. But now that we have combined scores, we can
+      // REDISTRIBUTE the appearances proportionally by score.
+      //
+      // This gives us candidate-specific appearance estimates that we can use
+      // for the dominant forwarder boost.
+      const totalScore = candidates.reduce((sum, c) => sum + c.combinedScore, 0);
+      if (totalScore > 0) {
+        // Calculate weighted position-1 counts
+        const weightedPos1Counts: number[] = [];
+        const rawPos1Total = candidates.reduce((sum, c) => sum + (c.positionCounts[0] || 0), 0);
+        
+        for (const c of candidates) {
+          const weight = c.combinedScore / totalScore;
+          // This candidate's share of position-1 appearances
+          const weightedPos1 = rawPos1Total * weight;
+          weightedPos1Counts.push(weightedPos1);
+        }
+        
+        // Now check dominant forwarder with WEIGHTED counts
+        const bestWeightedPos1 = weightedPos1Counts[0];
+        const secondWeightedPos1 = weightedPos1Counts[1] || 0;
+        const weightedTotal = bestWeightedPos1 + secondWeightedPos1;
+        
+        if (prefix === '24') {
+          console.log(`[disambiguation] Prefix ${prefix}: WEIGHTED pos1 - best=${bestWeightedPos1.toFixed(0)}, second=${secondWeightedPos1.toFixed(0)}, total=${weightedTotal.toFixed(0)}`);
+        }
+        
+        if (weightedTotal >= 20 && bestWeightedPos1 >= 10) {
+          const weightedRatio = bestWeightedPos1 / weightedTotal;
+          if (weightedRatio >= 0.60) { // Lowered from 0.80 since weighted counts are estimates
+            // Weighted dominant forwarder boost
+            // Scale: 60% = +0.2, 80% = +0.4, 100% = +0.6
+            const dominanceBoost = 0.20 + (weightedRatio - 0.60) * 1.0;
+            const newConfidence = Math.min(1, confidence + dominanceBoost);
+            
+            if (prefix === '24') {
+              console.log(`[disambiguation] Prefix ${prefix}: WEIGHTED DOMINANT BOOST! ratio=${weightedRatio.toFixed(2)}, boost=${dominanceBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
+            }
+            
+            confidence = newConfidence;
+          }
+        }
+      }
+      
       // ═══ SOURCE-GEOGRAPHIC EVIDENCE BOOST ═══════════════════════════════════════
       // If the best candidate has significantly more source-geographic evidence
       // than the runner-up, that's strong candidate-specific evidence.
