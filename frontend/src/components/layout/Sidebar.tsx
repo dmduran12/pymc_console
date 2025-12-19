@@ -29,6 +29,7 @@ import { POLLING_INTERVALS } from '@/lib/constants';
 const navigation = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
   { name: 'Contacts', to: '/contacts', icon: Users },
+  { name: 'Packets', to: '/packets', icon: Radio },
   { name: 'Statistics', to: '/statistics', icon: BarChart3 },
   { name: 'System', to: '/system', icon: Cpu },
   { name: 'Logs', to: '/logs', icon: FileText },
