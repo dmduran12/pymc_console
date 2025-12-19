@@ -1,8 +1,10 @@
-import { useMemo, Suspense, lazy, Component, ReactNode } from 'react';
+import { useMemo, useState, Suspense, lazy, Component, ReactNode } from 'react';
 import { NeighborInfo } from '@/types/api';
 import { MapPin, AlertTriangle, HelpCircle } from 'lucide-react';
+import clsx from 'clsx';
 import { matchPrefix, prefixMatches, NeighborAffinity } from '@/lib/mesh-topology';
 import { resolvePrefix, type PrefixLookup } from '@/lib/prefix-disambiguation';
+import { getHashPrefix } from '@/lib/path-utils';
 
 /**
  * Calculate distance between two coordinates in meters using Haversine formula.
@@ -52,6 +54,8 @@ interface PathMapVisualizationProps {
   localNode?: LocalNode;
   /** Local node's hash (for matching if we're in the path) */
   localHash?: string;
+  /** Packet source hash - shown as first hop with 100% confidence */
+  srcHash?: string;
   /** Pre-computed affinity data for multi-factor scoring */
   neighborAffinity?: Map<string, NeighborAffinity>;
   /** Pre-computed prefix disambiguation lookup (preferred for confidence) */
@@ -77,6 +81,7 @@ export interface ResolvedHop {
   candidates: PathCandidate[];
   confidence: number;  // Max probability among candidates (0 if none)
   totalMatches: number;  // Total prefix matches (including those without coordinates)
+  isSource?: boolean;  // True if this is the packet source (not from path array)
 }
 
 /** Result of path resolution */
@@ -372,22 +377,75 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, { hasError: bo
 /**
  * Path Map Visualization component
  * Shows packet path on a mini Leaflet map with prefix labels and confidence scoring
+ * Includes source hash as first hop and interactive hover highlighting
  */
 export function PathMapVisualization({
   path,
   neighbors,
   localNode,
   localHash,
+  srcHash,
   neighborAffinity,
   prefixLookup,
   hubNodes,
 }: PathMapVisualizationProps) {
+  // Hover state for highlighting - shared between badges and map
+  const [hoveredHopIndex, setHoveredHopIndex] = useState<number | null>(null);
+  
+  // Build source hop from srcHash (100% confidence - we know exactly who sent it)
+  const sourceHop = useMemo((): ResolvedHop | null => {
+    if (!srcHash) return null;
+    
+    const srcPrefix = getHashPrefix(srcHash);
+    const neighbor = neighbors[srcHash];
+    
+    // Check if we have location data for the source
+    if (neighbor?.latitude && neighbor?.longitude && 
+        !(neighbor.latitude === 0 && neighbor.longitude === 0)) {
+      return {
+        prefix: srcPrefix,
+        candidates: [{
+          hash: srcHash,
+          name: neighbor.node_name || neighbor.name || 'Source',
+          latitude: neighbor.latitude,
+          longitude: neighbor.longitude,
+          probability: 1, // 100% - exact match
+          isLocal: false,
+          isDirectNeighbor: neighbor.zero_hop === true,
+        }],
+        confidence: 1,
+        totalMatches: 1,
+        isSource: true, // Mark as source hop
+      };
+    }
+    
+    return null;
+  }, [srcHash, neighbors]);
+  
   // Resolve path prefixes to candidate nodes
-  // Uses prefixLookup when available (preferred - includes dominant forwarder boost)
-  const resolvedPath = useMemo(
+  const resolvedPathHops = useMemo(
     () => resolvePath(path, neighbors, localNode, localHash, neighborAffinity, prefixLookup),
     [path, neighbors, localNode, localHash, neighborAffinity, prefixLookup]
   );
+  
+  // Combine source hop with path hops
+  const resolvedPath = useMemo((): ResolvedPath => {
+    const hops = sourceHop 
+      ? [sourceHop, ...resolvedPathHops.hops]
+      : resolvedPathHops.hops;
+    
+    // Recalculate overall confidence including source
+    const overallConfidence = hops.reduce((acc, hop) => {
+      if (hop.confidence === 0) return 0;
+      return acc * hop.confidence;
+    }, 1);
+    
+    return {
+      hops,
+      overallConfidence,
+      hasValidPath: hops.some(hop => hop.candidates.length > 0),
+    };
+  }, [sourceHop, resolvedPathHops]);
   
   // Don't render if no path or no candidates have coordinates
   if (!resolvedPath.hasValidPath) {
@@ -445,36 +503,56 @@ export function PathMapVisualization({
               resolvedPath={resolvedPath}
               localNode={localNode}
               hubNodes={hubNodes}
+              hoveredHopIndex={hoveredHopIndex}
+              onHoverHop={setHoveredHopIndex}
             />
           </Suspense>
         </MapErrorBoundary>
       </div>
       
-      {/* Per-hop breakdown */}
+      {/* Per-hop breakdown - interactive */}
       <div className="flex flex-wrap gap-1.5">
-        {resolvedPath.hops.map((hop, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-elevated text-[10px] font-mono"
-            title={
-              hop.totalMatches === 0
-                ? 'No matching nodes found'
-                : hop.totalMatches === 1
-                ? `Exact match: ${hop.candidates[0]?.name || 'Unknown'}`
-                : `${hop.totalMatches} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
-            }
-          >
-            <span style={getHopBadgeStyle(hop.confidence, hop.totalMatches)}>
-              {hop.prefix}
-            </span>
-            {hop.totalMatches > 1 && (
-              <span className="text-text-muted">×{hop.totalMatches}</span>
-            )}
-            {hop.totalMatches === 0 && (
-              <span className="text-text-muted">?</span>
-            )}
-          </div>
-        ))}
+        {resolvedPath.hops.map((hop, i) => {
+          const isSource = 'isSource' in hop && hop.isSource;
+          const isHovered = hoveredHopIndex === i;
+          
+          return (
+            <div
+              key={i}
+              className={clsx(
+                'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition-all',
+                isHovered 
+                  ? 'bg-accent-primary/20 ring-1 ring-accent-primary/50' 
+                  : 'bg-bg-elevated hover:bg-bg-subtle',
+                isSource && 'border border-accent-success/30'
+              )}
+              title={
+                isSource
+                  ? `Source: ${hop.candidates[0]?.name || 'Unknown'}`
+                  : hop.totalMatches === 0
+                    ? 'No matching nodes found'
+                    : hop.totalMatches === 1
+                      ? `Exact match: ${hop.candidates[0]?.name || 'Unknown'}`
+                      : `${hop.totalMatches} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
+              }
+              onMouseEnter={() => setHoveredHopIndex(i)}
+              onMouseLeave={() => setHoveredHopIndex(null)}
+            >
+              {isSource && (
+                <span className="text-accent-success text-[8px] mr-0.5">SRC</span>
+              )}
+              <span style={getHopBadgeStyle(hop.confidence, hop.totalMatches)}>
+                {hop.prefix}
+              </span>
+              {hop.totalMatches > 1 && (
+                <span className="text-text-muted">×{hop.totalMatches}</span>
+              )}
+              {hop.totalMatches === 0 && (
+                <span className="text-text-muted">?</span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
