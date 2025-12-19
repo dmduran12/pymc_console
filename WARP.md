@@ -135,11 +135,11 @@ src/
 │   ├── charts/            # AirtimeGauge, PacketTypesChart, TrafficStackedChart, NeighborPolarChart
 │   ├── controls/          # ControlPanel (mode/duty cycle)
 │   ├── layout/            # Sidebar, Header, BackgroundProvider
-│   ├── contacts/          # ContactsMap (Leaflet neighbor visualization)
+│   ├── contacts/          # ContactsMap (Leaflet neighbor visualization with topology)
 │   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization
 │   ├── shared/            # TimeRangeSelector, BackgroundSelector
 │   ├── stats/             # StatsCard
-│   └── ui/                # HashBadge
+│   └── ui/                # HashBadge, ConfirmModal, DeepAnalysisModal
 ├── lib/
 │   ├── api.ts             # All API client functions (typed fetch wrappers)
 │   ├── constants.ts       # App constants
@@ -234,6 +234,65 @@ Edges are marked "certain" when:
 - MEDIUM (<5km) = 0.6
 - FAR (<10km) = 0.4
 - VERY_FAR (<20km) = 0.2
+
+### ContactsMap Component (`src/components/contacts/ContactsMap.tsx`)
+
+Interactive Leaflet map with topology visualization, animations, and filtering.
+
+**Visual Design:**
+- **Local node**: Yellow house icon (`#FBBF24` Amber-400) - indicates "home" node
+- **Hub nodes**: Filled indigo circle (`#6366F1`) - high-centrality nodes
+- **Standard nodes**: Indigo ring/torus (`#4338CA`) - minimal, elegant
+- **Edges**: Dark gray lines (`#3B3F4A`) with thickness scaled by validation count
+- **Loop edges**: Parallel double-lines in indigo (`#3730A3`) indicating redundant paths
+
+**Deep Analysis System:**
+Button triggers comprehensive topology rebuild:
+1. **Fetching** - Loads 20K packets from cache (`forceDeepLoad()`)
+2. **Analyzing** - Brief transition state
+3. **Building** - Topology computation (Web Worker)
+4. **Complete** - Shows checkmark, auto-enables topology view
+
+Modal (`DeepAnalysisModal.tsx`) shows 3-step progress with purple highlights for active step, green checkmarks for completed.
+
+**Animation Systems:**
+
+*Edge Animations (topology toggle):*
+- **Trace-in effect** (2s): Lines "draw" from point A to B with staggered delays using `easeInOutCubic`
+- **Retract effect** (0.5s): When toggling off, edges "zip" back toward nodes with `easeOutCubic`
+- **Weight interpolation**: Smooth thickness transitions when data updates
+- `isAnimatingInitial` flag prevents edge "blink" on toggle-on
+- Animation state stays in sync with visibility: edges at progress=0 when hidden, 1 when shown
+
+*Node Animations (Direct toggle):*
+- **Staggered fade** (0.5s): Non-direct nodes fade in/out with randomized delays
+- Per-node delays stored in ref for consistent animation across toggles
+- `nodeOpacities` Map tracks per-node opacity during animation
+
+**Filter Toggles:**
+- **Topology** (GitBranch icon) - Show/hide topology edges
+- **Solo Hubs** (Network icon) - Filter to hub nodes and their connections
+- **Solo Direct** (Radio icon) - Filter to zero-hop (direct RF) neighbors
+- **Fullscreen** (Maximize2 icon) - Expand map to fullscreen
+
+**Key State Variables:**
+```typescript
+showTopology: boolean           // Show topology edges
+soloDirect: boolean             // Filter to zero-hop neighbors
+soloHubs: boolean               // Filter to hub connections
+isExiting: boolean              // Edge retraction animation in progress
+nodeOpacities: Map<string, number>  // Per-node opacity for Direct toggle animation
+edgeAnimProgress: Map<string, number>  // Per-edge trace progress (0=retracted, 1=extended)
+edgeAnimProgressRef: ref        // Ref copy for capturing state at animation start
+isAnimatingInitial: boolean     // Prevents edge flash on toggle-on
+```
+
+**Icon Creation (Leaflet DivIcon):**
+```typescript
+createLocalIcon()                    // Yellow house SVG via renderToStaticMarkup
+createFilledIcon(color, opacity)     // Filled circle for hubs
+createRingIcon(color, opacity)       // Ring/torus for standard nodes
+```
 
 ### Backend API
 
@@ -364,11 +423,12 @@ Defined in `:root` and exposed via `@theme inline`:
 
 ### Theme Variants
 
-Four color schemes via `[data-theme="..."]` CSS selectors:
+Five color schemes via `[data-theme="..."]` CSS selectors:
 - Default (lavender/purple accents)
 - `amber` - Warm orange/gold
 - `grey` - Cool slate/blue
 - `black` - High contrast cyan/white
+- `flora` - Nature-inspired greens and earth tones
 
 ## Packet Path Analysis
 

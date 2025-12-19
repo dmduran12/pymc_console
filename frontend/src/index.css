@@ -948,6 +948,27 @@ body {
   border: none !important;
 }
 
+/* Ensure all custom map markers are clickable with proper z-index */
+.map-ring-marker,
+.map-filled-marker,
+.map-local-marker {
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+  z-index: 500 !important;
+  pointer-events: auto !important;
+}
+
+/* Ensure marker pane is always interactive */
+.leaflet-marker-pane {
+  z-index: 600 !important;
+  pointer-events: auto !important;
+}
+
+.leaflet-marker-pane .leaflet-marker-icon {
+  pointer-events: auto !important;
+}
+
 /* Dark liquid glass styling for Leaflet popups */
 .leaflet-popup-content-wrapper {
   background: rgba(20, 20, 22, 0.9) !important;

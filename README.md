@@ -28,10 +28,13 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 ### Neighbors & Topology
 - **Interactive map** — OpenStreetMap with dark theme and neighbor positions
 - **Mesh topology graph** — Network connections inferred from packet paths
+- **Deep Analysis** — One-click full topology rebuild from 20K+ packets
 - **Intelligent disambiguation** — Four-factor scoring resolves prefix collisions
 - **Edge confidence** — Line thickness scales with observation count
+- **Animated edges** — Trace-in effect on toggle, smooth fade-out
 - **Filter toggles** — Solo view for hub nodes or direct neighbors only
-- **Loop detection** — Identifies redundant paths (H₁ homology analysis)
+- **Loop detection** — Identifies redundant paths (double-line rendering)
+- **Visual identity** — Yellow house icon for local node, indigo rings for neighbors
 
 ![Neighbors](docs/images/neighbors.png)
 
@@ -243,6 +246,9 @@ Topology edges are rendered with visual cues indicating confidence:
   - Both endpoints have ≥60% confidence, OR
   - The destination has ≥90% confidence, OR
   - It's the last hop to local node
+- **Trace animation** — Edges "draw" from point A to B when topology is enabled
+- **Fade animation** — Edges smoothly fade out when topology is disabled
+- **Loop edges** — Redundant paths rendered as parallel double-lines in accent color
 
 ### Path Visualization
 
