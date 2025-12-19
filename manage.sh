@@ -964,8 +964,8 @@ do_upgrade() {
  ─────────────────────────────────────
 
  Select upgrade type:" 19 65 2 \
-        "<Console>" "Console Only (Update Dashboard UI)" \
-        "<Package>" "Full Upgrade (Core + Repeater + Console)" 3>&1 1>&2 2>&3)
+        "<Console>" "Console Only" \
+        "<Package>" "Full pyMC Stack" 3>&1 1>&2 2>&3)
     
     if [ -z "$upgrade_type" ]; then
         return 0
