@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, RefreshCw } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { DeepAnalysisModal, type AnalysisStep } from '@/components/ui/DeepAnalysisModal';
 import { getLinkQualityWeight, type TopologyEdge } from '@/lib/mesh-topology';
-import { useTopology } from '@/lib/stores/useTopologyStore';
-import { usePackets } from '@/lib/stores/useStore';
+import { useTopology, useIsComputingTopology } from '@/lib/stores/useTopologyStore';
+import { usePackets, usePacketCacheState, useTriggerDeepAnalysis } from '@/lib/stores/useStore';
 import { parsePath, getHashPrefix } from '@/lib/path-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -533,6 +534,60 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   
   // Show/hide topology toggle (default OFF for cleaner initial view)
   const [showTopology, setShowTopology] = useState(false);
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Deep Analysis System
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  const packetCacheState = usePacketCacheState();
+  const isComputingTopology = useIsComputingTopology();
+  const triggerDeepAnalysis = useTriggerDeepAnalysis();
+  
+  // Modal visibility and progress state
+  const [showDeepAnalysisModal, setShowDeepAnalysisModal] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState<AnalysisStep>('fetching');
+  
+  // Track previous state to detect step transitions
+  const wasDeepLoadingRef = useRef(false);
+  const wasComputingRef = useRef(false);
+  
+  // Derive analysis step from packet cache and topology states
+  useEffect(() => {
+    if (!showDeepAnalysisModal) return;
+    
+    const { isDeepLoading } = packetCacheState;
+    
+    // Step 1 → 2: Fetching complete, start analyzing
+    if (wasDeepLoadingRef.current && !isDeepLoading) {
+      setAnalysisStep('analyzing');
+      // Brief pause to show "analyzing" before topology compute starts
+      setTimeout(() => setAnalysisStep('building'), 300);
+    }
+    
+    // Step 3 → complete: Topology compute finished
+    if (wasComputingRef.current && !isComputingTopology && analysisStep === 'building') {
+      setAnalysisStep('complete');
+      // Close modal after brief success state
+      setTimeout(() => {
+        setShowDeepAnalysisModal(false);
+        setAnalysisStep('fetching');
+        // Enable topology view to show the new edges
+        setShowTopology(true);
+      }, 500);
+    }
+    
+    wasDeepLoadingRef.current = isDeepLoading;
+    wasComputingRef.current = isComputingTopology;
+  }, [showDeepAnalysisModal, packetCacheState, isComputingTopology, analysisStep]);
+  
+  // Handler for Deep Analysis button
+  const handleDeepAnalysis = useCallback(() => {
+    setShowDeepAnalysisModal(true);
+    setAnalysisStep('fetching');
+    wasDeepLoadingRef.current = true; // Prime for transition detection
+    wasComputingRef.current = false;
+    triggerDeepAnalysis();
+  }, [triggerDeepAnalysis]);
   
   // ═══════════════════════════════════════════════════════════════════════════════
   // Edge Animation System (state declarations - effect is after filteredCertainPolylines)
@@ -1103,8 +1158,30 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           onCancel={() => setPendingRemove(null)}
         />
         
+        {/* Deep Analysis Modal */}
+        <DeepAnalysisModal
+          isOpen={showDeepAnalysisModal}
+          currentStep={analysisStep}
+          packetCount={packetCacheState.packetCount}
+        />
+        
         {/* Map controls - top right */}
         <div className="absolute top-4 right-4 z-[600] flex gap-2">
+          {/* Deep Analysis button */}
+          <button
+            onClick={handleDeepAnalysis}
+            disabled={packetCacheState.isDeepLoading || showDeepAnalysisModal}
+            className="p-2 transition-colors hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background: 'rgba(20, 20, 22, 0.95)',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(140, 160, 200, 0.2)',
+            }}
+            title="Deep Analysis - Load full packet history and rebuild topology"
+          >
+            <BarChart2 className="w-4 h-4 text-accent-primary" />
+          </button>
+          
           {/* Show/hide topology toggle */}
           {validatedPolylines.length > 0 && (
             <button
