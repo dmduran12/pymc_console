@@ -1263,27 +1263,37 @@ export function getLinkQualityColor(certainCount: number, maxCertainCount: numbe
   }
 }
 
+/** Absolute validation thresholds for line thickness */
+export const EDGE_WEIGHT_THRESHOLDS = {
+  MAX_THICKNESS_AT: 100,  // 100+ validations = max thickness
+  MIN_VALIDATIONS: 5,     // Below 5 = not rendered (filtered elsewhere)
+};
+
+/** Max edge weight (90% of typical node dot size ~12px) */
+const MAX_EDGE_WEIGHT = 10;
+/** Min edge weight for weakest rendered edges */
+const MIN_EDGE_WEIGHT = 1.5;
+
 /**
- * Get line weight for a CERTAIN edge based on link quality (relative to max validation count).
- * Strong = thickest, medium = medium, weak = thinnest.
+ * Get line weight for a CERTAIN edge based on ABSOLUTE validation count.
+ * Uses a sliding scale from 5 validations (min) to 100+ validations (max).
+ * Max thickness is 90% of node dot size for visual hierarchy.
  * 
  * @param certainCount - Number of certain observations
- * @param maxCertainCount - Maximum certain count for normalization
+ * @param _maxCertainCount - Unused (kept for API compatibility)
  */
 export function getLinkQualityWeight(
   certainCount: number,
-  maxCertainCount: number
+  _maxCertainCount: number
 ): number {
-  const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
+  // Clamp to our absolute range: 5 to 100
+  const clamped = Math.max(EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS, 
+                           Math.min(certainCount, EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT));
   
-  if (normalized >= LINK_QUALITY_THRESHOLDS.STRONG) {
-    // Strong link - thickest (6px, +1px from before)
-    return 6;
-  } else if (normalized >= LINK_QUALITY_THRESHOLDS.MEDIUM) {
-    // Medium link
-    return 3;
-  } else {
-    // Weak link - thinnest
-    return 1.5;
-  }
+  // Normalize within our range (5-100 -> 0-1)
+  const range = EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT - EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS;
+  const normalized = (clamped - EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS) / range;
+  
+  // Linear interpolation from min to max weight
+  return MIN_EDGE_WEIGHT + (MAX_EDGE_WEIGHT - MIN_EDGE_WEIGHT) * normalized;
 }
