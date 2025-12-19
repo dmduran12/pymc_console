@@ -746,9 +746,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       // Start trace animation for new edges (staggered by index)
       if (newEdgeKeys.length > 0) {
         // Mark that we're animating (prevents flash from default values)
-        if (isInitialToggle) {
-          setIsAnimatingInitial(true);
-        }
+        // This applies to BOTH initial toggle AND data updates with new edges
+        setIsAnimatingInitial(true);
         
         let startTime: number | null = null;
         const staggerDelay = Math.min(100, ANIMATION_DURATION / newEdgeKeys.length / 2);
