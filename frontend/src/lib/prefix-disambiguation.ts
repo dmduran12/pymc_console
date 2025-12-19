@@ -315,7 +315,7 @@ export function buildPrefixLookup(
         candidate.positionCounts[positionIndex]++;
         candidate.totalAppearances++;
         
-        // === SOURCE-GEOGRAPHIC CORRELATION (NEW) ===
+        // === SOURCE-GEOGRAPHIC CORRELATION ===
         // For position 1 (last hop) with multiple candidates, use source location
         // to score which candidate is geographically plausible as the forwarder.
         //
@@ -361,6 +361,83 @@ export function buildPrefixLookup(
           
           candidate.srcGeoEvidenceScore += evidence;
           candidate.srcGeoEvidenceCount++;
+        }
+        
+        // === NEXT-HOP ANCHOR CORRELATION ===
+        // For position 2+ (not last hop), if the NEXT hop in the path is unambiguous
+        // or has a known location, use that to score this candidate.
+        // This enables "recursive disambiguation" - once we know node 24 is the gateway,
+        // we can use its location to disambiguate nodes that forward TO it.
+        if (position > 1 && candidates.length > 1 && candidate.latitude && candidate.longitude) {
+          // Get the next hop prefix (the node this candidate forwarded to)
+          const nextHopIndex = i + 1;
+          if (nextHopIndex < path.length) {
+            const nextHopPrefix = path[nextHopIndex];
+            const nextHopCandidates = prefixToCandidates.get(nextHopPrefix);
+            
+            // Check if next hop is unambiguous or has a dominant candidate with coords
+            if (nextHopCandidates && nextHopCandidates.length > 0) {
+              // Find the best next-hop candidate (by existing scores or unambiguous)
+              let anchorLat: number | undefined;
+              let anchorLon: number | undefined;
+              let anchorConfidence = 0;
+              
+              if (nextHopCandidates.length === 1) {
+                // Unambiguous - use it as anchor
+                const anchor = nextHopCandidates[0];
+                if (anchor.latitude && anchor.longitude) {
+                  anchorLat = anchor.latitude;
+                  anchorLon = anchor.longitude;
+                  anchorConfidence = 1.0;
+                }
+              } else {
+                // Multiple candidates - use the one with highest combinedScore if it has coords
+                // This creates a "soft" anchor based on current best guess
+                const sorted = [...nextHopCandidates].sort((a, b) => b.combinedScore - a.combinedScore);
+                const best = sorted[0];
+                const second = sorted[1];
+                if (best.latitude && best.longitude && best.combinedScore > 0) {
+                  // Confidence in anchor = score separation
+                  const scoreSeparation = second ? (best.combinedScore - second.combinedScore) / best.combinedScore : 1;
+                  anchorConfidence = Math.min(1, scoreSeparation + 0.3); // Boost a bit since we're iterating
+                  if (anchorConfidence > 0.4) { // Only use if reasonably confident
+                    anchorLat = best.latitude;
+                    anchorLon = best.longitude;
+                  }
+                }
+              }
+              
+              // If we have an anchor, score this candidate by proximity to it
+              if (anchorLat !== undefined && anchorLon !== undefined) {
+                const distToAnchor = calculateDistance(
+                  candidate.latitude, candidate.longitude,
+                  anchorLat, anchorLon
+                );
+                
+                // Score by proximity to next-hop anchor
+                // Nodes that forward to the anchor should be within RF range
+                let evidence = 0;
+                if (distToAnchor < 500) {
+                  evidence = 1.0;   // Very close - strong evidence
+                } else if (distToAnchor < 2000) {
+                  evidence = 0.8;   // Within 2km
+                } else if (distToAnchor < 5000) {
+                  evidence = 0.5;   // Within 5km
+                } else if (distToAnchor < 10000) {
+                  evidence = 0.3;   // Within 10km
+                } else {
+                  evidence = 0.1;   // Far
+                }
+                
+                // Weight by anchor confidence
+                evidence *= anchorConfidence;
+                
+                // Add to srcGeoEvidence (reusing the same accumulator)
+                candidate.srcGeoEvidenceScore += evidence;
+                candidate.srcGeoEvidenceCount++;
+              }
+            }
+          }
         }
         
         // Track adjacent prefixes (before and after in path)

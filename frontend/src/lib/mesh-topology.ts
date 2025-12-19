@@ -822,6 +822,17 @@ export function buildMeshTopology(
       }
     }
     
+    // === DEBUG: Log paths where node 24 appears ===
+    if (process.env.NODE_ENV === 'development' && effectivePath.some(p => p === '24')) {
+      console.log(`[mesh-topology] DEBUG: Path with 24:`, {
+        effective: effectivePath,
+        effectiveLength,
+        original: originalPath,
+        srcHash: packet.src_hash?.slice(0, 8),
+        willProcessConsecutivePairs: effectiveLength >= 2,
+      });
+    }
+    
     // Process consecutive pairs in the EFFECTIVE path (local already stripped)
     for (let i = 0; i < effectiveLength - 1; i++) {
       const fromPrefix = effectivePath[i];
@@ -857,10 +868,23 @@ export function buildMeshTopology(
       if (fromResult.hash === toResult.hash) continue;
       
       // Determine if this observation is "certain" based on disambiguation confidence
-      // An observation is certain if BOTH endpoints have confidence >= threshold
-      const isCertainObservation = 
+      // 
+      // IMPORTANT FIX: An observation should be certain if EITHER:
+      // 1. Both endpoints have high confidence (traditional case)
+      // 2. The "to" node has very high confidence (>= 0.9) - this handles the case where
+      //    a high-confidence gateway (like node 24) receives from nodes with collisions.
+      //    We KNOW the packet went through the gateway, so the edge is certain even if
+      //    we're less sure about the exact upstream node.
+      // 3. This is the last hop in the path (toPosition === 1) and to has high confidence
+      //
+      // This allows us to build edges backward from confidently-resolved gateways.
+      const bothHighConfidence = 
         fromResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD && 
         toResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD;
+      const toIsVeryHighConfidence = toResult.confidence >= 0.9;
+      const toIsConfidentLastHop = isToLastHop && toResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD;
+      
+      const isCertainObservation = bothHighConfidence || toIsVeryHighConfidence || toIsConfidentLastHop;
       
       // Track nodes for centrality
       nodesInPath.add(fromResult.hash);
@@ -872,7 +896,11 @@ export function buildMeshTopology(
       }
       
       // Calculate combined confidence for this hop
-      const hopConfidence = fromResult.confidence * toResult.confidence;
+      // When to-node is very high confidence, use its confidence directly
+      // (don't penalize by multiplying with from's lower confidence)
+      const hopConfidence = toIsVeryHighConfidence 
+        ? toResult.confidence 
+        : fromResult.confidence * toResult.confidence;
       
       // For uncertain edges, apply threshold; certain edges always included
       if (!isCertainObservation && hopConfidence < confidenceThreshold) continue;
