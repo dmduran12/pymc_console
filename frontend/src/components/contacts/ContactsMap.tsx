@@ -25,11 +25,11 @@ const DESIGN = {
   nodeColor: '#4338CA',        // Deep indigo/royal blue
   // Local node - slightly brighter but still muted
   localColor: '#4F46E5',       // Indigo-600
-  // Edge colors  
-  edgeColor: 'rgba(100, 110, 130, 0.45)',  // Mid gray, subtle
-  loopEdgeColor: '#6366F1',    // Indigo-500 - slightly brighter for loops
-  // Hub indicator - same as nodes
-  hubColor: '#4338CA',
+  // Edge colors - knocked back with 70% black tone for subtlety
+  edgeColor: 'rgba(50, 55, 65, 0.55)',     // Dark gray (70% toward black)
+  loopEdgeColor: '#3730A3',    // Indigo-800 darkened (70% black mix)
+  // Hub indicator - 25% brighter, saturated royal blue-purple
+  hubColor: '#6366F1',         // Indigo-500 (brighter, still saturated)
 };
 
 /**
