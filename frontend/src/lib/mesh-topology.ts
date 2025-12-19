@@ -1203,7 +1203,7 @@ export function getLinkQualityColor(certainCount: number, maxCertainCount: numbe
 
 /** Absolute validation thresholds for line thickness */
 export const EDGE_WEIGHT_THRESHOLDS = {
-  MAX_THICKNESS_AT: 100,  // 100+ validations = max thickness
+  MAX_THICKNESS_AT: 300,  // 300+ validations = max thickness
   MIN_VALIDATIONS: 5,     // Below 5 = not rendered (filtered elsewhere)
 };
 

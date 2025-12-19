@@ -12,48 +12,95 @@ interface LocalNode {
 interface PathMapProps {
   resolvedPath: ResolvedPath;
   localNode?: LocalNode;
+  /** Hub node hashes for visual distinction */
+  hubNodes?: string[];
 }
 
-// Colors for path visualization
-const PATH_COLORS = {
-  exact: '#39D98A',      // Green - exact match
-  multi: '#F9D26F',      // Yellow - multiple candidates  
-  unknown: '#767688',    // Gray - no candidates
-  line: '#B49DFF',       // Lavender - path line
-  localNode: '#60A5FA',  // Blue - local node
+// ═══════════════════════════════════════════════════════════════════════════════
+// Design System Constants (matches ContactsMap)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Marker size (matches ContactsMap)
+const MARKER_SIZE = 14;
+const RING_THICKNESS = 5;
+
+// Design palette (matches ContactsMap)
+const DESIGN = {
+  nodeColor: '#4338CA',      // Deep indigo - standard nodes
+  localColor: '#4F46E5',     // Indigo-600 - local node
+  hubColor: '#6366F1',       // Indigo-500 - hub nodes (filled)
+  edgeColor: '#3B3F4A',      // Dark gray - path lines
+  
+  // Confidence stroke colors
+  confidenceExact: '#39D98A',    // Green - 100% (unique match)
+  confidenceHigh: '#F9D26F',     // Yellow - 50-99%
+  confidenceMedium: '#FF8A5C',   // Orange - 25-49%
+  confidenceLow: '#FF5C7A',      // Red - 1-24%
+  confidenceUnknown: '#767688',  // Gray - 0%
 };
 
 /**
- * Create a simple dot marker icon
+ * Get stroke color based on confidence level.
  */
-function createDotIcon(
+function getConfidenceStrokeColor(confidence: number, candidateCount: number): string {
+  if (candidateCount === 0) return DESIGN.confidenceUnknown;
+  if (confidence >= 1) return DESIGN.confidenceExact;
+  if (confidence >= 0.5) return DESIGN.confidenceHigh;
+  if (confidence >= 0.25) return DESIGN.confidenceMedium;
+  if (confidence > 0) return DESIGN.confidenceLow;
+  return DESIGN.confidenceUnknown;
+}
+
+/**
+ * Create a ring icon with a confidence stroke indicator.
+ * Ring color is node type, stroke color indicates confidence.
+ */
+function createConfidenceRingIcon(
   confidence: number,
-  isLocal: boolean = false
+  candidateCount: number,
+  isLocal: boolean,
+  isHub: boolean
 ): L.DivIcon {
-  const color = isLocal
-    ? PATH_COLORS.localNode
-    : confidence >= 1
-    ? PATH_COLORS.exact
-    : confidence > 0
-    ? PATH_COLORS.multi
-    : PATH_COLORS.unknown;
+  const strokeColor = getConfidenceStrokeColor(confidence, candidateCount);
+  const fillColor = isLocal ? DESIGN.localColor : isHub ? DESIGN.hubColor : 'transparent';
+  const borderColor = isLocal || isHub ? 'transparent' : DESIGN.nodeColor;
+  const borderWidth = isLocal || isHub ? 0 : RING_THICKNESS;
   
-  const size = 14;
-  
+  // For local/hub: filled circle with confidence stroke
+  // For standard: ring with confidence stroke
   return L.divIcon({
-    className: 'path-marker',
-    html: `
+    className: 'path-confidence-marker',
+    html: `<div style="
+      width: ${MARKER_SIZE + 4}px;
+      height: ${MARKER_SIZE + 4}px;
+      position: relative;
+    ">
+      <!-- Confidence stroke (outer ring) -->
       <div style="
-        width: ${size}px;
-        height: ${size}px;
-        background: ${color};
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: ${MARKER_SIZE + 4}px;
+        height: ${MARKER_SIZE + 4}px;
         border-radius: 50%;
-        border: 2px solid rgba(255,255,255,0.9);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        border: 2px solid ${strokeColor};
+        box-sizing: border-box;
       "></div>
-    `,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+      <!-- Node marker (inner) -->
+      <div style="
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: ${MARKER_SIZE}px;
+        height: ${MARKER_SIZE}px;
+        background: ${fillColor};
+        border-radius: 50%;
+        border: ${borderWidth}px solid ${borderColor};
+        box-sizing: border-box;
+      "></div>
+    </div>`,
+    iconSize: [MARKER_SIZE + 4, MARKER_SIZE + 4],
+    iconAnchor: [(MARKER_SIZE + 4) / 2, (MARKER_SIZE + 4) / 2],
   });
 }
 
@@ -71,10 +118,10 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
         // Single point - zoom in close
         map.setView(positions[0], 15);
       } else {
-        // Multiple points - fit bounds to show all markers with padding
+        // Multiple points - fit bounds with minimal padding (matches ContactsMap)
         map.fitBounds(positions, { 
-          padding: [30, 30], 
-          maxZoom: 16,  // Allow zooming in close for nearby nodes
+          padding: [15, 15], 
+          maxZoom: 16,
         });
       }
     }
@@ -84,43 +131,32 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
 }
 
 /**
- * Path line component with layered styling
+ * Path line component - matches ContactsMap edge styling
  */
 function PathLine({ positions }: { positions: [number, number][] }) {
   if (positions.length < 2) return null;
   
   return (
-    <>
-      {/* Background glow */}
-      <Polyline
-        positions={positions}
-        pathOptions={{
-          color: PATH_COLORS.line,
-          weight: 4,
-          opacity: 0.25,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }}
-      />
-      {/* Main line */}
-      <Polyline
-        positions={positions}
-        pathOptions={{
-          color: PATH_COLORS.line,
-          weight: 2.5,
-          opacity: 0.85,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }}
-      />
-    </>
+    <Polyline
+      positions={positions}
+      pathOptions={{
+        color: DESIGN.edgeColor,
+        weight: 2,
+        opacity: 0.7,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }}
+    />
   );
 }
 
 /**
  * PathMap component - renders the Leaflet map with path visualization
+ * Styled to match ContactsMap (ring markers, subtle edges)
  */
-export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
+export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: PathMapProps) {
+  const hubSet = useMemo(() => new Set(hubNodes), [hubNodes]);
+  
   // Build positions and markers from resolved path
   const { positions, markers, pathLine } = useMemo(() => {
     const positions: [number, number][] = [];
@@ -128,8 +164,10 @@ export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
       position: [number, number];
       prefix: string;
       confidence: number;
+      candidateCount: number;
       hopIndex: number;
       candidate: PathCandidate;
+      isHub: boolean;
     }> = [];
     const pathLine: [number, number][] = [];
     
@@ -151,14 +189,16 @@ export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
           position: pos,
           prefix: hop.prefix,
           confidence: hop.confidence,
+          candidateCount: hop.candidates.length,
           hopIndex,
           candidate,
+          isHub: hubSet.has(candidate.hash),
         });
       });
     });
     
     return { positions, markers, pathLine };
-  }, [resolvedPath]);
+  }, [resolvedPath, hubSet]);
   
   // Calculate center
   const center: [number, number] = useMemo(() => {
@@ -205,29 +245,47 @@ export default function PathMap({ resolvedPath, localNode }: PathMapProps) {
         <Marker
           key={`${marker.hopIndex}-${marker.candidate.hash}`}
           position={marker.position}
-          icon={createDotIcon(
+          icon={createConfidenceRingIcon(
             marker.confidence,
-            marker.candidate.isLocal
+            marker.candidateCount,
+            marker.candidate.isLocal || false,
+            marker.isHub
           )}
-          opacity={marker.candidate.probability}
+          opacity={Math.max(0.5, marker.candidate.probability)} // Min opacity for visibility
         >
           <Tooltip
             permanent={false}
             direction="top"
-            offset={[0, -10]}
+            offset={[0, -12]}
           >
             <div className="text-xs">
-              <div className="font-semibold">{marker.candidate.name}</div>
-              <div className="text-text-muted font-mono text-[10px]">
-                {marker.candidate.hash.slice(0, 8)}...
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold">{marker.candidate.name}</span>
+                {marker.isHub && (
+                  <span 
+                    className="px-1 py-0.5 text-[8px] font-bold rounded"
+                    style={{ backgroundColor: '#FBBF24', color: '#000' }}
+                  >HUB</span>
+                )}
+                {marker.candidate.isLocal && (
+                  <span 
+                    className="px-1 py-0.5 text-[8px] font-bold rounded"
+                    style={{ backgroundColor: DESIGN.localColor, color: '#fff' }}
+                  >LOCAL</span>
+                )}
               </div>
-              {marker.candidate.probability < 1 && (
-                <div className="text-accent-secondary">
-                  {(marker.candidate.probability * 100).toFixed(0)}% likely
+              <div className="text-text-muted font-mono text-[10px]">
+                {marker.prefix} • {marker.candidate.hash.slice(0, 10)}...
+              </div>
+              {marker.candidate.probability < 1 && marker.candidateCount > 1 && (
+                <div style={{ color: getConfidenceStrokeColor(marker.confidence, marker.candidateCount) }}>
+                  {(marker.candidate.probability * 100).toFixed(0)}% confidence
                 </div>
               )}
-              {marker.candidate.isLocal && (
-                <div className="text-accent-tertiary">Local Node</div>
+              {marker.candidateCount === 1 && (
+                <div style={{ color: DESIGN.confidenceExact }}>
+                  Exact match
+                </div>
               )}
             </div>
           </Tooltip>

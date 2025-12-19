@@ -56,6 +56,8 @@ interface PathMapVisualizationProps {
   neighborAffinity?: Map<string, NeighborAffinity>;
   /** Pre-computed prefix disambiguation lookup (preferred for confidence) */
   prefixLookup?: PrefixLookup;
+  /** Hub node hashes for visual distinction on map */
+  hubNodes?: string[];
 }
 
 /** Candidate node for a path prefix with display info */
@@ -378,6 +380,7 @@ export function PathMapVisualization({
   localHash,
   neighborAffinity,
   prefixLookup,
+  hubNodes,
 }: PathMapVisualizationProps) {
   // Resolve path prefixes to candidate nodes
   // Uses prefixLookup when available (preferred - includes dominant forwarder boost)
@@ -441,6 +444,7 @@ export function PathMapVisualization({
             <PathMap
               resolvedPath={resolvedPath}
               localNode={localNode}
+              hubNodes={hubNodes}
             />
           </Suspense>
         </MapErrorBoundary>
