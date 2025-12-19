@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home } from 'lucide-react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -24,8 +25,8 @@ const RING_THICKNESS = 5;
 const DESIGN = {
   // Primary node color - deep royal blue-purple, dark and subtle
   nodeColor: '#4338CA',        // Deep indigo/royal blue
-  // Local node - slightly brighter but still muted
-  localColor: '#4F46E5',       // Indigo-600
+  // Local node - warm golden yellow (home icon)
+  localColor: '#FBBF24',       // Amber-400
   // Edge colors - solid colors for crisp rendering (no alpha to avoid overlap artifacts)
   edgeColor: '#3B3F4A',        // Dark gray - solid, no transparency
   loopEdgeColor: '#3730A3',    // Indigo-800 darkened (70% black mix)
@@ -36,8 +37,10 @@ const DESIGN = {
 /**
  * Create a ring (torus) icon for standard nodes.
  * Thick ring with small donut hole - no stroke, just the ring itself.
+ * @param color - Ring color
+ * @param opacity - Opacity 0-1 (for fade animations)
  */
-function createRingIcon(color: string = DESIGN.nodeColor): L.DivIcon {
+function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1): L.DivIcon {
   return L.divIcon({
     className: 'map-ring-marker',
     html: `<div style="
@@ -47,6 +50,8 @@ function createRingIcon(color: string = DESIGN.nodeColor): L.DivIcon {
       border-radius: 50%;
       border: ${RING_THICKNESS}px solid ${color};
       box-sizing: border-box;
+      opacity: ${opacity};
+      transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1);
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -57,8 +62,10 @@ function createRingIcon(color: string = DESIGN.nodeColor): L.DivIcon {
 /**
  * Create a filled dot icon for hub nodes.
  * Same outer dimension as ring - no border/stroke.
+ * @param color - Fill color
+ * @param opacity - Opacity 0-1 (for fade animations)
  */
-function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
+function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1): L.DivIcon {
   return L.divIcon({
     className: 'map-filled-marker',
     html: `<div style="
@@ -67,6 +74,8 @@ function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
       background-color: ${color};
       border-radius: 50%;
       box-sizing: border-box;
+      opacity: ${opacity};
+      transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1);
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -75,21 +84,33 @@ function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
 }
 
 /**
- * Create local node icon - filled, same size as other nodes, no stroke.
+ * Create local node icon - yellow house icon to indicate "home" node.
+ * Uses lucide-react Home icon rendered as static SVG.
  */
 function createLocalIcon(): L.DivIcon {
+  // Render the Home icon to static SVG markup
+  const iconMarkup = renderToStaticMarkup(
+    <Home 
+      size={MARKER_SIZE + 2} 
+      color={DESIGN.localColor} 
+      strokeWidth={2.5}
+      fill="none"
+    />
+  );
+  
   return L.divIcon({
     className: 'map-local-marker',
     html: `<div style="
-      width: ${MARKER_SIZE}px;
-      height: ${MARKER_SIZE}px;
-      background-color: ${DESIGN.localColor};
-      border-radius: 50%;
-      box-sizing: border-box;
-    "></div>`,
-    iconSize: [MARKER_SIZE, MARKER_SIZE],
-    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
-    popupAnchor: [0, -MARKER_SIZE / 2],
+      width: ${MARKER_SIZE + 2}px;
+      height: ${MARKER_SIZE + 2}px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));
+    ">${iconMarkup}</div>`,
+    iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
+    iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
+    popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
   });
 }
 
@@ -536,6 +557,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const [showTopology, setShowTopology] = useState(false);
   
   // ═══════════════════════════════════════════════════════════════════════════════
+  // Node Fade Animation System (for Direct toggle)
+  // Staggered fade with randomized delays for organic feel
+  // ═══════════════════════════════════════════════════════════════════════════════
+  const [nodeOpacities, setNodeOpacities] = useState<Map<string, number>>(new Map());
+  const NODE_FADE_DURATION = 500; // 0.5s
+  const prevSoloDirectRef = useRef(soloDirect);
+  const nodeStaggerDelaysRef = useRef<Map<string, number>>(new Map());
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
   // Deep Analysis System
   // ═══════════════════════════════════════════════════════════════════════════════
   
@@ -558,6 +588,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const MIN_BUILDING_TIME_MS = 1700;
   // Time to show "Ready!" state before closing (1s)
   const READY_DISPLAY_TIME_MS = 1000;
+  // Delay after modal closes before starting edge animation (let user see the map)
+  const POST_MODAL_ANIMATION_DELAY_MS = 150;
+  
+  // Track if we need to trigger topology animation after modal closes
+  const [pendingTopologyReveal, setPendingTopologyReveal] = useState(false);
   
   // Extract primitive values to avoid object reference changes triggering infinite loops
   const isDeepLoading = packetCacheState.isDeepLoading;
@@ -590,10 +625,10 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         setAnalysisStep('complete');
         // Show "Ready!" state for 1s before closing
         setTimeout(() => {
+          // Close modal first, mark topology reveal as pending
           setShowDeepAnalysisModal(false);
           setAnalysisStep('fetching');
-          // Enable topology view to show the new edges
-          setShowTopology(true);
+          setPendingTopologyReveal(true);
         }, READY_DISPLAY_TIME_MS);
       }, remainingDelay);
     }
@@ -601,6 +636,18 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     wasDeepLoadingRef.current = isDeepLoading;
     wasComputingRef.current = isComputingTopology;
   }, [showDeepAnalysisModal, isDeepLoading, isComputingTopology, analysisStep]);
+  
+  // Trigger topology animation AFTER modal has closed
+  useEffect(() => {
+    if (pendingTopologyReveal && !showDeepAnalysisModal) {
+      // Small delay to let the modal fully unmount and user see the map
+      const timer = setTimeout(() => {
+        setShowTopology(true);
+        setPendingTopologyReveal(false);
+      }, POST_MODAL_ANIMATION_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingTopologyReveal, showDeepAnalysisModal]);
   
   // Handler for Deep Analysis button
   const handleDeepAnalysis = useCallback(() => {
@@ -742,20 +789,157 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     });
   }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet, showTopology, localConnectedNodes]);
   
+  // ─── Node Fade Animation Effect (for Direct toggle) ───
+  // Staggered fade in/out with randomized delays
+  useEffect(() => {
+    const wasDirectMode = prevSoloDirectRef.current;
+    const isDirectMode = soloDirect;
+    prevSoloDirectRef.current = soloDirect;
+    
+    // Skip if no change or if not in a mode where we care about animating
+    if (wasDirectMode === isDirectMode) return;
+    
+    // Get all neighbor hashes
+    const allNeighborHashes = neighborsWithLocation.map(([hash]) => hash);
+    
+    // Generate random stagger delays (only once per node, persisted across toggles)
+    for (const hash of allNeighborHashes) {
+      if (!nodeStaggerDelaysRef.current.has(hash)) {
+        nodeStaggerDelaysRef.current.set(hash, Math.random());
+      }
+    }
+    
+    // Determine which nodes are being hidden/shown
+    const animatingNodes = allNeighborHashes.filter(hash => {
+      const isDirect = directNodeSet.has(hash);
+      // Nodes that would be filtered OUT by direct mode
+      return !isDirect;
+    });
+    
+    if (animatingNodes.length === 0) return;
+    
+    // Toggling Direct ON: fade OUT non-direct nodes (1 → 0)
+    // Toggling Direct OFF: fade IN non-direct nodes (0 → 1)
+    const targetOpacity = isDirectMode ? 0 : 1;
+    const startOpacity = isDirectMode ? 1 : 0;
+    const maxStaggerDelay = 200; // Max 200ms stagger spread
+    
+    // Initialize all animating nodes to their start opacity
+    setNodeOpacities(prev => {
+      const next = new Map(prev);
+      for (const hash of animatingNodes) {
+        next.set(hash, startOpacity);
+      }
+      return next;
+    });
+    
+    let startTime: number | null = null;
+    const animateNodes = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      
+      setNodeOpacities(prev => {
+        const next = new Map(prev);
+        
+        for (const hash of animatingNodes) {
+          const staggerDelay = (nodeStaggerDelaysRef.current.get(hash) ?? 0) * maxStaggerDelay;
+          const nodeElapsed = Math.max(0, elapsed - staggerDelay);
+          const progress = Math.min(nodeElapsed / NODE_FADE_DURATION, 1);
+          const eased = easeInOutCubic(progress);
+          
+          // Interpolate between start and target
+          const opacity = startOpacity + (targetOpacity - startOpacity) * eased;
+          next.set(hash, opacity);
+        }
+        
+        return next;
+      });
+      
+      const totalDuration = NODE_FADE_DURATION + maxStaggerDelay;
+      if (elapsed < totalDuration) {
+        requestAnimationFrame(animateNodes);
+      }
+    };
+    
+    requestAnimationFrame(animateNodes);
+  }, [soloDirect, neighborsWithLocation, directNodeSet, easeInOutCubic, NODE_FADE_DURATION]);
+  
   // ─── Edge Animation Effect (must be after filteredCertainPolylines) ───
   // Track "snapshot" of weights at animation start for smooth interpolation
   const animStartWeightsRef = useRef<Map<string, number>>(new Map());
   const animTargetWeightsRef = useRef<Map<string, number>>(new Map());
   
+  // Exit animation state - retract edges when topology is toggled off
+  const [isExiting, setIsExiting] = useState(false);
+  const prevShowTopologyRef = useRef(showTopology);
+  const edgeAnimProgressRef = useRef<Map<string, number>>(new Map());
+  const EXIT_ANIMATION_DURATION = 500; // 0.5s quick "zip" retraction
+  
+  // Keep ref in sync with state (for capturing in animation)
   useEffect(() => {
-    if (!showTopology) {
-      // When toggled off, reset animation state
-      setEdgeAnimProgress(new Map());
-      knownEdgesRef.current = new Set();
-      lastEdgeSetRef.current = '';
-      animStartWeightsRef.current = new Map();
-      animTargetWeightsRef.current = new Map();
-      setIsAnimatingInitial(false);
+    edgeAnimProgressRef.current = edgeAnimProgress;
+  }, [edgeAnimProgress]);
+  
+  // Cubic ease-out for snappy retraction
+  const easeOutCubic = useCallback((t: number): number => {
+    return 1 - Math.pow(1 - t, 3);
+  }, []);
+  
+  // Handle topology toggle - detect changes and trigger exit animation
+  useEffect(() => {
+    const wasShowing = prevShowTopologyRef.current;
+    const isShowing = showTopology;
+    prevShowTopologyRef.current = showTopology;
+    
+    // Toggling OFF: start exit animation (retract edges toward nodes)
+    if (wasShowing && !isShowing && !isExiting) {
+      setIsExiting(true);
+      
+      // Capture current edge progress values as starting points for retraction
+      const startProgressMap = new Map(edgeAnimProgressRef.current);
+      
+      let startTime: number | null = null;
+      const animateExit = (timestamp: number) => {
+        if (!startTime) startTime = timestamp;
+        const elapsed = timestamp - startTime;
+        const progress = Math.min(elapsed / EXIT_ANIMATION_DURATION, 1);
+        const eased = easeOutCubic(progress); // Quick ease-out for "zip" effect
+        
+        // Retract each edge from its current progress toward 0
+        setEdgeAnimProgress(() => {
+          const next = new Map<string, number>();
+          for (const [key, startVal] of startProgressMap) {
+            // Interpolate from startVal → 0
+            next.set(key, startVal * (1 - eased));
+          }
+          return next;
+        });
+        
+        if (progress < 1) {
+          requestAnimationFrame(animateExit);
+        } else {
+          // Exit animation complete - fully reset state
+          setIsExiting(false);
+          setEdgeAnimProgress(new Map());
+          knownEdgesRef.current = new Set();
+          lastEdgeSetRef.current = '';
+          animStartWeightsRef.current = new Map();
+          animTargetWeightsRef.current = new Map();
+        }
+      };
+      
+      requestAnimationFrame(animateExit);
+    }
+    
+    // Toggling ON: immediately set isAnimatingInitial to prevent blink
+    if (!wasShowing && isShowing) {
+      setIsAnimatingInitial(true);
+    }
+  }, [showTopology, isExiting, easeOutCubic]);
+  
+  useEffect(() => {
+    // Skip if we're in exit animation or topology is off
+    if (!showTopology || isExiting) {
       return;
     }
     
@@ -893,7 +1077,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     }
     
     lastEdgeSetRef.current = currentWeightSignature;
-  }, [showTopology, filteredCertainPolylines, meshTopology.maxCertainCount, easeInOutCubic, ANIMATION_DURATION]);
+  }, [showTopology, isExiting, filteredCertainPolylines, meshTopology.maxCertainCount, easeInOutCubic, ANIMATION_DURATION]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -958,13 +1142,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         <FitBoundsOnce positions={allPositions} />
         
         {/* Draw validated topology edges - animated trace effect */}
-        {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
+        {(showTopology || isExiting) && filteredCertainPolylines.map(({ from, to, edge }) => {
           // Get animation progress for this edge
           // Default to 0 (hidden) if we're in initial animation phase, otherwise 1 (fully visible)
           const defaultProgress = isAnimatingInitial ? 0 : 1;
           const traceProgress = edgeAnimProgress.get(edge.key) ?? defaultProgress;
           
-          // Don't render edges that haven't started animating
+          // Don't render edges that haven't started animating (or have fully retracted)
           if (traceProgress <= 0) return null;
           
           // Calculate weight with smooth interpolation during weight animation
@@ -994,7 +1178,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             from[1] + (to[1] - from[1]) * traceProgress,
           ];
           
-          // Opacity fades in with the trace
+          // Opacity scales with trace progress (fades as edges retract)
           const opacity = Math.min(traceProgress * 1.5, 1) * 0.7;
           
           // Loop edges: render as parallel double-lines in accent color
@@ -1108,13 +1292,45 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         )}
         
         {/* Neighbor markers - rings for standard nodes, filled for hubs */}
-        {filteredNeighbors.map(([hash, neighbor]) => {
+        {/* Use neighborsWithLocation for fade animation, but apply visibility rules */}
+        {neighborsWithLocation.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
           // Check if this is a zero-hop neighbor or hub node
           const isZeroHop = zeroHopNeighbors.has(hash);
           const isHub = meshTopology.hubNodes.includes(hash);
           const centrality = meshTopology.centrality.get(hash) || 0;
+          
+          // Visibility calculation - should this node be shown given solo modes?
+          const isHubConnected = hubConnectedNodes.has(hash);
+          const isDirect = directNodeSet.has(hash);
+          const isLocalConnected = showTopology && localConnectedNodes.has(hash);
+          
+          let shouldShow = true;
+          if (soloHubs || soloDirect) {
+            if (soloHubs && soloDirect) {
+              shouldShow = isHubConnected || isDirect || isLocalConnected;
+            } else if (soloHubs) {
+              shouldShow = isHubConnected;
+            } else if (soloDirect) {
+              shouldShow = isDirect || isLocalConnected;
+            }
+          }
+          
+          // Calculate opacity for fade animation
+          // - Nodes that should be shown get full opacity (or animated opacity)
+          // - Nodes being hidden get their animated opacity
+          let nodeOpacity = 1;
+          if (soloDirect && !isDirect && !isLocalConnected) {
+            // Non-direct nodes in direct mode: use animated opacity (fading out)
+            nodeOpacity = nodeOpacities.get(hash) ?? 0;
+          } else if (!soloDirect && nodeOpacities.has(hash)) {
+            // Nodes returning from direct mode: use animated opacity (fading in)
+            nodeOpacity = nodeOpacities.get(hash) ?? 1;
+          }
+          
+          // Don't render if completely invisible (and not animating in)
+          if (!shouldShow && nodeOpacity <= 0) return null;
           
           // Calculate SNR (only meaningful for zero-hop neighbors)
           const meanSnr = calculateMeanSnr(packets, hash);
@@ -1127,12 +1343,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Compact hash prefix (2 chars)
           const hashPrefix = hash.startsWith('0x') ? hash.slice(2, 4).toUpperCase() : hash.slice(0, 2).toUpperCase();
           
-          // Icon selection:
+          // Icon selection with opacity:
           // - Hubs: filled dot (indicates importance)
           // - All other nodes: ring/torus (elegant, minimal)
           const icon = isHub 
-            ? createFilledIcon(DESIGN.hubColor) 
-            : createRingIcon(DESIGN.nodeColor);
+            ? createFilledIcon(DESIGN.hubColor, nodeOpacity) 
+            : createRingIcon(DESIGN.nodeColor, nodeOpacity);
           
           return (
             <Marker
@@ -1315,13 +1531,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               />
               <span className="text-text-muted">Hub</span>
             </div>
-            {/* Local node - no border */}
+            {/* Local node - house icon */}
             <div className="flex items-center gap-1.5">
-              <div 
-                className="w-3 h-3 rounded-full flex-shrink-0" 
-                style={{ 
-                  backgroundColor: DESIGN.localColor,
-                }}
+              <Home 
+                className="w-3 h-3 flex-shrink-0" 
+                style={{ color: DESIGN.localColor }}
+                strokeWidth={2.5}
               />
               <span className="text-text-muted">Local</span>
             </div>
