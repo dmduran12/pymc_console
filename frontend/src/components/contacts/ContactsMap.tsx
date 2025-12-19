@@ -1262,12 +1262,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
-        {/* Local node marker - filled, distinct blue */}
+        {/* Local node marker - yellow house, always on top */}
         {localNode && localNode.latitude && localNode.longitude && (
           <Marker
             position={[localNode.latitude, localNode.longitude]}
             icon={createLocalIcon()}
-            zIndexOffset={1000}
+            zIndexOffset={10000}
             eventHandlers={{
               mouseover: () => setHoveredMarker('local'),
               mouseout: () => setHoveredMarker(null),

@@ -29,78 +29,47 @@ const DESIGN = {
   nodeColor: '#4338CA',      // Deep indigo - standard nodes
   localColor: '#4F46E5',     // Indigo-600 - local node
   hubColor: '#6366F1',       // Indigo-500 - hub nodes (filled)
-  edgeColor: '#3B3F4A',      // Dark gray - path lines
-  
-  // Confidence stroke colors
-  confidenceExact: '#39D98A',    // Green - 100% (unique match)
-  confidenceHigh: '#F9D26F',     // Yellow - 50-99%
-  confidenceMedium: '#FF8A5C',   // Orange - 25-49%
-  confidenceLow: '#FF5C7A',      // Red - 1-24%
-  confidenceUnknown: '#767688',  // Gray - 0%
+  edgeColor: '#3B3F4A',      // Dark gray - path lines (matches ContactsMap)
+  ambiguousColor: '#F9D26F', // Yellow - de-prioritized/ambiguous candidates
 };
 
 /**
- * Get stroke color based on confidence level.
+ * Create a simple ring/filled icon for path nodes.
+ * No confidence stroke - disambiguation shown via color and opacity.
+ * 
+ * @param isLocal - Whether this is the local node
+ * @param isHub - Whether this is a hub node
+ * @param isPrimary - Whether this is the primary (most likely) candidate
  */
-function getConfidenceStrokeColor(confidence: number, candidateCount: number): string {
-  if (candidateCount === 0) return DESIGN.confidenceUnknown;
-  if (confidence >= 1) return DESIGN.confidenceExact;
-  if (confidence >= 0.5) return DESIGN.confidenceHigh;
-  if (confidence >= 0.25) return DESIGN.confidenceMedium;
-  if (confidence > 0) return DESIGN.confidenceLow;
-  return DESIGN.confidenceUnknown;
-}
-
-/**
- * Create a ring icon with a confidence stroke indicator.
- * Ring color is node type, stroke color indicates confidence.
- */
-function createConfidenceRingIcon(
-  confidence: number,
-  candidateCount: number,
+function createPathNodeIcon(
   isLocal: boolean,
-  isHub: boolean
+  isHub: boolean,
+  isPrimary: boolean
 ): L.DivIcon {
-  const strokeColor = getConfidenceStrokeColor(confidence, candidateCount);
-  const fillColor = isLocal ? DESIGN.localColor : isHub ? DESIGN.hubColor : 'transparent';
-  const borderColor = isLocal || isHub ? 'transparent' : DESIGN.nodeColor;
-  const borderWidth = isLocal || isHub ? 0 : RING_THICKNESS;
+  // Primary candidates use standard colors, secondary use yellow
+  const fillColor = isLocal 
+    ? DESIGN.localColor 
+    : isHub 
+      ? DESIGN.hubColor 
+      : isPrimary 
+        ? 'transparent' 
+        : DESIGN.ambiguousColor;
   
-  // For local/hub: filled circle with confidence stroke
-  // For standard: ring with confidence stroke
+  const borderColor = (isLocal || isHub || !isPrimary) ? 'transparent' : DESIGN.nodeColor;
+  const borderWidth = (isLocal || isHub || !isPrimary) ? 0 : RING_THICKNESS;
+  
   return L.divIcon({
-    className: 'path-confidence-marker',
+    className: 'path-node-marker',
     html: `<div style="
-      width: ${MARKER_SIZE + 4}px;
-      height: ${MARKER_SIZE + 4}px;
-      position: relative;
-    ">
-      <!-- Confidence stroke (outer ring) -->
-      <div style="
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: ${MARKER_SIZE + 4}px;
-        height: ${MARKER_SIZE + 4}px;
-        border-radius: 50%;
-        border: 2px solid ${strokeColor};
-        box-sizing: border-box;
-      "></div>
-      <!-- Node marker (inner) -->
-      <div style="
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: ${MARKER_SIZE}px;
-        height: ${MARKER_SIZE}px;
-        background: ${fillColor};
-        border-radius: 50%;
-        border: ${borderWidth}px solid ${borderColor};
-        box-sizing: border-box;
-      "></div>
-    </div>`,
-    iconSize: [MARKER_SIZE + 4, MARKER_SIZE + 4],
-    iconAnchor: [(MARKER_SIZE + 4) / 2, (MARKER_SIZE + 4) / 2],
+      width: ${MARKER_SIZE}px;
+      height: ${MARKER_SIZE}px;
+      background: ${fillColor};
+      border-radius: 50%;
+      border: ${borderWidth}px solid ${borderColor};
+      box-sizing: border-box;
+    "></div>`,
+    iconSize: [MARKER_SIZE, MARKER_SIZE],
+    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
   });
 }
 
@@ -168,6 +137,7 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
       hopIndex: number;
       candidate: PathCandidate;
       isHub: boolean;
+      isPrimary: boolean;
     }> = [];
     const pathLine: [number, number][] = [];
     
@@ -181,10 +151,12 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
       const primaryCandidate = sortedCandidates[0];
       pathLine.push([primaryCandidate.latitude, primaryCandidate.longitude]);
       
-      // Add markers for all candidates (with opacity based on probability)
-      hop.candidates.forEach(candidate => {
+      // Add markers for all candidates
+      // Primary candidate (highest probability) gets full styling, others get yellow + low opacity
+      hop.candidates.forEach((candidate, candidateIndex) => {
         const pos: [number, number] = [candidate.latitude, candidate.longitude];
         positions.push(pos);
+        const isPrimary = candidateIndex === 0; // First in sorted list is primary
         markers.push({
           position: pos,
           prefix: hop.prefix,
@@ -193,6 +165,7 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
           hopIndex,
           candidate,
           isHub: hubSet.has(candidate.hash),
+          isPrimary,
         });
       });
     });
@@ -245,13 +218,12 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
         <Marker
           key={`${marker.hopIndex}-${marker.candidate.hash}`}
           position={marker.position}
-          icon={createConfidenceRingIcon(
-            marker.confidence,
-            marker.candidateCount,
+          icon={createPathNodeIcon(
             marker.candidate.isLocal || false,
-            marker.isHub
+            marker.isHub,
+            marker.isPrimary
           )}
-          opacity={Math.max(0.5, marker.candidate.probability)} // Min opacity for visibility
+          opacity={marker.isPrimary ? 1 : 0.5} // Secondary candidates at 50% opacity
         >
           <Tooltip
             permanent={false}
@@ -277,14 +249,14 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
               <div className="text-text-muted font-mono text-[10px]">
                 {marker.prefix} • {marker.candidate.hash.slice(0, 10)}...
               </div>
-              {marker.candidate.probability < 1 && marker.candidateCount > 1 && (
-                <div style={{ color: getConfidenceStrokeColor(marker.confidence, marker.candidateCount) }}>
-                  {(marker.candidate.probability * 100).toFixed(0)}% confidence
+              {!marker.isPrimary && marker.candidateCount > 1 && (
+                <div style={{ color: DESIGN.ambiguousColor }}>
+                  Alternative ({(marker.candidate.probability * 100).toFixed(0)}%)
                 </div>
               )}
-              {marker.candidateCount === 1 && (
-                <div style={{ color: DESIGN.confidenceExact }}>
-                  Exact match
+              {marker.isPrimary && marker.candidateCount > 1 && (
+                <div className="text-text-muted">
+                  {marker.candidateCount} candidates
                 </div>
               )}
             </div>
