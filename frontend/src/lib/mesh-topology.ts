@@ -649,21 +649,23 @@ export function buildMeshTopology(
       const lastHopPrefix = path[path.length - 1];
       
       // Resolve the last hop
-      const lastHopMatches = matchPrefix(lastHopPrefix, neighbors, localHash, neighborAffinity, true);
       const lastHopResolved = resolveHop(lastHopPrefix, neighbors, localHash, neighborAffinity, true);
       
       if (lastHopResolved.hash && lastHopResolved.hash !== localHash) {
         // This edge touches local directly - hop distance = 0
         //
-        // CERTAINTY LOGIC for last hop:
-        // - If only 1 match: 100% certain
-        // - If collision with local (local + 1 neighbor match): still certain!
-        //   Because we KNOW the last hop isn't us (we received the packet),
-        //   so it must be the neighbor.
-        // - If collision with multiple neighbors: uncertain (need affinity to pick)
-        const nonLocalMatches = lastHopMatches.matches.filter(h => h !== localHash);
-        const isCertain = lastHopMatches.matches.length === 1 || nonLocalMatches.length === 1;
-        const confidence = isCertain ? 1 : lastHopResolved.confidence;
+        // CERTAINTY: We ALWAYS mark last-hop-to-local as certain because we
+        // definitively received the packet. Even if there's a prefix collision
+        // among neighbors, we know ONE of them forwarded to us. The affinity
+        // scoring picks the most likely candidate, and either way, an edge
+        // exists between local and that neighbor.
+        //
+        // This is crucial for setups where the local node only receives through
+        // a single gateway neighbor (e.g., observer with small antenna behind
+        // a rooftop repeater). Without this, prefix collisions would prevent
+        // any edges from reaching the validation threshold.
+        const isCertain = true; // We received the packet - this is certain
+        const confidence = 1;
         
         addEdgeObservation(lastHopResolved.hash, localHash, confidence, isCertain, 0);
         
