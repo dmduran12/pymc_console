@@ -556,7 +556,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     return connected;
   }, [meshTopology, hubNodeSet, localHash]);
   
-  // Direct (zero-hop) nodes set
+  // Direct (zero-hop) nodes set - ONLY local and its immediate zero-hop neighbors
   const directNodeSet = useMemo(() => {
     const direct = new Set<string>();
     if (localHash) direct.add(localHash);
@@ -566,6 +566,23 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     return direct;
   }, [zeroHopNeighbors, localHash]);
   
+  // Nodes connected to local via topology edges (for topology toggle)
+  const localConnectedNodes = useMemo(() => {
+    const connected = new Set<string>();
+    if (localHash) {
+      connected.add(localHash);
+      // Find all nodes with edges to/from local
+      for (const edge of meshTopology.validatedEdges) {
+        if (edge.fromHash === localHash) {
+          connected.add(edge.toHash);
+        } else if (edge.toHash === localHash) {
+          connected.add(edge.fromHash);
+        }
+      }
+    }
+    return connected;
+  }, [meshTopology.validatedEdges, localHash]);
+  
   // Filtered polylines based on solo modes, sorted by strength (weakest first, strongest last = on top)
   const filteredCertainPolylines = useMemo(() => {
     let filtered = validatedPolylines;
@@ -574,16 +591,19 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       filtered = validatedPolylines.filter(({ edge }) => {
         const fromHub = hubNodeSet.has(edge.fromHash);
         const toHub = hubNodeSet.has(edge.toHash);
-        const fromDirect = directNodeSet.has(edge.fromHash);
-        const toDirect = directNodeSet.has(edge.toHash);
+        
+        // For direct mode: edge must connect TO or FROM local directly
+        const isLocalEdge = localHash && 
+          (edge.fromHash === localHash || edge.toHash === localHash);
         
         if (soloHubs && soloDirect) {
-          // Show hub connections OR direct connections
-          return fromHub || toHub || fromDirect || toDirect;
+          // Show hub connections OR local's direct edges
+          return fromHub || toHub || isLocalEdge;
         } else if (soloHubs) {
           return fromHub || toHub;
         } else if (soloDirect) {
-          return fromDirect || toDirect;
+          // ONLY show edges that connect directly to local
+          return isLocalEdge;
         }
         return true;
       });
@@ -591,7 +611,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     // Sort by certainCount ascending (weakest rendered first = bottom, strongest last = top)
     return [...filtered].sort((a, b) => a.edge.certainCount - b.edge.certainCount);
-  }, [validatedPolylines, soloHubs, soloDirect, hubNodeSet, directNodeSet]);
+  }, [validatedPolylines, soloHubs, soloDirect, hubNodeSet, localHash]);
   
   // Filtered neighbors based on solo modes
   const filteredNeighbors = useMemo(() => {
@@ -599,17 +619,20 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     return neighborsWithLocation.filter(([hash]) => {
       const isHubConnected = hubConnectedNodes.has(hash);
       const isDirect = directNodeSet.has(hash);
+      // When topology is shown, also include nodes connected to local via edges
+      const isLocalConnected = showTopology && localConnectedNodes.has(hash);
       
       if (soloHubs && soloDirect) {
-        return isHubConnected || isDirect;
+        return isHubConnected || isDirect || isLocalConnected;
       } else if (soloHubs) {
         return isHubConnected;
       } else if (soloDirect) {
-        return isDirect;
+        // Show zero-hop neighbors, OR if topology is on, show topology-connected nodes
+        return isDirect || isLocalConnected;
       }
       return true;
     });
-  }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
+  }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet, showTopology, localConnectedNodes]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
