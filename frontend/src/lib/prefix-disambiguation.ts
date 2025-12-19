@@ -394,22 +394,33 @@ export function buildPrefixLookup(
       //
       // Criteria (all must be met for boost):
       // - Confidence already >= 50% (other factors support this candidate)
-      // - At least 100 total observations at position 1 across all candidates
-      // - Best candidate has 95%+ of position-1 appearances
-      // - Best candidate has at least 50 position-1 appearances (absolute minimum)
+      // - At least 20 total observations at position 1 across colliding candidates
+      // - Best candidate has 90%+ of position-1 appearances
+      // - Best candidate has at least 10 position-1 appearances (absolute minimum)
       if (confidence >= 0.5) {
         const pos1Index = 0; // Position 1 = last hop = index 0
         const bestPos1Count = candidates[0].positionCounts[pos1Index] || 0;
         const secondPos1Count = candidates[1].positionCounts[pos1Index] || 0;
         const totalPos1 = bestPos1Count + secondPos1Count;
         
-        if (totalPos1 >= 100 && bestPos1Count >= 50) {
+        // Debug logging in development
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[disambiguation] Prefix ${prefix}: bestPos1=${bestPos1Count}, secondPos1=${secondPos1Count}, total=${totalPos1}, conf=${confidence.toFixed(2)}`);
+        }
+        
+        if (totalPos1 >= 20 && bestPos1Count >= 10) {
           const pos1Ratio = bestPos1Count / totalPos1;
-          if (pos1Ratio >= 0.95) {
+          if (pos1Ratio >= 0.90) {
             // This candidate is dominant at position 1 - major confidence boost
-            // Scale boost by how dominant (95% = +0.3, 99% = +0.4, 100% = +0.5)
-            const dominanceBoost = 0.3 + (pos1Ratio - 0.95) * 4; // 0.3 to 0.5
-            confidence = Math.min(1, confidence + dominanceBoost);
+            // Scale boost by how dominant (90% = +0.25, 95% = +0.35, 100% = +0.5)
+            const dominanceBoost = 0.25 + (pos1Ratio - 0.90) * 2.5; // 0.25 to 0.5
+            const newConfidence = Math.min(1, confidence + dominanceBoost);
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`[disambiguation] Prefix ${prefix}: DOMINANT BOOST! ratio=${pos1Ratio.toFixed(2)}, boost=${dominanceBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
+            }
+            
+            confidence = newConfidence;
           }
         }
       }
@@ -473,12 +484,24 @@ export function resolvePrefix(
     return { hash: null, confidence: 0 };
   }
   
+  // For last hop (direct forwarder to local), use the global confidence which
+  // includes the dominant forwarder boost. This is the most important case.
+  if (context?.isLastHop) {
+    return { hash: result.bestMatch, confidence: result.confidence };
+  }
+  
+  // For position 1 (also last hop), prefer global confidence with boost
+  if (context?.position === 1) {
+    return { hash: result.bestMatch, confidence: result.confidence };
+  }
+  
   // If position context provided and we have position-specific data, use it
+  // But take the MAX of position confidence and global confidence to preserve boosts
   if (context?.position && result.bestMatchForPosition.has(context.position)) {
     const posMatch = result.bestMatchForPosition.get(context.position)!;
-    // Blend position-specific confidence with global confidence
-    const blendedConfidence = (posMatch.confidence + result.confidence) / 2;
-    return { hash: posMatch.hash, confidence: blendedConfidence };
+    // Use max instead of average to preserve boosted global confidence
+    const bestConfidence = Math.max(posMatch.confidence, result.confidence);
+    return { hash: posMatch.hash, confidence: bestConfidence };
   }
   
   // If adjacent prefixes provided, boost candidates with high co-occurrence
@@ -502,7 +525,7 @@ export function resolvePrefix(
     return { hash: bestHash, confidence: result.confidence };
   }
   
-  // Default: return global best match
+  // Default: return global best match with full (potentially boosted) confidence
   return { hash: result.bestMatch, confidence: result.confidence };
 }
 
