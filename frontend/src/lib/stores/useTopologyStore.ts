@@ -6,10 +6,10 @@
  */
 
 import { create } from 'zustand';
-import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge } from '@/lib/topology-service';
+import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop } from '@/lib/topology-service';
 
 // Re-export types for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop };
 
 interface TopologyState {
   // Topology data
@@ -40,6 +40,8 @@ function createEmptyTopology(): MeshTopology {
     localPrefix: null,
     centrality: new Map(),
     hubNodes: [],
+    loops: [],
+    loopEdgeKeys: new Set(),
   };
 }
 
@@ -122,3 +124,17 @@ export const useEdgeCount = () => useTopologyStoreBase((s) => s.topology.validat
 
 /** Has topology data */
 export const useHasTopology = () => useTopologyStoreBase((s) => s.topology.edges.length > 0);
+
+/** Network loops (cycles = redundant paths) */
+export const useNetworkLoops = () => useTopologyStoreBase((s) => s.topology.loops);
+
+/** Set of edge keys that are part of at least one loop */
+export const useLoopEdgeKeys = () => useTopologyStoreBase((s) => s.topology.loopEdgeKeys);
+
+/** Number of detected loops */
+export const useLoopCount = () => useTopologyStoreBase((s) => s.topology.loops.length);
+
+/** Whether any loops include the local node */
+export const useHasLocalLoop = () => useTopologyStoreBase((s) => 
+  s.topology.loops.some(loop => loop.includesLocal)
+);

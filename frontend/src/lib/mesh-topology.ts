@@ -14,9 +14,15 @@ import { Packet, NeighborInfo } from '@/types/api';
 import { 
   buildPrefixLookup, 
   resolvePrefix, 
-  getHashPrefix,
   getDisambiguationStats,
 } from './prefix-disambiguation';
+import { 
+  parsePacketPath, 
+  getHashPrefix, 
+  prefixMatches,
+  getPositionFromIndex,
+  getHopDistanceFromLocal,
+} from './path-utils';
 
 /** Represents a directed edge between two nodes */
 export interface TopologyEdge {
@@ -41,6 +47,32 @@ export interface TopologyEdge {
   isCertain: boolean;
   /** Number of times this exact connection was observed with 100% certainty */
   certainCount: number;
+  /** Whether this edge is part of at least one detected loop (redundant path) */
+  isLoopEdge?: boolean;
+}
+
+/**
+ * Represents a detected loop (cycle) in the mesh network.
+ * Loops indicate redundant paths — critical for mesh resilience.
+ * If one link in a loop fails, traffic can route around via the other path.
+ */
+export interface NetworkLoop {
+  /** Unique identifier for this loop */
+  id: string;
+  /** Edge keys that form this loop */
+  edgeKeys: string[];
+  /** Node hashes in the loop (in traversal order) */
+  nodes: string[];
+  /** Number of edges in the loop */
+  size: number;
+  /** Average certainCount across edges in the loop */
+  avgCertainCount: number;
+  /** Minimum certainCount across loop edges (weakest link determines reliability) */
+  minCertainCount: number;
+  /** Whether local node is part of this loop (high priority for display) */
+  includesLocal: boolean;
+  /** Loop strength: min certainCount normalized to 0-1 */
+  strength: number;
 }
 
 /** Minimum validations required for an edge to be rendered */
@@ -78,6 +110,10 @@ export interface MeshTopology {
   centrality: Map<string, number>;
   /** Hub nodes identified by high centrality (sorted by centrality desc) */
   hubNodes: string[];
+  /** Detected loops (cycles) in the network - indicates redundant paths */
+  loops: NetworkLoop[];
+  /** Set of edge keys that are part of at least one loop */
+  loopEdgeKeys: Set<string>;
 }
 
 interface EdgeAccumulator {
@@ -96,24 +132,8 @@ interface EdgeAccumulator {
   uncertainCount: number;
 }
 
-// Re-export getHashPrefix from prefix-disambiguation for backward compatibility
-export { getHashPrefix };
-
-/**
- * Check if a path prefix matches a hash.
- * Path prefixes are 2-char hex (e.g., "19").
- * Hashes can be "0xNN" format or full hex strings.
- */
-export function prefixMatches(prefix: string, hash: string): boolean {
-  const normalizedPrefix = prefix.toUpperCase();
-  // Handle "0x" prefix
-  if (hash.startsWith('0x') || hash.startsWith('0X')) {
-    const hashHex = hash.slice(2).toUpperCase();
-    return hashHex.startsWith(normalizedPrefix);
-  }
-  // For full hex strings, check if first N chars match
-  return hash.toUpperCase().startsWith(normalizedPrefix);
-}
+// Re-export from path-utils for backward compatibility
+export { getHashPrefix, prefixMatches } from './path-utils';
 
 /**
  * Calculate distance between two coordinates in meters using Haversine formula.
@@ -198,9 +218,6 @@ export function buildNeighborAffinity(
   localHash?: string
 ): Map<string, NeighborAffinity> {
   const affinity = new Map<string, NeighborAffinity>();
-  // localHash is passed but not used directly in affinity building
-  // (it's used later in buildMeshTopology for edge creation)
-  void localHash;
   const hasLocalCoords = localLat !== undefined && localLon !== undefined &&
     (localLat !== 0 || localLon !== 0);
   
@@ -239,37 +256,19 @@ export function buildNeighborAffinity(
   }
   
   // Analyze packets for hop positions and frequency
-  // NOTE: The forwarded_path MAY include local's prefix at the end (e.g., ["78", "24", "19"])
-  // We need to skip local's prefix so the last forwarder is correctly identified as position 1.
-  const localPrefix = localHash ? getHashPrefix(localHash).toUpperCase() : null;
-  
+  // Use centralized path parsing from path-utils.ts
   for (const packet of packets) {
-    // Note: paths may be JSON strings or arrays depending on API version
-    let path = packet.forwarded_path ?? packet.original_path;
+    const parsed = parsePacketPath(packet, localHash);
     
-    // Parse JSON string if needed
-    if (typeof path === 'string') {
-      try {
-        path = JSON.parse(path);
-      } catch {
-        continue; // Invalid JSON, skip
-      }
-    }
-    
-    if (path && Array.isArray(path) && path.length >= 1) {
-      // Remove local's prefix from the end if present
-      let effectivePath = path;
-      if (localPrefix && path.length > 0 && path[path.length - 1].toUpperCase() === localPrefix) {
-        effectivePath = path.slice(0, -1);
-      }
-      if (effectivePath.length === 0) continue;
+    if (parsed && parsed.effectiveLength >= 1) {
+      const path = parsed.effective; // Local already stripped
       
       // Process the path - last element is the node that forwarded to us (1-hop)
       // Hop positions: last element = 1-hop (direct forwarder), second-to-last = 2-hop, etc.
-      for (let i = 0; i < effectivePath.length; i++) {
-        const prefix = effectivePath[i];
-        // hopDistance from local: last element = 1 (direct), second-to-last = 2, etc.
-        const hopDistance = effectivePath.length - i;
+      for (let i = 0; i < path.length; i++) {
+        const prefix = path[i];
+        // hopDistance from local: position 1 = direct, position 2 = 2-hop, etc.
+        const position = getPositionFromIndex(i, parsed.effectiveLength);
         
         // Find matching neighbors and update their hop stats
         for (const [hash, aff] of affinity) {
@@ -277,11 +276,11 @@ export function buildNeighborAffinity(
             aff.frequency++;
             
             // Track hop position (index 0 = 1-hop, index 1 = 2-hop, etc.)
-            const hopIndex = Math.min(hopDistance - 1, 4); // Cap at 5 positions
+            const hopIndex = Math.min(position - 1, 4); // Cap at 5 positions
             aff.hopPositionCounts[hopIndex]++;
             
-            // Track direct forwards specifically (last element in effective path)
-            if (i === effectivePath.length - 1) {
+            // Track direct forwards specifically (position 1 = last forwarder)
+            if (position === 1) {
               aff.directForwardCount++;
             }
           }
@@ -290,7 +289,7 @@ export function buildNeighborAffinity(
     }
     
     // Also count direct packets (empty path) from src_hash
-    if ((!path || (Array.isArray(path) && path.length === 0)) && packet.src_hash) {
+    if ((!parsed || parsed.effectiveLength === 0) && packet.src_hash) {
       const srcAff = affinity.get(packet.src_hash);
       if (srcAff) {
         srcAff.frequency++;
@@ -471,6 +470,180 @@ function makeEdgeKey(hash1: string, hash2: string): string {
   return [hash1, hash2].sort().join('-');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Loop Detection (H₁ Homology)
+// 
+// Detects cycles in the mesh network graph. Cycles represent redundant paths -
+// critical for mesh resilience. If one link in a cycle fails, traffic can
+// route around via the alternate path.
+// 
+// Uses DFS-based cycle detection with path reconstruction.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Find all loops (cycles) in the network graph.
+ * 
+ * Algorithm: For each edge, temporarily remove it and check if endpoints
+ * are still connected. If yes, there's an alternate path = a loop exists.
+ * Then reconstruct the loop by finding the shortest alternate path.
+ * 
+ * Complexity: O(E * (V + E)) in worst case, but typically much faster
+ * due to sparse mesh graphs and early termination.
+ * 
+ * @param edges - Validated edges to analyze
+ * @param localHash - Local node hash (for includesLocal flag)
+ * @param maxCertainCount - For normalizing loop strength
+ */
+export function findNetworkLoops(
+  edges: TopologyEdge[],
+  localHash?: string,
+  maxCertainCount: number = 1
+): { loops: NetworkLoop[]; loopEdgeKeys: Set<string> } {
+  if (edges.length < 3) {
+    // Need at least 3 edges to form a loop
+    return { loops: [], loopEdgeKeys: new Set() };
+  }
+  
+  // Build adjacency list for graph traversal
+  const adjacency = new Map<string, Set<string>>();
+  const edgeByKey = new Map<string, TopologyEdge>();
+  
+  for (const edge of edges) {
+    edgeByKey.set(edge.key, edge);
+    
+    if (!adjacency.has(edge.fromHash)) {
+      adjacency.set(edge.fromHash, new Set());
+    }
+    if (!adjacency.has(edge.toHash)) {
+      adjacency.set(edge.toHash, new Set());
+    }
+    
+    adjacency.get(edge.fromHash)!.add(edge.toHash);
+    adjacency.get(edge.toHash)!.add(edge.fromHash);
+  }
+  
+  const loops: NetworkLoop[] = [];
+  const loopEdgeKeys = new Set<string>();
+  const seenLoopSignatures = new Set<string>(); // Prevent duplicate loops
+  
+  /**
+   * BFS to find shortest path between two nodes, avoiding a specific edge.
+   * Returns the path as array of node hashes, or null if no path exists.
+   */
+  function findAlternatePath(
+    start: string,
+    end: string,
+    excludeEdgeKey: string
+  ): string[] | null {
+    if (start === end) return [start];
+    
+    const visited = new Set<string>([start]);
+    const queue: { node: string; path: string[] }[] = [{ node: start, path: [start] }];
+    
+    while (queue.length > 0) {
+      const { node, path } = queue.shift()!;
+      const neighbors = adjacency.get(node);
+      
+      if (!neighbors) continue;
+      
+      for (const neighbor of neighbors) {
+        // Skip the excluded edge
+        const edgeKey = makeEdgeKey(node, neighbor);
+        if (edgeKey === excludeEdgeKey) continue;
+        
+        if (neighbor === end) {
+          // Found the destination
+          return [...path, neighbor];
+        }
+        
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push({ node: neighbor, path: [...path, neighbor] });
+        }
+      }
+    }
+    
+    return null; // No alternate path found
+  }
+  
+  // For each edge, check if removing it still leaves endpoints connected
+  // If so, we have a loop
+  for (const edge of edges) {
+    const alternatePath = findAlternatePath(edge.fromHash, edge.toHash, edge.key);
+    
+    if (alternatePath && alternatePath.length >= 2) {
+      // Found a loop! The loop consists of:
+      // - The direct edge (edge.fromHash -> edge.toHash)
+      // - The alternate path (fromHash -> ... -> toHash)
+      
+      // Build the loop's edge keys
+      const loopNodes = alternatePath;
+      const loopEdges: string[] = [edge.key]; // Include the original edge
+      
+      // Add edges from the alternate path
+      for (let i = 0; i < alternatePath.length - 1; i++) {
+        const pathEdgeKey = makeEdgeKey(alternatePath[i], alternatePath[i + 1]);
+        loopEdges.push(pathEdgeKey);
+      }
+      
+      // Create a canonical signature to detect duplicate loops
+      // Sort nodes and join to create a unique identifier
+      const signature = [...loopNodes].sort().join(',');
+      
+      if (seenLoopSignatures.has(signature)) {
+        continue; // Skip duplicate loop
+      }
+      seenLoopSignatures.add(signature);
+      
+      // Calculate loop statistics
+      let totalCertainCount = 0;
+      let minCertainCount = Infinity;
+      
+      for (const edgeKey of loopEdges) {
+        const loopEdge = edgeByKey.get(edgeKey);
+        if (loopEdge) {
+          totalCertainCount += loopEdge.certainCount;
+          minCertainCount = Math.min(minCertainCount, loopEdge.certainCount);
+          loopEdgeKeys.add(edgeKey);
+        }
+      }
+      
+      const avgCertainCount = loopEdges.length > 0 
+        ? totalCertainCount / loopEdges.length 
+        : 0;
+      
+      const includesLocal = localHash 
+        ? loopNodes.includes(localHash)
+        : false;
+      
+      const loop: NetworkLoop = {
+        id: `loop-${loops.length}`,
+        edgeKeys: loopEdges,
+        nodes: loopNodes,
+        size: loopEdges.length,
+        avgCertainCount,
+        minCertainCount: minCertainCount === Infinity ? 0 : minCertainCount,
+        includesLocal,
+        strength: maxCertainCount > 0 
+          ? (minCertainCount === Infinity ? 0 : minCertainCount / maxCertainCount)
+          : 0,
+      };
+      
+      loops.push(loop);
+    }
+  }
+  
+  // Sort loops: local-including first, then by strength (weakest link)
+  loops.sort((a, b) => {
+    if (a.includesLocal !== b.includesLocal) {
+      return a.includesLocal ? -1 : 1;
+    }
+    return b.strength - a.strength;
+  });
+  
+  return { loops, loopEdgeKeys };
+}
+
 /**
  * Analyze packets to build mesh topology with confidence-weighted edges.
  * 
@@ -572,20 +745,13 @@ export function buildMeshTopology(
   };
   
   for (const packet of sortedPackets) {
-    // Get path from packet (forwarded_path has local appended)
-    // Note: paths may be JSON strings or arrays depending on API version
-    let path = packet.forwarded_path ?? packet.original_path;
+    // Use centralized path parsing from path-utils.ts
+    const parsed = parsePacketPath(packet, localHash);
+    if (!parsed) continue;
     
-    // Parse JSON string if needed
-    if (typeof path === 'string') {
-      try {
-        path = JSON.parse(path);
-      } catch {
-        continue; // Invalid JSON, skip
-      }
-    }
-    
-    if (!path || !Array.isArray(path) || path.length < 1) continue;
+    const effectivePath = parsed.effective; // Local already stripped
+    const effectiveLength = parsed.effectiveLength;
+    const originalPath = parsed.original; // For source->first-hop inference
     
     // Track which nodes appear in this path (for centrality)
     const nodesInPath = new Set<string>();
@@ -593,13 +759,14 @@ export function buildMeshTopology(
     // === SOURCE → FIRST HOP INFERENCE (ALL PACKET TYPES) ===
     // For any packet with src_hash, we can infer an edge from the source to the first hop
     // This reveals the source's direct RF neighbor on their side of the network
-    if (packet.src_hash && path.length >= 1) {
-      const firstHopPrefix = path[0];
+    if (packet.src_hash && originalPath.length >= 1) {
+      const firstHopPrefix = originalPath[0];
       
       // Resolve the first hop using disambiguation system
+      // Position for first hop is effectiveLength (furthest from local)
       const firstHopResult = resolvePrefix(prefixLookup, firstHopPrefix, {
-        position: 1, // 1-indexed position (first element)
-        adjacentPrefixes: path.length > 1 ? [path[1]] : [],
+        position: effectiveLength, // Furthest from local
+        adjacentPrefixes: originalPath.length > 1 ? [originalPath[1]] : [],
       });
       
       // The source hash is known exactly (from the packet)
@@ -612,8 +779,7 @@ export function buildMeshTopology(
         const confidence = firstHopResult.confidence * (srcInNeighbors ? 1 : 0.8);
         
         // This edge is at the FAR end of the path from local's perspective
-        // Hop distance = path length (since source is before the first element)
-        const hopDistance = path.length;
+        const hopDistance = effectiveLength + 1; // Beyond the effective path
         
         addEdgeObservation(srcHash, firstHopResult.hash, confidence, isCertain, hopDistance);
         
@@ -625,80 +791,61 @@ export function buildMeshTopology(
     
     // === LAST HOP → LOCAL INFERENCE (ALL PACKET TYPES) ===
     // The last forwarder is the node that sent us the packet directly.
-    // The forwarded_path may end with local's prefix (e.g., ["78", "24", "19"])
-    // so we need to find the last NON-LOCAL prefix in the path.
-    if (localHash && path.length >= 1) {
-      // Find the last hop that isn't local
-      let lastHopIndex = path.length - 1;
-      const localPrefixUpper = localPrefix?.toUpperCase();
+    // This is position 1 in the effective path (already has local stripped)
+    if (localHash && effectiveLength >= 1) {
+      const lastHopIndex = effectiveLength - 1;
+      const lastHopPrefix = effectivePath[lastHopIndex];
       
-      // Skip local's prefix if it's at the end
-      if (localPrefixUpper && path[lastHopIndex]?.toUpperCase() === localPrefixUpper) {
-        lastHopIndex--;
-      }
+      // Resolve the last hop using disambiguation system
+      // Position 1 = last forwarder (closest to local)
+      const lastHopResult = resolvePrefix(prefixLookup, lastHopPrefix, {
+        position: 1, // Last forwarder is always position 1
+        adjacentPrefixes: lastHopIndex > 0 ? [effectivePath[lastHopIndex - 1]] : [],
+        isLastHop: true,
+      });
       
-      // Must have at least one non-local hop
-      if (lastHopIndex < 0) {
-        // Path only contains local, skip
-      } else {
-        const lastHopPrefix = path[lastHopIndex];
+      if (lastHopResult.hash && lastHopResult.hash !== localHash) {
+        // This edge touches local directly - hop distance = 0
+        //
+        // ALWAYS mark last-hop-to-local as certain because we definitively received
+        // the packet from SOMEONE. The disambiguation system picks the most likely
+        // candidate, and we trust that resolution. This is critical for setups where
+        // an observer receives through a single gateway with prefix collisions.
+        const isCertain = true;
+        const confidence = lastHopResult.confidence;
         
-        // Resolve the last hop using disambiguation system
-        const lastHopResult = resolvePrefix(prefixLookup, lastHopPrefix, {
-          position: lastHopIndex + 1, // 1-indexed position
-          adjacentPrefixes: lastHopIndex > 0 ? [path[lastHopIndex - 1]] : [],
-          isLastHop: true,
-        });
+        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
         
-        if (lastHopResult.hash && lastHopResult.hash !== localHash) {
-          // This edge touches local directly - hop distance = 0
-          //
-          // ALWAYS mark last-hop-to-local as certain because we definitively received
-          // the packet from SOMEONE. The disambiguation system picks the most likely
-          // candidate, and we trust that resolution. This is critical for setups where
-          // an observer receives through a single gateway with prefix collisions.
-          const isCertain = true;
-          const confidence = lastHopResult.confidence; // Use boosted confidence for averaging
-          
-          addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
-          
-          // Track for centrality
-          nodesInPath.add(lastHopResult.hash);
-          nodesInPath.add(localHash);
-        }
+        // Track for centrality
+        nodesInPath.add(lastHopResult.hash);
+        nodesInPath.add(localHash);
       }
     }
     
-    // Process consecutive pairs in the path - these are actual RF links
-    // Skip pairs that touch local (already handled above with guaranteed certainty)
-    for (let i = 0; i < path.length - 1; i++) {
-      const fromPrefix = path[i];
-      const toPrefix = path[i + 1];
+    // Process consecutive pairs in the EFFECTIVE path (local already stripped)
+    for (let i = 0; i < effectiveLength - 1; i++) {
+      const fromPrefix = effectivePath[i];
+      const toPrefix = effectivePath[i + 1];
       
-      // Skip if either end is local - we already handled last-hop-to-local above
-      if (localPrefix) {
-        const fromUpper = fromPrefix?.toUpperCase();
-        const toUpper = toPrefix?.toUpperCase();
-        const localUpper = localPrefix.toUpperCase();
-        if (fromUpper === localUpper || toUpper === localUpper) continue;
-      }
-      
-      const isToLastHop = (i + 1) === path.length - 1;
+      // Calculate positions using centralized helper
+      const fromPosition = getPositionFromIndex(i, effectiveLength);
+      const toPosition = getPositionFromIndex(i + 1, effectiveLength);
+      const isToLastHop = toPosition === 1;
       
       // Resolve both ends using disambiguation system with context
       const fromResult = resolvePrefix(prefixLookup, fromPrefix, {
-        position: i + 1, // 1-indexed
+        position: fromPosition,
         adjacentPrefixes: [
-          ...(i > 0 ? [path[i - 1]] : []),
-          path[i + 1],
+          ...(i > 0 ? [effectivePath[i - 1]] : []),
+          effectivePath[i + 1],
         ],
       });
       
       const toResult = resolvePrefix(prefixLookup, toPrefix, {
-        position: i + 2, // 1-indexed
+        position: toPosition,
         adjacentPrefixes: [
-          path[i],
-          ...(i + 2 < path.length ? [path[i + 2]] : []),
+          effectivePath[i],
+          ...(i + 2 < effectiveLength ? [effectivePath[i + 2]] : []),
         ],
         isLastHop: isToLastHop,
       });
@@ -719,8 +866,8 @@ export function buildMeshTopology(
       nodesInPath.add(fromResult.hash);
       nodesInPath.add(toResult.hash);
       
-      // Track bridge nodes (middle of path = not first or last)
-      if (i > 0) {
+      // Track bridge nodes (middle of path = not first or last in effective path)
+      if (i > 0 && i < effectiveLength - 1) {
         nodeBridgeCounts.set(fromResult.hash, (nodeBridgeCounts.get(fromResult.hash) || 0) + 1);
       }
       
@@ -730,11 +877,8 @@ export function buildMeshTopology(
       // For uncertain edges, apply threshold; certain edges always included
       if (!isCertainObservation && hopConfidence < confidenceThreshold) continue;
       
-      // Calculate hop distance from local (0 = edge touches local)
-      // For path [A, B, C, local]: A-B is 2 hops from local, B-C is 1 hop, C-local is 0 hops
-      const hopDistanceFromLocal = localPrefix 
-        ? Math.max(0, path.length - 2 - i) 
-        : 99;
+      // Calculate hop distance from local using centralized helper
+      const hopDistanceFromLocal = getHopDistanceFromLocal(toPosition);
       
       // Add edge observation using helper
       addEdgeObservation(
@@ -849,6 +993,26 @@ export function buildMeshTopology(
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
   
+  // === LOOP DETECTION (H₁ Homology) ===
+  // Find cycles in the network - these represent redundant paths for resilience
+  const { loops, loopEdgeKeys } = findNetworkLoops(validatedEdges, localHash, maxCertainCount);
+  
+  // Mark edges that are part of loops
+  for (const edge of edges) {
+    edge.isLoopEdge = loopEdgeKeys.has(edge.key);
+  }
+  
+  // Log loop detection results in development
+  if (process.env.NODE_ENV === 'development' && loops.length > 0) {
+    console.log(`[mesh-topology] Found ${loops.length} loops:`, loops.map(l => ({
+      id: l.id,
+      size: l.size,
+      nodes: l.nodes.length,
+      strength: l.strength.toFixed(2),
+      includesLocal: l.includesLocal,
+    })));
+  }
+  
   return { 
     edges, 
     validatedEdges: cappedEdges,
@@ -862,6 +1026,8 @@ export function buildMeshTopology(
     localPrefix,
     centrality,
     hubNodes,
+    loops,
+    loopEdgeKeys,
   };
 }
 

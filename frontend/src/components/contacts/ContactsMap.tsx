@@ -1,32 +1,140 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, RefreshCw } from 'lucide-react';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { getLinkQualityColor, getLinkQualityWeight, type TopologyEdge } from '@/lib/mesh-topology';
+import { getLinkQualityWeight, type TopologyEdge } from '@/lib/mesh-topology';
 import { useTopology } from '@/lib/stores/useTopologyStore';
 import { usePackets } from '@/lib/stores/useStore';
+import { parsePath, getHashPrefix } from '@/lib/path-utils';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Design System Constants
+// ═══════════════════════════════════════════════════════════════════════════════
 
 // Uniform marker size for all nodes
 const MARKER_SIZE = 16;
+const RING_THICKNESS = 3;
 
-// Create a simple dot icon - no shadows/glows for performance
-function createDotIcon(color: string, _isHovered: boolean = false): L.DivIcon {
+// Design palette - sophisticated, minimal
+const DESIGN = {
+  // Primary node color (purple/lavender accent)
+  nodeColor: '#B49DFF',        // --accent-primary lavender
+  // Local node - distinct but harmonious
+  localColor: '#60A5FA',       // Blue for local
+  // Edge colors  
+  edgeColor: 'rgba(140, 150, 170, 0.5)',  // Neutral gray
+  loopEdgeColor: '#B49DFF',    // Same as nodes - indicates redundant path
+  // Hub indicator
+  hubColor: '#B49DFF',         // Same purple, but filled
+};
+
+/**
+ * Create a ring (torus) icon for standard nodes.
+ * Elegant, minimal design - unfilled circle with stroke.
+ */
+function createRingIcon(color: string = DESIGN.nodeColor): L.DivIcon {
   return L.divIcon({
-    className: 'map-dot-marker',
+    className: 'map-ring-marker',
     html: `<div style="
       width: ${MARKER_SIZE}px;
       height: ${MARKER_SIZE}px;
-      background-color: ${color};
+      background: transparent;
       border-radius: 50%;
-      border: 1px solid rgba(13, 14, 18, 0.8);
+      border: ${RING_THICKNESS}px solid ${color};
+      box-sizing: border-box;
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
     popupAnchor: [0, -MARKER_SIZE / 2],
   });
+}
+
+/**
+ * Create a filled dot icon for hub nodes.
+ * Filled circle indicates importance/centrality.
+ */
+function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
+  return L.divIcon({
+    className: 'map-filled-marker',
+    html: `<div style="
+      width: ${MARKER_SIZE}px;
+      height: ${MARKER_SIZE}px;
+      background-color: ${color};
+      border-radius: 50%;
+      border: 2px solid rgba(13, 14, 18, 0.9);
+      box-sizing: border-box;
+    "></div>`,
+    iconSize: [MARKER_SIZE, MARKER_SIZE],
+    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
+    popupAnchor: [0, -MARKER_SIZE / 2],
+  });
+}
+
+/**
+ * Create local node icon - filled, distinct color.
+ */
+function createLocalIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'map-local-marker',
+    html: `<div style="
+      width: ${MARKER_SIZE + 2}px;
+      height: ${MARKER_SIZE + 2}px;
+      background-color: ${DESIGN.localColor};
+      border-radius: 50%;
+      border: 2px solid rgba(13, 14, 18, 0.9);
+      box-sizing: border-box;
+      box-shadow: 0 0 8px ${DESIGN.localColor}40;
+    "></div>`,
+    iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
+    iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
+    popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
+  });
+}
+
+/**
+ * Calculate offset positions for parallel (double) lines.
+ * Used for loop edges to visually indicate redundancy.
+ */
+function getParallelOffsets(
+  from: [number, number],
+  to: [number, number],
+  offset: number
+): { line1: [[number, number], [number, number]]; line2: [[number, number], [number, number]] } {
+  // Calculate perpendicular offset
+  const dx = to[1] - from[1]; // longitude diff
+  const dy = to[0] - from[0]; // latitude diff
+  const len = Math.sqrt(dx * dx + dy * dy);
+  
+  if (len === 0) {
+    return {
+      line1: [from, to],
+      line2: [from, to],
+    };
+  }
+  
+  // Perpendicular unit vector (normalized)
+  const perpX = -dy / len;
+  const perpY = dx / len;
+  
+  // Scale offset (convert degrees to approximate visual offset)
+  const scale = offset * 0.00002; // Adjust for reasonable visual separation
+  
+  const offsetX = perpX * scale;
+  const offsetY = perpY * scale;
+  
+  return {
+    line1: [
+      [from[0] + offsetX, from[1] + offsetY],
+      [to[0] + offsetX, to[1] + offsetY],
+    ],
+    line2: [
+      [from[0] - offsetX, from[1] - offsetY],
+      [to[0] - offsetX, to[1] - offsetY],
+    ],
+  };
 }
 
 interface LocalNode {
@@ -42,16 +150,16 @@ interface ContactsMapProps {
   onRemoveNode?: (hash: string) => void;
 }
 
-// Signal color constants from CSS variables (computed for map use)
+// Legacy signal colors (kept for popup display)
 const SIGNAL_COLORS = {
-  excellent: '#4CFFB5',  // --signal-excellent
-  good: '#39D98A',       // --signal-good
-  fair: '#F9D26F',       // --signal-fair
-  poor: '#FF8A5C',       // --signal-poor
-  critical: '#FF5C7A',   // --signal-critical
-  unknown: '#767688',    // --signal-unknown
-  localNode: '#60A5FA',  // --map-local-node
-  zeroHop: '#4338CA',    // Deep royal blue for zero-hop/direct neighbors
+  excellent: '#4CFFB5',
+  good: '#39D98A',
+  fair: '#F9D26F',
+  poor: '#FF8A5C',
+  critical: '#FF5C7A',
+  unknown: '#767688',
+  localNode: DESIGN.localColor,
+  zeroHop: DESIGN.nodeColor,
 };
 
 /**
@@ -117,7 +225,7 @@ function inferZeroHopNeighbors(
   // Build prefix -> full hash lookup for fallback prefix matching
   const prefixToHash = new Map<string, string[]>();
   for (const hash of Object.keys(neighbors)) {
-    const prefix = hash.slice(0, 2).toUpperCase();
+    const prefix = getHashPrefix(hash);
     const existing = prefixToHash.get(prefix) || [];
     existing.push(hash);
     prefixToHash.set(prefix, existing);
@@ -144,21 +252,13 @@ function inferZeroHopNeighbors(
     // Method 4: (Fallback) The LAST non-local element in the path is the node that transmitted to us.
     // Only use this if we don't already have edges from topology
     // Note: This is less reliable for prefix collisions
-    // Note: forwarded_path may include local's prefix at the end, so we need to skip it
+    // Use centralized path parsing which handles local stripping
     if (path.length > 0 && (!topologyEdges || topologyEdges.length === 0)) {
-      // Find the last hop that isn't local
-      let lastHopIndex = path.length - 1;
-      const localPrefixUpper = localHash?.startsWith('0x') 
-        ? localHash.slice(2).toUpperCase() 
-        : localHash?.slice(0, 2).toUpperCase();
+      const parsed = parsePath(path, localHash);
+      if (!parsed || parsed.effectiveLength === 0) continue;
       
-      if (localPrefixUpper && path[lastHopIndex]?.toUpperCase() === localPrefixUpper) {
-        lastHopIndex--;
-      }
-      
-      if (lastHopIndex < 0) continue; // Path only contains local
-      
-      const lastHopPrefix = path[lastHopIndex].toUpperCase();
+      // Last element in effective path is the last forwarder (transmitted to us)
+      const lastHopPrefix = parsed.effective[parsed.effectiveLength - 1];
       
       // Find neighbors matching this prefix
       const matchingHashes = prefixToHash.get(lastHopPrefix) || [];
@@ -178,16 +278,6 @@ function inferZeroHopNeighbors(
   return zeroHopNodes;
 }
 
-// Get color based on signal strength (SNR is more reliable than RSSI for LoRa)
-function getSignalColor(snr?: number): string {
-  if (snr === undefined) return SIGNAL_COLORS.unknown;
-  if (snr >= 5) return SIGNAL_COLORS.excellent;
-  if (snr >= 0) return SIGNAL_COLORS.good;
-  if (snr >= -5) return SIGNAL_COLORS.fair;
-  if (snr >= -10) return SIGNAL_COLORS.poor;
-  return SIGNAL_COLORS.critical;
-}
-
 // Simple tooltip for legend items - no blur for performance
 function LegendTooltip({ text }: { text: string }) {
   return (
@@ -203,25 +293,6 @@ function LegendTooltip({ text }: { text: string }) {
         {text}
       </div>
     </span>
-  );
-}
-
-// Legend item with hover tooltip
-function LegendItem({ indicator, label, tooltip }: { indicator: React.ReactNode; label: string; tooltip: string }) {
-  return (
-    <div className="flex items-center gap-1.5 group relative">
-      {indicator}
-      <span className="text-text-muted">{label}</span>
-      <div 
-        className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-40 p-2 text-[10px] leading-tight rounded-lg z-10"
-        style={{
-          background: 'rgba(20, 20, 22, 0.98)',
-          border: '1px solid rgba(140, 160, 200, 0.3)',
-        }}
-      >
-        {tooltip}
-      </div>
-    </div>
   );
 }
 
@@ -355,8 +426,8 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
 }
 
 export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode }: ContactsMapProps) {
-  // Track hover state per marker
-  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
+  // Track hover state per marker (setHoveredMarker used for events, hoveredMarker reserved for future use)
+  const [, setHoveredMarker] = useState<string | null>(null);
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
@@ -604,14 +675,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw validated topology edges - solid lines, color by link quality */}
+        {/* Draw validated topology edges - gray, thickness indicates strength */}
         {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
-          // Color based on link quality (green=strong, red=weak)
-          const color = getLinkQualityColor(edge.certainCount, meshTopology.maxCertainCount);
-          // Thickness based on validation frequency (thicker=stronger link)
+          // All edges are neutral gray - thickness conveys strength
           const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+          const isLoopEdge = meshTopology.loopEdgeKeys.has(edge.key);
           
-          // Calculate link quality percentage
+          // Calculate link quality percentage for tooltip
           const linkQuality = meshTopology.maxCertainCount > 0 
             ? (edge.certainCount / meshTopology.maxCertainCount)
             : 0;
@@ -622,12 +692,62 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
           const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
           
+          // Loop edges: render as parallel double-lines in accent color
+          if (isLoopEdge) {
+            const { line1, line2 } = getParallelOffsets(from, to, weight * 1.5);
+            return (
+              <>
+                {/* Double line for loop edge - indicates redundant path */}
+                <Polyline
+                  key={`loop-edge-1-${edge.key}`}
+                  positions={line1}
+                  pathOptions={{
+                    color: DESIGN.loopEdgeColor,
+                    weight: Math.max(1.5, weight * 0.6),
+                    opacity: 0.9,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+                <Polyline
+                  key={`loop-edge-2-${edge.key}`}
+                  positions={line2}
+                  pathOptions={{
+                    color: DESIGN.loopEdgeColor,
+                    weight: Math.max(1.5, weight * 0.6),
+                    opacity: 0.9,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                >
+                  <Tooltip
+                    permanent={false}
+                    direction="center"
+                    className="topology-edge-tooltip"
+                  >
+                    <div className="text-xs">
+                      <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                      <div className="text-text-secondary">
+                        {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
+                      </div>
+                      <div style={{ color: DESIGN.loopEdgeColor }} className="flex items-center gap-1 mt-0.5">
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Redundant path</span>
+                      </div>
+                    </div>
+                  </Tooltip>
+                </Polyline>
+              </>
+            );
+          }
+          
+          // Standard edge: single gray line
           return (
             <Polyline
               key={`edge-${edge.key}`}
               positions={[from, to]}
               pathOptions={{
-                color,
+                color: DESIGN.edgeColor,
                 weight,
                 opacity: 1,
                 lineCap: 'round',
@@ -641,8 +761,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               >
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
-                  <div style={{ color }}>
-                    {Math.round(linkQuality * 100)}% ({edge.certainCount} validations)
+                  <div className="text-text-secondary">
+                    {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
                   </div>
                   {edge.isHubConnection && (
                     <div className="text-amber-400">Hub connection</div>
@@ -655,11 +775,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
-        {/* Local node marker - matte plastic style with CSS shadows */}
+        {/* Local node marker - filled, distinct blue */}
         {localNode && localNode.latitude && localNode.longitude && (
           <Marker
             position={[localNode.latitude, localNode.longitude]}
-            icon={createDotIcon(SIGNAL_COLORS.localNode, hoveredMarker === 'local')}
+            icon={createLocalIcon()}
             eventHandlers={{
               mouseover: () => setHoveredMarker('local'),
               mouseout: () => setHoveredMarker(null),
@@ -674,7 +794,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   </span>
                 )}
                 <br />
-                <span className="text-accent-tertiary font-medium">This Node (Local)</span>
+                <span style={{ color: DESIGN.localColor }} className="font-medium">This Node (Local)</span>
                 <br />
                 <span className="text-xs text-text-muted">
                   {localNode.latitude.toFixed(5)}, {localNode.longitude.toFixed(5)}
@@ -684,7 +804,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           </Marker>
         )}
         
-        {/* Neighbor markers - uniform size, color by type */}
+        {/* Neighbor markers - rings for standard nodes, filled for hubs */}
         {filteredNeighbors.map(([hash, neighbor]) => {
           if (!neighbor.latitude || !neighbor.longitude) return null;
           
@@ -695,25 +815,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           
           // Calculate SNR (only meaningful for zero-hop neighbors)
           const meanSnr = calculateMeanSnr(packets, hash);
-          const displaySnr = meanSnr ?? neighbor.snr;
-          
-          // Color logic:
-          // - Hub nodes: amber (they're important network infrastructure)
-          // - Zero-hop (direct RF contact): color by SNR (we actually heard them)
-          // - Multi-hop: neutral gray (SNR not meaningful - we didn't hear them directly)
-          let color: string;
-          if (isHub) {
-            color = '#FBBF24'; // amber-400 for hub nodes
-          } else if (isZeroHop) {
-            // For direct neighbors, color by signal quality
-            color = getSignalColor(displaySnr);
-          } else {
-            // Multi-hop nodes - neutral color since we didn't hear them directly
-            color = SIGNAL_COLORS.unknown; // Gray for multi-hop
-          }
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
-          const isHovered = hoveredMarker === hash;
           
           // Get full affinity data for this neighbor
           const affinity = meshTopology.fullAffinity.get(hash);
@@ -721,11 +824,18 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Compact hash prefix (2 chars)
           const hashPrefix = hash.startsWith('0x') ? hash.slice(2, 4).toUpperCase() : hash.slice(0, 2).toUpperCase();
           
+          // Icon selection:
+          // - Hubs: filled dot (indicates importance)
+          // - All other nodes: ring/torus (elegant, minimal)
+          const icon = isHub 
+            ? createFilledIcon(DESIGN.hubColor) 
+            : createRingIcon(DESIGN.nodeColor);
+          
           return (
             <Marker
               key={hash}
               position={[neighbor.latitude, neighbor.longitude]}
-              icon={createDotIcon(color, isHovered)}
+              icon={icon}
               eventHandlers={{
                 mouseover: () => setHoveredMarker(hash),
                 mouseout: () => setHoveredMarker(null),
@@ -848,49 +958,57 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             borderRadius: '0.75rem',
             padding: '0.625rem',
             border: '1px solid rgba(140, 160, 200, 0.2)',
-            maxWidth: '140px',
+            maxWidth: '150px',
           }}
         >
+          {/* Node types legend */}
           <div className="text-text-secondary font-medium mb-1.5 flex items-center gap-1">
-            Signal (SNR)
-            <LegendTooltip text="Node color indicates mean SNR from received packets. Higher SNR = better signal quality." />
+            Nodes
+            <LegendTooltip text="All nodes shown in network accent color. Hubs are filled; others are rings." />
           </div>
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-1">
+            {/* Ring node indicator */}
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.excellent, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Excellent ≥5</span>
+              <div 
+                className="w-3 h-3 rounded-full flex-shrink-0" 
+                style={{ 
+                  background: 'transparent',
+                  border: `2.5px solid ${DESIGN.nodeColor}`,
+                  boxSizing: 'border-box',
+                }}
+              />
+              <span className="text-text-muted">Node</span>
             </div>
+            {/* Hub filled indicator */}
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.good, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Good 0–5</span>
+              <div 
+                className="w-3 h-3 rounded-full flex-shrink-0" 
+                style={{ 
+                  backgroundColor: DESIGN.hubColor,
+                  border: '1.5px solid rgba(13,14,18,0.8)',
+                }}
+              />
+              <span className="text-text-muted">Hub</span>
             </div>
+            {/* Local node */}
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.fair, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Fair -5–0</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.poor, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Poor -10–-5</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.critical, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Critical &lt;-10</span>
-            </div>
-            <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-white/10">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Direct (0-hop)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: SIGNAL_COLORS.localNode, border: '1px solid rgba(13,14,18,0.8)' }}></div>
-              <span className="text-text-muted">Local node</span>
+              <div 
+                className="w-3 h-3 rounded-full flex-shrink-0" 
+                style={{ 
+                  backgroundColor: DESIGN.localColor,
+                  border: '1.5px solid rgba(13,14,18,0.8)',
+                }}
+              />
+              <span className="text-text-muted">Local</span>
             </div>
           </div>
+          
           {/* Topology stats - compact summary */}
           {showTopology && validatedPolylines.length > 0 && (
             <>
               <div className="text-text-secondary font-medium mt-2 pt-2 border-t border-white/10 mb-1 flex items-center gap-1">
                 Topology
-                <LegendTooltip text="Top 100 links with 5+ validations. Line thickness = validation count." />
+                <LegendTooltip text="Links with 5+ validations. Thickness = relative strength." />
               </div>
               <div className="flex flex-col gap-0.5 text-text-muted">
                 <div className="flex justify-between tabular-nums">
@@ -904,28 +1022,65 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 {meshTopology.hubNodes.length > 0 && (
                   <div className="flex justify-between tabular-nums">
                     <span>Hubs</span>
-                    <span className="text-amber-400">{meshTopology.hubNodes.length}</span>
+                    <span style={{ color: DESIGN.hubColor }}>{meshTopology.hubNodes.length}</span>
                   </div>
                 )}
               </div>
-              {/* Link quality legend */}
-              <div className="flex flex-col gap-0.5 mt-1.5 pt-1.5 border-t border-white/10">
-                <LegendItem 
-                  indicator={<div className="w-3 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(74, 222, 128)' }} />}
-                  label="Strong"
-                  tooltip="≥24% of max validation count."
-                />
-                <LegendItem 
-                  indicator={<div className="w-3 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(250, 204, 21)' }} />}
-                  label="Medium"
-                  tooltip="12-23% of max validation count."
-                />
-                <LegendItem 
-                  indicator={<div className="w-3 h-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgb(248, 113, 113)' }} />}
-                  label="Weak"
-                  tooltip="6-11% of max validation count."
-                />
+              
+              {/* Link types legend */}
+              <div className="flex flex-col gap-1 mt-1.5 pt-1.5 border-t border-white/10">
+                {/* Standard link */}
+                <div className="flex items-center gap-1.5">
+                  <div 
+                    className="flex-shrink-0" 
+                    style={{ 
+                      width: '14px',
+                      height: '3px',
+                      backgroundColor: DESIGN.edgeColor,
+                      borderRadius: '1px',
+                    }}
+                  />
+                  <span className="text-text-muted">Link</span>
+                </div>
+                {/* Loop/redundant path indicator */}
+                {meshTopology.loops.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <div 
+                      className="flex-shrink-0 flex flex-col gap-0.5" 
+                      style={{ width: '14px' }}
+                    >
+                      <div style={{ 
+                        height: '2px', 
+                        backgroundColor: DESIGN.loopEdgeColor,
+                        borderRadius: '1px',
+                      }} />
+                      <div style={{ 
+                        height: '2px', 
+                        backgroundColor: DESIGN.loopEdgeColor,
+                        borderRadius: '1px',
+                      }} />
+                    </div>
+                    <span className="text-text-muted">Redundant</span>
+                  </div>
+                )}
               </div>
+              
+              {/* Loops indicator - key resilience metric */}
+              {meshTopology.loops.length > 0 && (
+                <div className="mt-1.5 pt-1.5 border-t border-white/10">
+                  <div className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3 h-3 flex-shrink-0" style={{ color: DESIGN.loopEdgeColor }} />
+                    <div className="flex flex-col">
+                      <span style={{ color: DESIGN.loopEdgeColor }} className="font-medium">
+                        {meshTopology.loops.length} {meshTopology.loops.length === 1 ? 'Loop' : 'Loops'}
+                      </span>
+                      <span className="text-text-muted text-[10px] leading-tight">
+                        Redundant paths
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

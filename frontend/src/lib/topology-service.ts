@@ -8,7 +8,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import type { MeshTopology, NeighborAffinity, TopologyEdge } from '@/lib/mesh-topology';
+import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop } from '@/lib/mesh-topology';
 import type { 
   TopologyWorkerRequest, 
   TopologyWorkerMessage, 
@@ -16,12 +16,12 @@ import type {
 } from '@/lib/workers/topology.worker';
 
 // Re-export for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop };
 
 /** Listener for topology changes */
 export type TopologyListener = (topology: MeshTopology, computeTimeMs: number) => void;
 
-/** Deserialize worker response back to MeshTopology with Maps */
+/** Deserialize worker response back to MeshTopology with Maps/Sets */
 function deserializeTopology(serialized: SerializedTopology): MeshTopology {
   return {
     edges: serialized.edges,
@@ -36,6 +36,8 @@ function deserializeTopology(serialized: SerializedTopology): MeshTopology {
     neighborAffinity: new Map(serialized.neighborAffinityEntries),
     fullAffinity: new Map(serialized.fullAffinityEntries),
     centrality: new Map(serialized.centralityEntries),
+    loops: serialized.loops ?? [],
+    loopEdgeKeys: new Set(serialized.loopEdgeKeyEntries ?? []),
   };
 }
 
@@ -54,6 +56,8 @@ function createEmptyTopology(): MeshTopology {
     localPrefix: null,
     centrality: new Map(),
     hubNodes: [],
+    loops: [],
+    loopEdgeKeys: new Set(),
   };
 }
 

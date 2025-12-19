@@ -6,7 +6,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import { buildMeshTopology, type MeshTopology, type NeighborAffinity } from '@/lib/mesh-topology';
+import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop } from '@/lib/mesh-topology';
 
 // Message types
 export interface TopologyWorkerRequest {
@@ -20,7 +20,7 @@ export interface TopologyWorkerRequest {
   };
 }
 
-// Serializable version of MeshTopology (Maps converted to arrays)
+// Serializable version of MeshTopology (Maps/Sets converted to arrays)
 export interface SerializedTopology {
   edges: MeshTopology['edges'];
   validatedEdges: MeshTopology['validatedEdges'];
@@ -35,6 +35,9 @@ export interface SerializedTopology {
   neighborAffinityEntries: [string, number][];
   fullAffinityEntries: [string, NeighborAffinity][];
   centralityEntries: [string, number][];
+  // Loop detection results
+  loops: NetworkLoop[];
+  loopEdgeKeyEntries: string[]; // Set serialized as array
 }
 
 export interface TopologyWorkerResponse {
@@ -74,7 +77,7 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
       localLon
     );
     
-    // Serialize Maps for postMessage (Maps aren't transferable)
+    // Serialize Maps/Sets for postMessage (Maps/Sets aren't transferable)
     const serialized: SerializedTopology = {
       edges: topology.edges,
       validatedEdges: topology.validatedEdges,
@@ -88,6 +91,8 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
       neighborAffinityEntries: Array.from(topology.neighborAffinity.entries()),
       fullAffinityEntries: Array.from(topology.fullAffinity.entries()),
       centralityEntries: Array.from(topology.centrality.entries()),
+      loops: topology.loops,
+      loopEdgeKeyEntries: Array.from(topology.loopEdgeKeys),
     };
     
     const computeTimeMs = performance.now() - startTime;

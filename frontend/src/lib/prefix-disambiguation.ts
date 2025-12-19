@@ -15,6 +15,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
+import { parsePacketPath, getHashPrefix as getPrefix, getPositionFromIndex } from '@/lib/path-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -127,27 +128,8 @@ const GEO_SCORING = {
 // Helper Functions
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Extract the 2-character prefix from a hash.
- * Handles both "0xNN" format (local hash) and full hex strings (neighbor hashes).
- */
-export function getHashPrefix(hash: string): string {
-  if (hash.startsWith('0x') || hash.startsWith('0X')) {
-    return hash.slice(2).toUpperCase();
-  }
-  return hash.slice(0, 2).toUpperCase();
-}
-
-/**
- * Check if a prefix matches a hash.
- */
-export function prefixMatches(prefix: string, hash: string): boolean {
-  const normalizedPrefix = prefix.toUpperCase();
-  if (hash.startsWith('0x') || hash.startsWith('0X')) {
-    return hash.slice(2).toUpperCase().startsWith(normalizedPrefix);
-  }
-  return hash.toUpperCase().startsWith(normalizedPrefix);
-}
+// Re-export from path-utils for backward compatibility
+export { getHashPrefix, prefixMatches } from '@/lib/path-utils';
 
 /**
  * Calculate distance between two coordinates in meters using Haversine formula.
@@ -167,26 +149,7 @@ function calculateDistance(
   return R * c;
 }
 
-/**
- * Parse path from packet (handles JSON string or array).
- */
-function parsePath(packet: Packet): string[] | null {
-  let path = packet.forwarded_path ?? packet.original_path;
-  
-  if (typeof path === 'string') {
-    try {
-      path = JSON.parse(path);
-    } catch {
-      return null;
-    }
-  }
-  
-  if (!path || !Array.isArray(path) || path.length === 0) {
-    return null;
-  }
-  
-  return path.map(p => String(p).toUpperCase());
-}
+// Path parsing now handled by path-utils.ts
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Core Functions
@@ -219,7 +182,7 @@ export function buildPrefixLookup(
   
   // Add local node if hash provided
   if (localHash) {
-    const localPrefix = getHashPrefix(localHash);
+    const localPrefix = getPrefix(localHash);
     const candidate: DisambiguationCandidate = {
       hash: localHash,
       prefix: localPrefix,
@@ -242,7 +205,7 @@ export function buildPrefixLookup(
   
   // Add all neighbors
   for (const [hash, neighbor] of Object.entries(neighbors)) {
-    const prefix = getHashPrefix(hash);
+    const prefix = getPrefix(hash);
     
     let distanceToLocal: number | undefined;
     let isZeroHop = neighbor.zero_hop === true; // Direct radio contact flag
@@ -307,28 +270,21 @@ export function buildPrefixLookup(
   }
   
   // ─── Step 2: Analyze packets for position and co-occurrence data ─────────────
-  const localPrefix = localHash ? getHashPrefix(localHash) : null;
-  
+  // Use centralized path parsing from path-utils.ts
   for (const packet of packets) {
-    let path = parsePath(packet);
-    if (!path) continue;
+    const parsed = parsePacketPath(packet, localHash);
+    if (!parsed || parsed.effectiveLength === 0) continue;
     
-    // Remove local node from path if present at the end
-    // The forwarded_path includes local (e.g., ["FA", "79", "24", "19"])
-    // We want position 1 to be the last forwarder, not local itself
-    if (localPrefix && path.length > 0 && path[path.length - 1] === localPrefix) {
-      path = path.slice(0, -1);
-    }
-    if (path.length === 0) continue;
+    const path = parsed.effective; // Local already stripped
     
-    // Process each element in the path
+    // Process each element in the effective path
     for (let i = 0; i < path.length; i++) {
       const prefix = path[i];
       const candidates = prefixToCandidates.get(prefix);
       if (!candidates) continue;
       
       // Position: 1 = last element (direct forwarder), 2 = second-to-last, etc.
-      const position = path.length - i;
+      const position = getPositionFromIndex(i, parsed.effectiveLength);
       const positionIndex = Math.min(position - 1, MAX_POSITIONS - 1);
       
       // Update position counts for all candidates matching this prefix
