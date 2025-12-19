@@ -200,7 +200,9 @@ export function buildNeighborAffinity(
   localHash?: string
 ): Map<string, NeighborAffinity> {
   const affinity = new Map<string, NeighborAffinity>();
-  const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  // localHash is passed but not used directly in affinity building
+  // (it's used later in buildMeshTopology for edge creation)
+  void localHash;
   const hasLocalCoords = localLat !== undefined && localLon !== undefined &&
     (localLat !== 0 || localLon !== 0);
   
@@ -239,6 +241,9 @@ export function buildNeighborAffinity(
   }
   
   // Analyze packets for hop positions and frequency
+  // NOTE: MeshCore paths are [first_hop, ..., last_hop] where last_hop is the node
+  // that transmitted the packet to us. Local is NOT appended to the path.
+  // So hop distance is relative to the END of the path (which is our direct neighbor).
   for (const packet of packets) {
     // Note: paths may be JSON strings or arrays depending on API version
     let path = packet.forwarded_path ?? packet.original_path;
@@ -252,30 +257,26 @@ export function buildNeighborAffinity(
       }
     }
     
-    if (path && Array.isArray(path) && path.length >= 1 && localPrefix) {
-      const lastPrefix = path[path.length - 1];
-      const pathEndsWithLocal = lastPrefix.toUpperCase() === localPrefix;
-      
-      if (pathEndsWithLocal) {
-        // Analyze each position in the path (excluding local at end)
-        for (let i = 0; i < path.length - 1; i++) {
-          const prefix = path[i];
-          // hopDistance: 1 = second-to-last (direct forwarder), 2 = third-to-last, etc.
-          const hopDistance = path.length - 1 - i;
-          
-          // Find matching neighbors and update their hop stats
-          for (const [hash, aff] of affinity) {
-            if (prefixMatches(prefix, hash)) {
-              aff.frequency++;
-              
-              // Track hop position (index 0 = 1-hop, index 1 = 2-hop, etc.)
-              const hopIndex = Math.min(hopDistance - 1, 4); // Cap at 5 positions
-              aff.hopPositionCounts[hopIndex]++;
-              
-              // Track direct forwards specifically
-              if (hopDistance === 1) {
-                aff.directForwardCount++;
-              }
+    if (path && Array.isArray(path) && path.length >= 1) {
+      // Process ALL paths - the last element is always the node that forwarded to us
+      // Hop positions: last element = 1-hop (direct forwarder), second-to-last = 2-hop, etc.
+      for (let i = 0; i < path.length; i++) {
+        const prefix = path[i];
+        // hopDistance from local: last element = 1 (direct), second-to-last = 2, etc.
+        const hopDistance = path.length - i;
+        
+        // Find matching neighbors and update their hop stats
+        for (const [hash, aff] of affinity) {
+          if (prefixMatches(prefix, hash)) {
+            aff.frequency++;
+            
+            // Track hop position (index 0 = 1-hop, index 1 = 2-hop, etc.)
+            const hopIndex = Math.min(hopDistance - 1, 4); // Cap at 5 positions
+            aff.hopPositionCounts[hopIndex]++;
+            
+            // Track direct forwards specifically (last element in path)
+            if (i === path.length - 1) {
+              aff.directForwardCount++;
             }
           }
         }
