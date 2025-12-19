@@ -157,6 +157,26 @@ class PacketCache {
     if (this.meta.deepLoadComplete || this.isDeepLoading) {
       return;
     }
+    return this.doDeepLoad();
+  }
+
+  /**
+   * Force deep load: Always fetch, even if already complete.
+   * Used by "Deep Analysis" button to refresh topology data.
+   */
+  async forceDeepLoad(): Promise<void> {
+    if (this.isDeepLoading) {
+      return; // Already in progress
+    }
+    // Reset deepLoadComplete to allow re-fetch
+    this.meta.deepLoadComplete = false;
+    return this.doDeepLoad();
+  }
+
+  /**
+   * Internal deep load implementation
+   */
+  private async doDeepLoad(): Promise<void> {
 
     this.isDeepLoading = true;
     this.statusMessage = 'Fetching topology data...';

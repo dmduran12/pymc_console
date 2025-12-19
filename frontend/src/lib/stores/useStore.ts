@@ -132,6 +132,7 @@ interface StoreState {
   hideContact: (hash: string) => void;
   clearPacketCache: () => void;
   triggerTopologyCompute: () => void;
+  triggerDeepAnalysis: () => Promise<void>;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -429,6 +430,13 @@ const store = create<StoreState>((set, get) => ({
     // Trigger async computation in worker
     topologyService.compute(packets, visibleNeighbors, localHash, localLat, localLon);
   },
+  
+  triggerDeepAnalysis: async () => {
+    // Force deep load (even if already complete)
+    await packetCache.forceDeepLoad();
+    // Packets will be updated by the subscription in initializeApp
+    // Topology compute will be triggered when packets update
+  },
 }));
 
 // Main store hook (full access)
@@ -464,3 +472,4 @@ export const useHiddenContacts = () => store((s) => s.hiddenContacts);
 export const useHideContact = () => store((s) => s.hideContact);
 export const usePacketCacheState = () => store((s) => s.packetCacheState);
 export const useClearPacketCache = () => store((s) => s.clearPacketCache);
+export const useTriggerDeepAnalysis = () => store((s) => s.triggerDeepAnalysis);
