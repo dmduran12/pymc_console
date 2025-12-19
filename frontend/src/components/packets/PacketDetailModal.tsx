@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useMemo } from 'react';
+import { memo, useState, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Check, ChevronDown, ChevronRight, ArrowRight, Map } from 'lucide-react';
 import clsx from 'clsx';
@@ -74,6 +74,17 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
   const [showRawHex, setShowRawHex] = useState(false);
   const [showPathMap, setShowPathMap] = useState(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  
+  // ESC key to close
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
   
   // Get neighbors, packets, and local node info from store for path visualization
   const stats = useStats();

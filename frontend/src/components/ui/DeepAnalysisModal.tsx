@@ -9,7 +9,7 @@
  * Then shows "Ready!" with a big checkmark before closing.
  */
 
-import { memo } from 'react';
+import { memo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Loader2, Database, GitBranch, Download } from 'lucide-react';
 import clsx from 'clsx';
@@ -77,7 +77,19 @@ function StepIndicator({ label, icon, status, detail }: StepIndicatorProps) {
   );
 }
 
-function DeepAnalysisModalComponent({ isOpen, currentStep, packetCount }: DeepAnalysisModalProps) {
+function DeepAnalysisModalComponent({ isOpen, currentStep, packetCount, onClose }: DeepAnalysisModalProps) {
+  // ESC key to close (only when onClose provided and modal is closeable)
+  useEffect(() => {
+    if (!isOpen || !onClose) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
   
   const isComplete = currentStep === 'complete';
