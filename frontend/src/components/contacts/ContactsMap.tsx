@@ -551,6 +551,14 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const wasDeepLoadingRef = useRef(false);
   const wasComputingRef = useRef(false);
   
+  // Track when building step started (for minimum display time)
+  const buildingStartTimeRef = useRef<number>(0);
+  
+  // Minimum time to show "Building Topology" step (1.7s)
+  const MIN_BUILDING_TIME_MS = 1700;
+  // Time to show "Ready!" state before closing (1s)
+  const READY_DISPLAY_TIME_MS = 1000;
+  
   // Extract primitive values to avoid object reference changes triggering infinite loops
   const isDeepLoading = packetCacheState.isDeepLoading;
   
@@ -562,19 +570,28 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     if (wasDeepLoadingRef.current && !isDeepLoading) {
       setAnalysisStep('analyzing');
       // Brief pause to show "analyzing" before topology compute starts
-      setTimeout(() => setAnalysisStep('building'), 300);
+      setTimeout(() => {
+        setAnalysisStep('building');
+        buildingStartTimeRef.current = Date.now();
+      }, 300);
     }
     
     // Step 3 → complete: Topology compute finished
+    // Ensure minimum 1.7s display time for "Building Topology" step
     if (wasComputingRef.current && !isComputingTopology && analysisStep === 'building') {
-      setAnalysisStep('complete');
-      // Close modal after brief success state
+      const elapsed = Date.now() - buildingStartTimeRef.current;
+      const remainingDelay = Math.max(0, MIN_BUILDING_TIME_MS - elapsed);
+      
       setTimeout(() => {
-        setShowDeepAnalysisModal(false);
-        setAnalysisStep('fetching');
-        // Enable topology view to show the new edges
-        setShowTopology(true);
-      }, 500);
+        setAnalysisStep('complete');
+        // Show "Ready!" state for 1s before closing
+        setTimeout(() => {
+          setShowDeepAnalysisModal(false);
+          setAnalysisStep('fetching');
+          // Enable topology view to show the new edges
+          setShowTopology(true);
+        }, READY_DISPLAY_TIME_MS);
+      }, remainingDelay);
     }
     
     wasDeepLoadingRef.current = isDeepLoading;
@@ -1172,7 +1189,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           <button
             onClick={handleDeepAnalysis}
             disabled={packetCacheState.isDeepLoading || showDeepAnalysisModal}
-            className="p-2 transition-colors hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 flex items-center gap-2 transition-colors hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               background: 'rgba(20, 20, 22, 0.95)',
               borderRadius: '0.75rem',
@@ -1180,6 +1197,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             }}
             title="Deep Analysis - Load full packet history and rebuild topology"
           >
+            <span className="text-xs font-medium text-text-primary">Deep Analysis</span>
             <BarChart2 className="w-4 h-4 text-accent-primary" />
           </button>
           
