@@ -52,11 +52,17 @@ export interface DisambiguationCandidate {
   /** Distance to local node in meters (if calculable) */
   distanceToLocal?: number;
   
-  // ─── Source-Geographic Evidence (NEW) ────────────────────────────────────────
+  // ─── Source-Geographic Evidence ──────────────────────────────────────────────
   /** Evidence score from source-geographic correlation at position 1 */
   srcGeoEvidenceScore: number;
   /** Number of position-1 observations with geographic evidence */
   srcGeoEvidenceCount: number;
+  
+  // ─── Recency Scoring (inspired by meshcore-bot) ──────────────────────────────
+  /** Unix timestamp when this node was last seen (from neighbor.last_seen) */
+  lastSeenTimestamp: number;
+  /** 0-1: Recency score using exponential decay e^(-hours/12) */
+  recencyScore: number;
   
   // ─── Combined Scores ─────────────────────────────────────────────────────────
   /** 0-1: Score based on path position consistency */
@@ -104,18 +110,32 @@ export interface ResolutionContext {
 
 /** 
  * Weights for combining scores.
- * Geographic is weighted highest because it's the only true differentiator
- * for prefix collisions (position/co-occurrence data is shared among all
- * candidates matching the same prefix).
+ * Geographic + Recency weighted highest as they provide candidate-specific evidence.
+ * Position/co-occurrence data is shared among all candidates matching the same prefix.
  */
 const SCORE_WEIGHTS = {
-  position: 0.25,
-  cooccurrence: 0.25,
-  geographic: 0.50,  // Highest weight - only real differentiator for collisions
+  position: 0.15,      // Shared across collision candidates
+  cooccurrence: 0.15,  // Shared across collision candidates
+  geographic: 0.40,    // Candidate-specific - distance to local
+  recency: 0.30,       // Candidate-specific - when last seen
 };
 
 /** Maximum hop positions to track */
 const MAX_POSITIONS = 5;
+
+/**
+ * Maximum age for candidates to be considered (in hours).
+ * Nodes not seen in this period are filtered out before disambiguation.
+ * Default: 336 hours = 14 days (matches meshcore-bot's max_repeater_age_days)
+ */
+const MAX_CANDIDATE_AGE_HOURS = 336;
+
+/**
+ * Recency decay half-life in hours.
+ * Score = e^(-hours/RECENCY_DECAY_HOURS)
+ * At 12 hours: ~37% score, at 24 hours: ~14%, at 48 hours: ~2%
+ */
+const RECENCY_DECAY_HOURS = 12;
 
 /** 
  * Distance thresholds for geographic scoring.
@@ -153,6 +173,51 @@ function calculateDistance(
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+}
+
+/**
+ * Calculate recency score using exponential decay.
+ * Inspired by meshcore-bot: score = e^(-hours/12)
+ * 
+ * @param lastSeenTimestamp - Unix timestamp (seconds) when node was last seen
+ * @param nowTimestamp - Current timestamp (defaults to now)
+ * @returns 0-1 score where 1.0 = just seen, decaying over time
+ */
+function calculateRecencyScore(lastSeenTimestamp: number, nowTimestamp?: number): number {
+  if (!lastSeenTimestamp || lastSeenTimestamp <= 0) {
+    return 0.1; // Unknown recency gets low score
+  }
+  
+  const now = nowTimestamp ?? Math.floor(Date.now() / 1000);
+  const hoursAgo = (now - lastSeenTimestamp) / 3600;
+  
+  if (hoursAgo < 0) {
+    return 1.0; // Future timestamp (clock skew) - assume recent
+  }
+  
+  // Exponential decay: e^(-hours/12)
+  // 1 hour ago: ~0.92
+  // 6 hours ago: ~0.61
+  // 12 hours ago: ~0.37
+  // 24 hours ago: ~0.14
+  // 48 hours ago: ~0.02
+  return Math.exp(-hoursAgo / RECENCY_DECAY_HOURS);
+}
+
+/**
+ * Check if a candidate is too old to be considered.
+ * @param lastSeenTimestamp - Unix timestamp when node was last seen
+ * @returns true if candidate should be filtered out
+ */
+function isCandidateTooOld(lastSeenTimestamp: number): boolean {
+  if (!lastSeenTimestamp || lastSeenTimestamp <= 0) {
+    return false; // Unknown age - don't filter (could be local node)
+  }
+  
+  const now = Math.floor(Date.now() / 1000);
+  const hoursAgo = (now - lastSeenTimestamp) / 3600;
+  
+  return hoursAgo > MAX_CANDIDATE_AGE_HOURS;
 }
 
 // Path parsing now handled by path-utils.ts
@@ -203,6 +268,8 @@ export function buildPrefixLookup(
       distanceToLocal: 0,
       srcGeoEvidenceScore: 0,
       srcGeoEvidenceCount: 0,
+      lastSeenTimestamp: Math.floor(Date.now() / 1000), // Local is always "just seen"
+      recencyScore: 1.0, // Local gets max recency
       positionScore: 0,
       cooccurrenceScore: 0,
       geographicScore: 1.0, // Local is always at distance 0
@@ -211,9 +278,15 @@ export function buildPrefixLookup(
     prefixToCandidates.set(localPrefix, [candidate]);
   }
   
-  // Add all neighbors
+  // Add all neighbors (with age filtering)
   for (const [hash, neighbor] of Object.entries(neighbors)) {
     const prefix = getPrefix(hash);
+    const lastSeenTimestamp = neighbor.last_seen ?? 0;
+    
+    // Skip candidates that are too old (not seen in MAX_CANDIDATE_AGE_HOURS)
+    if (isCandidateTooOld(lastSeenTimestamp)) {
+      continue;
+    }
     
     let distanceToLocal: number | undefined;
     let isZeroHop = neighbor.zero_hop === true; // Direct radio contact flag
@@ -254,6 +327,9 @@ export function buildPrefixLookup(
       geoScore = Math.max(geoScore, 0.95);
     }
     
+    // Calculate recency score using exponential decay
+    const recencyScore = calculateRecencyScore(lastSeenTimestamp);
+    
     const candidate: DisambiguationCandidate = {
       hash,
       prefix,
@@ -268,6 +344,8 @@ export function buildPrefixLookup(
       distanceToLocal,
       srcGeoEvidenceScore: 0,
       srcGeoEvidenceCount: 0,
+      lastSeenTimestamp,
+      recencyScore,
       positionScore: 0,
       cooccurrenceScore: 0,
       geographicScore: geoScore, // Pre-calculated
@@ -361,6 +439,70 @@ export function buildPrefixLookup(
           
           candidate.srcGeoEvidenceScore += evidence;
           candidate.srcGeoEvidenceCount++;
+        }
+        
+        // === PREVIOUS-HOP ANCHOR CORRELATION (meshcore-bot inspired) ===
+        // For positions not at the start of path, use the PREVIOUS hop's location
+        // as an anchor. A relay node should be within RF range of the node that
+        // forwarded to it. This complements the next-hop anchor below.
+        if (i > 0 && candidates.length > 1 && candidate.latitude && candidate.longitude) {
+          const prevHopIndex = i - 1;
+          const prevHopPrefix = path[prevHopIndex];
+          const prevHopCandidates = prefixToCandidates.get(prevHopPrefix);
+          
+          if (prevHopCandidates && prevHopCandidates.length > 0) {
+            // Find the best previous-hop candidate location
+            let anchorLat: number | undefined;
+            let anchorLon: number | undefined;
+            let anchorConfidence = 0;
+            
+            if (prevHopCandidates.length === 1) {
+              const anchor = prevHopCandidates[0];
+              if (anchor.latitude && anchor.longitude) {
+                anchorLat = anchor.latitude;
+                anchorLon = anchor.longitude;
+                anchorConfidence = 1.0;
+              }
+            } else {
+              // Use best-scoring candidate with coords
+              const sorted = [...prevHopCandidates].sort((a, b) => b.combinedScore - a.combinedScore);
+              const best = sorted[0];
+              const second = sorted[1];
+              if (best.latitude && best.longitude && best.combinedScore > 0) {
+                const scoreSeparation = second ? (best.combinedScore - second.combinedScore) / best.combinedScore : 1;
+                anchorConfidence = Math.min(1, scoreSeparation + 0.3);
+                if (anchorConfidence > 0.4) {
+                  anchorLat = best.latitude;
+                  anchorLon = best.longitude;
+                }
+              }
+            }
+            
+            if (anchorLat !== undefined && anchorLon !== undefined) {
+              const distToAnchor = calculateDistance(
+                candidate.latitude, candidate.longitude,
+                anchorLat, anchorLon
+              );
+              
+              // Score by proximity to previous-hop anchor
+              let evidence = 0;
+              if (distToAnchor < 500) {
+                evidence = 1.0;
+              } else if (distToAnchor < 2000) {
+                evidence = 0.8;
+              } else if (distToAnchor < 5000) {
+                evidence = 0.5;
+              } else if (distToAnchor < 10000) {
+                evidence = 0.3;
+              } else {
+                evidence = 0.1;
+              }
+              
+              evidence *= anchorConfidence;
+              candidate.srcGeoEvidenceScore += evidence;
+              candidate.srcGeoEvidenceCount++;
+            }
+          }
         }
         
         // === NEXT-HOP ANCHOR CORRELATION ===
@@ -502,12 +644,14 @@ export function buildPrefixLookup(
       
       // Geographic score is pre-calculated during candidate creation
       // (includes distance-based scoring and zero_hop boost)
+      // Recency score is pre-calculated using exponential decay
       
-      // Combined score (base calculation)
+      // Combined score (4-factor calculation)
       candidate.combinedScore = 
         candidate.positionScore * SCORE_WEIGHTS.position +
         candidate.cooccurrenceScore * SCORE_WEIGHTS.cooccurrence +
-        candidate.geographicScore * SCORE_WEIGHTS.geographic;
+        candidate.geographicScore * SCORE_WEIGHTS.geographic +
+        candidate.recencyScore * SCORE_WEIGHTS.recency;
       
       // === SOURCE-GEOGRAPHIC EVIDENCE BOOST ===
       // If this candidate has accumulated evidence from src_hash correlation,
@@ -567,11 +711,6 @@ export function buildPrefixLookup(
       const secondPos1Count = candidates[1].positionCounts[pos1Index] || 0;
       const totalPos1 = bestPos1Count + secondPos1Count;
       
-      // Debug logging (temporarily enabled for prefix 24)
-      if (prefix === '24') {
-        console.log(`[disambiguation] Prefix ${prefix}: bestPos1=${bestPos1Count}, secondPos1=${secondPos1Count}, total=${totalPos1}, conf=${confidence.toFixed(2)}`);
-      }
-      
       if (totalPos1 >= 20 && bestPos1Count >= 10) {
         const pos1Ratio = bestPos1Count / totalPos1;
         if (pos1Ratio >= 0.80) {
@@ -614,10 +753,6 @@ export function buildPrefixLookup(
         const secondWeightedPos1 = weightedPos1Counts[1] || 0;
         const weightedTotal = bestWeightedPos1 + secondWeightedPos1;
         
-        if (prefix === '24') {
-          console.log(`[disambiguation] Prefix ${prefix}: WEIGHTED pos1 - best=${bestWeightedPos1.toFixed(0)}, second=${secondWeightedPos1.toFixed(0)}, total=${weightedTotal.toFixed(0)}`);
-        }
-        
         if (weightedTotal >= 20 && bestWeightedPos1 >= 10) {
           const weightedRatio = bestWeightedPos1 / weightedTotal;
           if (weightedRatio >= 0.60) { // Lowered from 0.80 since weighted counts are estimates
@@ -625,10 +760,6 @@ export function buildPrefixLookup(
             // Scale: 60% = +0.2, 80% = +0.4, 100% = +0.6
             const dominanceBoost = 0.20 + (weightedRatio - 0.60) * 1.0;
             const newConfidence = Math.min(1, confidence + dominanceBoost);
-            
-            if (prefix === '24') {
-              console.log(`[disambiguation] Prefix ${prefix}: WEIGHTED DOMINANT BOOST! ratio=${weightedRatio.toFixed(2)}, boost=${dominanceBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
-            }
             
             confidence = newConfidence;
           }

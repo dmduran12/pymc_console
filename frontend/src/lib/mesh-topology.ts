@@ -875,26 +875,6 @@ export function buildMeshTopology(
       
       const isCertainObservation = bothHighConfidence || toIsVeryHighConfidence || toIsConfidentLastHop;
       
-      // DEBUG: Log edges TO prefix 24 (temporarily enabled in all envs)
-      if (toPrefix === '24') {
-        console.log(`[edge-debug] Edge TO 24:`, {
-          fromPrefix,
-          toPrefix,
-          fromHash: fromResult.hash?.slice(0, 8),
-          toHash: toResult.hash?.slice(0, 8),
-          fromConf: fromResult.confidence.toFixed(3),
-          toConf: toResult.confidence.toFixed(3),
-          isToLastHop,
-          toPosition,
-          bothHighConf: bothHighConfidence,
-          toVeryHigh: toIsVeryHighConfidence,
-          toConfLastHop: toIsConfidentLastHop,
-          isCertain: isCertainObservation,
-          threshold: CERTAINTY_CONFIDENCE_THRESHOLD,
-          packetHash: packet.packet_hash?.slice(0, 8),
-        });
-      }
-      
       // Track nodes for centrality
       nodesInPath.add(fromResult.hash);
       nodesInPath.add(toResult.hash);
@@ -964,48 +944,6 @@ export function buildMeshTopology(
   for (const [hash, score] of sortedByCentrality) {
     if (score >= 0.5) {
       hubNodes.push(hash);
-    }
-  }
-  
-  // DEBUG: Log edges involving prefix 24 (temporarily enabled in all envs)
-  if (true) {
-    const edges24 = [...accumulators.values()].filter(acc => 
-      acc.fromHash.toUpperCase().startsWith('24') || 
-      acc.toHash.toUpperCase().startsWith('24')
-    );
-    console.log(`[mesh-topology] DEBUG: Edges involving prefix 24:`, {
-      count: edges24.length,
-      edges: edges24.map(acc => ({
-        key: acc.key,
-        from: acc.fromHash.slice(0, 8),
-        to: acc.toHash.slice(0, 8),
-        totalCount: acc.count,
-        certainCount: acc.certainCount,
-        uncertainCount: acc.uncertainCount,
-        meetsThreshold: acc.certainCount >= MIN_EDGE_VALIDATIONS,
-        avgConf: (acc.confidenceSum / acc.count).toFixed(2),
-      })),
-    });
-    
-    // Also log prefix 24 disambiguation result
-    const prefix24Result = prefixLookup.get('24');
-    if (prefix24Result) {
-      console.log(`[mesh-topology] DEBUG: Prefix 24 disambiguation:`, {
-        candidateCount: prefix24Result.candidates.length,
-        bestMatch: prefix24Result.bestMatch?.slice(0, 16),
-        confidence: prefix24Result.confidence.toFixed(3),
-        isUnambiguous: prefix24Result.isUnambiguous,
-        candidates: prefix24Result.candidates.slice(0, 5).map(c => ({
-          hash: c.hash.slice(0, 16),
-          pos1Count: c.positionCounts[0],
-          totalAppearances: c.totalAppearances,
-          geoScore: c.geographicScore.toFixed(2),
-          combinedScore: c.combinedScore.toFixed(3),
-          distanceToLocal: c.distanceToLocal?.toFixed(0) ?? 'unknown',
-        })),
-      });
-    } else {
-      console.log(`[mesh-topology] DEBUG: Prefix 24 NOT FOUND in lookup!`);
     }
   }
   
