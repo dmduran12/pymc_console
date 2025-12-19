@@ -5,7 +5,7 @@
 
 A modern web dashboard for monitoring and managing your [MeshCore](https://meshcore.co.uk/) LoRa mesh repeater.
 
-Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console provides real-time visibility into your mesh network with an intuitive interface.
+Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](https://github.com/rightup), pyMC Console provides real-time visibility into your mesh network with an intuitive, feature-rich interface.
 
 ## Features
 
@@ -27,18 +27,18 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 
 ### Neighbors & Topology
 - **Interactive map** — OpenStreetMap with dark theme and neighbor positions
-- **Mesh topology graph** — Visualizes network connections inferred from packet paths
-- **Edge thickness** — Line width scales with validation count (5-100+ observations)
-- **Intelligent disambiguation** — Resolves prefix collisions using multi-factor scoring
-- **Filter toggles** — Solo view for hub nodes or direct neighbors
-- **Loop detection** — Identifies redundant paths for network resilience (H₁ homology)
+- **Mesh topology graph** — Network connections inferred from packet paths
+- **Intelligent disambiguation** — Four-factor scoring resolves prefix collisions
+- **Edge confidence** — Line thickness scales with observation count
+- **Filter toggles** — Solo view for hub nodes or direct neighbors only
+- **Loop detection** — Identifies redundant paths (H₁ homology analysis)
 
 ![Neighbors](docs/images/neighbors.png)
 
 ### Packets
 - **Searchable history** — Filter by type, route, time range
 - **Packet details** — Hash, path, payload, signal info, duplicates
-- **Path visualization** — Interactive map showing packet route with confidence indicators
+- **Path visualization** — Interactive map showing packet route with hop confidence
 
 ### Settings
 - **Mode toggle** — Forward (repeating) or Monitor (RX only)
@@ -216,16 +216,20 @@ Packet path: ["FA", "79", "24", "19"]
            Origin → Hop1 → Hop2 → Local
 ```
 
-**Disambiguation Challenge**: Multiple nodes may share the same 2-char prefix (1 in 256 collision chance). The system uses three-factor scoring to resolve ambiguity:
+**The Challenge**: Multiple nodes may share the same 2-char prefix (1 in 256 collision chance). The system uses four-factor scoring inspired by [meshcore-bot](https://github.com/agessaman/meshcore-bot) to resolve ambiguity:
 
-1. **Position evidence (25%)** — Where in paths does this prefix typically appear?
-2. **Co-occurrence evidence (25%)** — Which prefixes appear adjacent to this one?
-3. **Geographic evidence (50%)** — How close is the candidate to known anchor points?
+1. **Position (15%)** — Where in paths does this prefix typically appear?
+2. **Co-occurrence (15%)** — Which prefixes appear adjacent to this one?
+3. **Geographic (40%)** — How close is the candidate to anchor points?
+4. **Recency (30%)** — How recently was this node seen?
 
 **Key techniques:**
-- **Score-weighted redistribution**: Appearance counts are redistributed proportionally by combined score, giving candidate-specific estimates even when raw counts are shared
-- **Source-Geographic Correlation**: Position-1 prefixes scored by distance from packet origin
-- **Next-Hop Anchor Correlation**: Upstream prefixes scored by distance from already-resolved downstream nodes
+
+- **Recency scoring** — Exponential decay `e^(-hours/12)` favors recently-active nodes
+- **Age filtering** — Nodes not seen in 14 days are excluded from consideration
+- **Dual-hop anchoring** — Candidates scored by distance to both previous and next hops (a relay must be within RF range of both neighbors)
+- **Score-weighted redistribution** — Appearance counts redistributed proportionally by combined score
+- **Source-geographic correlation** — Position-1 prefixes scored by distance from packet origin
 
 The system loads up to 20,000 packets (~7 days of traffic) to build comprehensive topology evidence.
 
@@ -239,6 +243,16 @@ Topology edges are rendered with visual cues indicating confidence:
   - Both endpoints have ≥60% confidence, OR
   - The destination has ≥90% confidence, OR
   - It's the last hop to local node
+
+### Path Visualization
+
+Clicking a packet shows its route on a map with confidence indicators:
+
+- **Green** — 100% confidence (unique prefix, no collision)
+- **Yellow** — 50-99% confidence (high certainty)
+- **Orange** — 25-49% confidence (medium certainty)
+- **Red** — 1-24% confidence (low certainty)
+- **Gray** — Unknown prefix (not in neighbor list)
 
 ## Development
 
@@ -262,8 +276,10 @@ MIT — See [LICENSE](LICENSE)
 
 ## Credits
 
-Built on the excellent work of [RightUp](https://github.com/rightup):
+Built on the excellent work of:
 
-- **[pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)** — The core repeater daemon handling LoRa communication and mesh routing
-- **[pymc_core](https://github.com/rightup/pyMC_core)** — The underlying mesh protocol library
+- **[RightUp](https://github.com/rightup)** — Creator of pyMC_Repeater, pymc_core, and the MeshCore ecosystem
+- **[pyMC_Repeater](https://github.com/rightup/pyMC_Repeater)** — Core repeater daemon for LoRa communication and mesh routing
+- **[pymc_core](https://github.com/rightup/pyMC_core)** — Underlying mesh protocol library
+- **[meshcore-bot](https://github.com/agessaman/meshcore-bot)** — Inspiration for recency scoring and dual-hop anchor disambiguation
 - **[MeshCore](https://meshcore.co.uk/)** — The MeshCore project and community

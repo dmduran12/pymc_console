@@ -184,23 +184,35 @@ const { stats } = useStore();       // Avoid
 - Background images and color schemes are decoupled (can be mixed independently)
 - localStorage persistence with automatic migration from legacy keys
 
-**Mesh Topology System** (`src/lib/`): Multi-layered network analysis with intelligent prefix disambiguation.
+**Mesh Topology System** (`src/lib/`): Multi-layered network analysis with intelligent prefix disambiguation. Inspired by [meshcore-bot](https://github.com/agessaman/meshcore-bot)'s path analysis.
 
 **Core Files:**
-- `prefix-disambiguation.ts` - Three-factor scoring system for resolving 2-char hex prefixes to nodes
+- `prefix-disambiguation.ts` - Four-factor scoring system for resolving 2-char hex prefixes to nodes
 - `mesh-topology.ts` - Edge building, validation, and graph construction
 - `path-utils.ts` - Centralized path parsing: `parsePath()`, `iteratePathEdges()`, `extractPrefixFromHash()`
 - `packet-cache.ts` - Deep packet loading with 20K limit for comprehensive topology
 - `topology-service.ts` - Web Worker orchestration for off-main-thread computation
 
-**Disambiguation Scoring** (3 factors):
-- **Position (25%)** - How often a candidate appears at each path position
-- **Co-occurrence (25%)** - How often pairs of prefixes appear adjacent in paths
-- **Geographic (50%)** - Distance-based scoring using coordinates
+**Disambiguation Scoring** (4 factors):
+- **Position (15%)** - How often a candidate appears at each path position
+- **Co-occurrence (15%)** - How often pairs of prefixes appear adjacent in paths
+- **Geographic (40%)** - Distance-based scoring using dual-hop anchoring
+- **Recency (30%)** - Exponential decay scoring based on when node was last seen
+
+**Recency Scoring** (inspired by meshcore-bot):
+- Uses exponential decay: `e^(-hours/12)`
+- 1 hour ago: ~92%, 12 hours: ~37%, 24 hours: ~14%, 48 hours: ~2%
+- Nodes not seen in 14 days (336 hours) are filtered out entirely
+- Local node always gets 1.0 recency score
+
+**Dual-Hop Anchor Correlation:**
+- **Previous-Hop Anchor** - Upstream prefixes scored by distance from already-resolved previous hop
+- **Next-Hop Anchor** - Upstream prefixes scored by distance from already-resolved downstream node
+- A relay node should be within RF range of both its upstream and downstream neighbors
 
 **Special Correlations:**
 - **Source-Geographic Correlation** - Position-1 prefixes scored by distance from packet's `src_hash` location
-- **Next-Hop Anchor Correlation** - Position 2+ prefixes use next hop's location as anchor for recursive disambiguation
+- **Score-Weighted Redistribution** - Appearance counts redistributed proportionally by combined score
 
 **Edge Certainty Logic:**
 Edges are marked "certain" when:
@@ -213,13 +225,15 @@ Edges are marked "certain" when:
 - `MIN_EDGE_VALIDATIONS = 5` - Minimum observations for edge certainty
 - `CERTAINTY_CONFIDENCE_THRESHOLD = 0.6` - Minimum confidence for certain edges
 - `confidenceThreshold = 0.5` - Minimum confidence for edge inclusion
+- `MAX_CANDIDATE_AGE_HOURS = 336` - Filter out nodes not seen in 14 days
+- `RECENCY_DECAY_HOURS = 12` - Half-life for recency scoring
 
 **Geographic Scoring Bands:**
 - VERY_CLOSE (<500m) = 1.0
-- CLOSE (<2km) = 0.9
-- MEDIUM (<5km) = 0.7
-- FAR (<10km) = 0.5
-- VERY_FAR (<20km) = 0.3
+- CLOSE (<2km) = 0.8
+- MEDIUM (<5km) = 0.6
+- FAR (<10km) = 0.4
+- VERY_FAR (<20km) = 0.2
 
 ### Backend API
 
@@ -368,37 +382,58 @@ MeshCore packets contain a `path` field with 2-character hex prefixes representi
 
 ### Path Resolution (`prefix-disambiguation.ts`)
 
-The disambiguation system uses multi-factor analysis to resolve ambiguous 2-char prefixes:
+The disambiguation system uses multi-factor analysis to resolve ambiguous 2-char prefixes (inspired by [meshcore-bot](https://github.com/agessaman/meshcore-bot)):
 
 1. **Evidence Collection** (per-prefix statistics):
    - `positionCounts[0-4]` - How often prefix appears at each position
    - `cooccurrenceCount` - How often prefix appears adjacent to known prefixes  
    - `srcGeoEvidenceScore` - Correlation with packet source locations (position 1)
+   - `lastSeenTimestamp` - When the candidate was last heard
+   - `recencyScore` - Exponential decay based on age
 
-2. **Three-Factor Scoring**:
-   - **Position (25%)**: Normalized count at observed position vs total observations
-   - **Co-occurrence (25%)**: Adjacent prefix relationships from historical data
-   - **Geographic (50%)**: Distance from anchor point (source for pos-1, next-hop for pos-2+)
+2. **Age Filtering** (pre-processing):
+   - Candidates not seen in 14 days (`MAX_CANDIDATE_AGE_HOURS = 336`) are filtered out
+   - Prevents stale/offline nodes from causing false collisions
 
-3. **Special Disambiguation Techniques**:
+3. **Four-Factor Scoring**:
+   - **Position (15%)**: Normalized count at observed position vs total observations
+   - **Co-occurrence (15%)**: Adjacent prefix relationships from historical data
+   - **Geographic (40%)**: Distance from anchor points (dual-hop anchoring)
+   - **Recency (30%)**: Exponential decay `e^(-hours/12)` favoring recently-seen nodes
+
+4. **Dual-Hop Anchor Correlation**:
+   A relay node must be within RF range of both adjacent hops. The system uses:
+
+   **Previous-Hop Anchor** (upstream):
+   ```typescript
+   // Use already-resolved previous hop as anchor
+   // Position N scored by distance from position N-1's location
+   prevHopGeoScore = distanceScore(candidate.location, prevHop.location)
+   ```
+
+   **Next-Hop Anchor** (downstream):
+   ```typescript
+   // Use already-resolved next hop as anchor
+   // Position N scored by distance from position N+1's location
+   nextHopGeoScore = distanceScore(candidate.location, nextHop.location)
+   ```
+
+5. **Special Correlations**:
 
    **Source-Geographic Correlation** (position 1):
-   When prefix appears at position 1, score candidates by distance from packet's source node:
    ```typescript
-   // If packet src_hash is known and has coordinates,
-   // candidates closer to source get higher scores
+   // Position-1 prefixes scored by distance from packet origin
    srcGeoEvidenceScore += distanceScore(candidate.location, srcLocation)
    ```
 
-   **Next-Hop Anchor Correlation** (position 2+):
-   Use the already-resolved next hop as an anchor for upstream disambiguation:
+   **Score-Weighted Redistribution**:
    ```typescript
-   // If downstream node (position i+1) is resolved with high confidence,
-   // use its location to score upstream candidates at position i
-   geoScore = distanceScore(candidate.location, nextHop.location)
+   // When multiple candidates share a prefix, raw appearance counts
+   // are redistributed proportionally by combined score
+   redistributedCount = rawCount * (myScore / totalScoresForPrefix)
    ```
 
-4. **Confidence Thresholds**:
+6. **Confidence Thresholds**:
    - ≥0.9 = Very high confidence (used for edge certainty)
    - ≥0.6 = High confidence (certain edge threshold)
    - ≥0.5 = Included in topology (default threshold)
