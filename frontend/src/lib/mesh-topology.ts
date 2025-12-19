@@ -1207,15 +1207,22 @@ export const EDGE_WEIGHT_THRESHOLDS = {
   MIN_VALIDATIONS: 5,     // Below 5 = not rendered (filtered elsewhere)
 };
 
-/** Max edge weight (90% of typical node dot size ~12px) */
-const MAX_EDGE_WEIGHT = 10;
+/** Max edge weight - reduced to keep most edges thin */
+const MAX_EDGE_WEIGHT = 6;
 /** Min edge weight for weakest rendered edges */
-const MIN_EDGE_WEIGHT = 1.5;
+const MIN_EDGE_WEIGHT = 1;
 
 /**
  * Get line weight for a CERTAIN edge based on ABSOLUTE validation count.
- * Uses a sliding scale from 5 validations (min) to 100+ validations (max).
- * Max thickness is 90% of node dot size for visual hierarchy.
+ * Uses LOGARITHMIC scaling so most edges stay thin, only high-validation
+ * edges get noticeably thicker.
+ * 
+ * Scale:
+ * - 5 validations: 1px (minimum)
+ * - 10 validations: ~2px
+ * - 25 validations: ~3px
+ * - 50 validations: ~4px
+ * - 100+ validations: 6px (maximum)
  * 
  * @param certainCount - Number of certain observations
  * @param _maxCertainCount - Unused (kept for API compatibility)
@@ -1228,10 +1235,14 @@ export function getLinkQualityWeight(
   const clamped = Math.max(EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS, 
                            Math.min(certainCount, EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT));
   
-  // Normalize within our range (5-100 -> 0-1)
-  const range = EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT - EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS;
-  const normalized = (clamped - EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS) / range;
+  // Logarithmic normalization: log(x) / log(max) gives a 0-1 range that
+  // grows quickly at first, then slows down
+  // We use log base that makes 5->100 span nicely
+  const logMin = Math.log(EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS);
+  const logMax = Math.log(EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT);
+  const logCurrent = Math.log(clamped);
+  const normalized = (logCurrent - logMin) / (logMax - logMin);
   
-  // Linear interpolation from min to max weight
+  // Interpolate from min to max weight using log-normalized value
   return MIN_EDGE_WEIGHT + (MAX_EDGE_WEIGHT - MIN_EDGE_WEIGHT) * normalized;
 }
