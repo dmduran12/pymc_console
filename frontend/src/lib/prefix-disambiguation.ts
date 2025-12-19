@@ -95,18 +95,33 @@ export interface ResolutionContext {
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Weights for combining scores */
+/** 
+ * Weights for combining scores.
+ * Geographic is weighted highest because it's the only true differentiator
+ * for prefix collisions (position/co-occurrence data is shared among all
+ * candidates matching the same prefix).
+ */
 const SCORE_WEIGHTS = {
-  position: 0.35,
-  cooccurrence: 0.35,
-  geographic: 0.30,
+  position: 0.25,
+  cooccurrence: 0.25,
+  geographic: 0.50,  // Highest weight - only real differentiator for collisions
 };
 
 /** Maximum hop positions to track */
 const MAX_POSITIONS = 5;
 
-/** Expected max distance for a single RF hop (meters) - for geographic scoring */
-const EXPECTED_MAX_HOP_DISTANCE = 50000; // 50km
+/** 
+ * Distance thresholds for geographic scoring.
+ * Closer neighbors get exponentially higher scores.
+ */
+const GEO_SCORING = {
+  VERY_CLOSE: 500,    // < 500m = 1.0 (direct neighbor range)
+  CLOSE: 2000,        // < 2km = 0.8
+  MEDIUM: 5000,       // < 5km = 0.6  
+  FAR: 10000,         // < 10km = 0.4
+  VERY_FAR: 20000,    // < 20km = 0.2
+  // > 20km = 0.1
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helper Functions
@@ -230,12 +245,42 @@ export function buildPrefixLookup(
     const prefix = getHashPrefix(hash);
     
     let distanceToLocal: number | undefined;
+    let isZeroHop = neighbor.zero_hop === true; // Direct radio contact flag
+    
     if (hasLocalCoords && neighbor.latitude && neighbor.longitude &&
         (neighbor.latitude !== 0 || neighbor.longitude !== 0)) {
       distanceToLocal = calculateDistance(
         localLat!, localLon!,
         neighbor.latitude, neighbor.longitude
       );
+    }
+    
+    // Calculate initial geographic score based on distance
+    let geoScore = 0.2; // Default for unknown location
+    if (distanceToLocal !== undefined) {
+      // Distance-based scoring with steep falloff for close neighbors
+      if (distanceToLocal < GEO_SCORING.VERY_CLOSE) {
+        geoScore = 1.0;
+      } else if (distanceToLocal < GEO_SCORING.CLOSE) {
+        geoScore = 0.8;
+      } else if (distanceToLocal < GEO_SCORING.MEDIUM) {
+        geoScore = 0.6;
+      } else if (distanceToLocal < GEO_SCORING.FAR) {
+        geoScore = 0.4;
+      } else if (distanceToLocal < GEO_SCORING.VERY_FAR) {
+        geoScore = 0.2;
+      } else {
+        geoScore = 0.1;
+      }
+    } else if (neighbor.latitude && neighbor.longitude) {
+      // Has coords but no local coords - neutral score
+      geoScore = 0.5;
+    }
+    
+    // MAJOR BOOST: If this neighbor has zero_hop flag (known direct contact)
+    // This is the strongest signal - we've actually received RF from them
+    if (isZeroHop) {
+      geoScore = Math.max(geoScore, 0.95);
     }
     
     const candidate: DisambiguationCandidate = {
@@ -252,7 +297,7 @@ export function buildPrefixLookup(
       distanceToLocal,
       positionScore: 0,
       cooccurrenceScore: 0,
-      geographicScore: 0,
+      geographicScore: geoScore, // Pre-calculated
       combinedScore: 0,
     };
     
@@ -341,17 +386,8 @@ export function buildPrefixLookup(
         candidate.cooccurrenceScore = candidate.totalAdjacentObservations / maxAdjacentObs;
       }
       
-      // Geographic score: inverse of distance to local
-      if (candidate.distanceToLocal !== undefined) {
-        // Score = 1 / (1 + distance/expectedMax), capped at 1
-        candidate.geographicScore = Math.min(1, 1 / (1 + candidate.distanceToLocal / EXPECTED_MAX_HOP_DISTANCE));
-      } else if (candidate.latitude && candidate.longitude) {
-        // Has coords but no local coords - neutral score
-        candidate.geographicScore = 0.5;
-      } else {
-        // No coords - low score
-        candidate.geographicScore = 0.2;
-      }
+      // Geographic score is pre-calculated during candidate creation
+      // (includes distance-based scoring and zero_hop boost)
       
       // Combined score
       candidate.combinedScore = 
