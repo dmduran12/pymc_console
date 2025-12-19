@@ -2,16 +2,21 @@
  * Mesh Topology Analysis
  * 
  * Analyzes packet paths to build a network graph with confidence-weighted edges.
- * Uses probabilistic prefix matching (2-char hex prefixes have 256 possible values).
- * Only creates edges when confidence meets the threshold (default 80%).
+ * Uses the centralized prefix disambiguation system for consistent prefix resolution.
  * 
- * Enhanced features:
- * - Local node prefix detection: last path element matching local prefix = receiving node
- * - Neighbor affinity: tracks strongest neighbors to break ties in 50/50 decisions
- * - src_hash and dst_hash correlation for additional confidence
+ * Key features:
+ * - Prefix disambiguation: resolves 2-char prefix collisions using position, co-occurrence, and geography
+ * - Edge certainty: uses disambiguation confidence to determine edge validity
+ * - Betweenness centrality: identifies hub nodes (high-traffic forwarders)
  */
 
 import { Packet, NeighborInfo } from '@/types/api';
+import { 
+  buildPrefixLookup, 
+  resolvePrefix, 
+  getHashPrefix,
+  getDisambiguationStats,
+} from './prefix-disambiguation';
 
 /** Represents a directed edge between two nodes */
 export interface TopologyEdge {
@@ -40,6 +45,9 @@ export interface TopologyEdge {
 
 /** Minimum validations required for an edge to be rendered */
 export const MIN_EDGE_VALIDATIONS = 5;
+
+/** Confidence threshold for counting an edge as "certain" */
+export const CERTAINTY_CONFIDENCE_THRESHOLD = 0.6;
 
 /** Maximum edges to render (performance cap) */
 export const MAX_RENDERED_EDGES = 100;
@@ -88,18 +96,8 @@ interface EdgeAccumulator {
   uncertainCount: number;
 }
 
-/**
- * Extract the 2-character prefix from a hash.
- * Handles both "0xNN" format (local hash) and full hex strings (neighbor hashes).
- */
-export function getHashPrefix(hash: string): string {
-  // Handle "0x" prefix - extract the hex part after it
-  if (hash.startsWith('0x') || hash.startsWith('0X')) {
-    return hash.slice(2).toUpperCase();
-  }
-  // For full hex strings, take first 2 characters
-  return hash.slice(0, 2).toUpperCase();
-}
+// Re-export getHashPrefix from prefix-disambiguation for backward compatibility
+export { getHashPrefix };
 
 /**
  * Check if a path prefix matches a hash.
@@ -459,43 +457,6 @@ export function matchPrefix(
 }
 
 /**
- * Calculate confidence for a single hop in a path.
- * Returns the resolved hash and the confidence score.
- * 
- * @param prefix - The 2-char prefix to resolve
- * @param neighbors - Known neighbors
- * @param localHash - Local node's full hash  
- * @param neighborAffinity - Affinity map (supports both simple and combined formats)
- * @param isLastHop - Whether this is the last element in the path
- */
-function resolveHop(
-  prefix: string,
-  neighbors: Record<string, NeighborInfo>,
-  localHash?: string,
-  neighborAffinity?: Map<string, number | NeighborAffinity>,
-  isLastHop: boolean = false
-): { hash: string | null; confidence: number } {
-  const { matches, probability, bestMatch } = matchPrefix(
-    prefix, 
-    neighbors, 
-    localHash, 
-    neighborAffinity,
-    isLastHop
-  );
-  
-  if (matches.length === 1) {
-    // Exact match - 100% confidence
-    return { hash: matches[0], confidence: 1 };
-  } else if (matches.length > 1) {
-    // matchPrefix already calculates probability based on affinity
-    return { hash: bestMatch, confidence: probability };
-  }
-  
-  // No match
-  return { hash: null, confidence: 0 };
-}
-
-/**
  * Generate edge key from two hashes (sorted for consistency).
  */
 function makeEdgeKey(hash1: string, hash2: string): string {
@@ -532,7 +493,18 @@ export function buildMeshTopology(
   // This ensures the same packet data produces the same topology regardless of fetch order
   const sortedPackets = [...packets].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
   
-  // First pass: build neighbor affinity map with proximity scores
+  // === BUILD PREFIX DISAMBIGUATION LOOKUP ===
+  // This is the centralized system that resolves 2-char prefix collisions
+  // using position consistency, co-occurrence patterns, and geographic proximity
+  const prefixLookup = buildPrefixLookup(sortedPackets, neighbors, localHash, localLat, localLon);
+  
+  // Log disambiguation stats in development
+  if (process.env.NODE_ENV === 'development') {
+    const disambigStats = getDisambiguationStats(prefixLookup);
+    console.log('[mesh-topology] Disambiguation stats:', disambigStats);
+  }
+  
+  // First pass: build neighbor affinity map with proximity scores (for backward compat)
   const neighborAffinity = buildNeighborAffinity(sortedPackets, neighbors, localLat, localLon, localHash);
   const localPrefix = localHash ? getHashPrefix(localHash) : null;
   
@@ -616,29 +588,30 @@ export function buildMeshTopology(
     if (packet.src_hash && path.length >= 1) {
       const firstHopPrefix = path[0];
       
-      // Resolve the first hop (this is the node that received the packet directly from source)
-      const firstHopMatches = matchPrefix(firstHopPrefix, neighbors, localHash, neighborAffinity, false);
-      const firstHopResolved = resolveHop(firstHopPrefix, neighbors, localHash, neighborAffinity, false);
+      // Resolve the first hop using disambiguation system
+      const firstHopResult = resolvePrefix(prefixLookup, firstHopPrefix, {
+        position: 1, // 1-indexed position (first element)
+        adjacentPrefixes: path.length > 1 ? [path[1]] : [],
+      });
       
       // The source hash is known exactly (from the packet)
       const srcHash = packet.src_hash;
       
-      if (firstHopResolved.hash && firstHopResolved.hash !== srcHash) {
-        // This is a certain edge if we uniquely identify the first hop
-        // AND the source is a known neighbor (or at least has high affinity)
+      if (firstHopResult.hash && firstHopResult.hash !== srcHash) {
+        // Use disambiguation confidence for certainty
         const srcInNeighbors = Object.keys(neighbors).includes(srcHash);
-        const isCertain = firstHopMatches.matches.length === 1 && srcInNeighbors;
-        const confidence = isCertain ? 1 : (srcInNeighbors ? 0.9 : 0.7);
+        const isCertain = firstHopResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD && srcInNeighbors;
+        const confidence = firstHopResult.confidence * (srcInNeighbors ? 1 : 0.8);
         
         // This edge is at the FAR end of the path from local's perspective
         // Hop distance = path length (since source is before the first element)
         const hopDistance = path.length;
         
-        addEdgeObservation(srcHash, firstHopResolved.hash, confidence, isCertain, hopDistance);
+        addEdgeObservation(srcHash, firstHopResult.hash, confidence, isCertain, hopDistance);
         
         // Track for centrality
         nodesInPath.add(srcHash);
-        nodesInPath.add(firstHopResolved.hash);
+        nodesInPath.add(firstHopResult.hash);
       }
     }
     
@@ -648,29 +621,28 @@ export function buildMeshTopology(
     if (localHash && path.length >= 1) {
       const lastHopPrefix = path[path.length - 1];
       
-      // Resolve the last hop
-      const lastHopResolved = resolveHop(lastHopPrefix, neighbors, localHash, neighborAffinity, true);
+      // Resolve the last hop using disambiguation system
+      const lastHopResult = resolvePrefix(prefixLookup, lastHopPrefix, {
+        position: path.length, // 1-indexed position (last element)
+        adjacentPrefixes: path.length > 1 ? [path[path.length - 2]] : [],
+        isLastHop: true,
+      });
       
-      if (lastHopResolved.hash && lastHopResolved.hash !== localHash) {
+      if (lastHopResult.hash && lastHopResult.hash !== localHash) {
         // This edge touches local directly - hop distance = 0
         //
         // CERTAINTY: We ALWAYS mark last-hop-to-local as certain because we
         // definitively received the packet. Even if there's a prefix collision
-        // among neighbors, we know ONE of them forwarded to us. The affinity
-        // scoring picks the most likely candidate, and either way, an edge
-        // exists between local and that neighbor.
-        //
-        // This is crucial for setups where the local node only receives through
-        // a single gateway neighbor (e.g., observer with small antenna behind
-        // a rooftop repeater). Without this, prefix collisions would prevent
-        // any edges from reaching the validation threshold.
+        // among neighbors, we know ONE of them forwarded to us. The disambiguation
+        // system picks the most likely candidate based on position consistency,
+        // co-occurrence patterns, and geographic proximity.
         const isCertain = true; // We received the packet - this is certain
         const confidence = 1;
         
-        addEdgeObservation(lastHopResolved.hash, localHash, confidence, isCertain, 0);
+        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
         
         // Track for centrality
-        nodesInPath.add(lastHopResolved.hash);
+        nodesInPath.add(lastHopResult.hash);
         nodesInPath.add(localHash);
       }
     }
@@ -681,35 +653,47 @@ export function buildMeshTopology(
       const toPrefix = path[i + 1];
       const isToLastHop = (i + 1) === path.length - 1;
       
-      // Get all matches for both endpoints (to determine certainty)
-      const fromMatches = matchPrefix(fromPrefix, neighbors, localHash, neighborAffinity, false);
-      const toMatches = matchPrefix(toPrefix, neighbors, localHash, neighborAffinity, isToLastHop);
+      // Resolve both ends using disambiguation system with context
+      const fromResult = resolvePrefix(prefixLookup, fromPrefix, {
+        position: i + 1, // 1-indexed
+        adjacentPrefixes: [
+          ...(i > 0 ? [path[i - 1]] : []),
+          path[i + 1],
+        ],
+      });
       
-      // Resolve both ends of this hop with affinity tiebreaking
-      const fromResolved = resolveHop(fromPrefix, neighbors, localHash, neighborAffinity, false);
-      const toResolved = resolveHop(toPrefix, neighbors, localHash, neighborAffinity, isToLastHop);
+      const toResult = resolvePrefix(prefixLookup, toPrefix, {
+        position: i + 2, // 1-indexed
+        adjacentPrefixes: [
+          path[i],
+          ...(i + 2 < path.length ? [path[i + 2]] : []),
+        ],
+        isLastHop: isToLastHop,
+      });
       
       // Skip if either end couldn't be resolved
-      if (!fromResolved.hash || !toResolved.hash) continue;
+      if (!fromResult.hash || !toResult.hash) continue;
       
       // Skip self-loops
-      if (fromResolved.hash === toResolved.hash) continue;
+      if (fromResult.hash === toResult.hash) continue;
       
-      // Determine if this observation is 100% certain
-      // Certain = both endpoints have exactly 1 match (unique identification)
-      const isCertainObservation = fromMatches.matches.length === 1 && toMatches.matches.length === 1;
+      // Determine if this observation is "certain" based on disambiguation confidence
+      // An observation is certain if BOTH endpoints have confidence >= threshold
+      const isCertainObservation = 
+        fromResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD && 
+        toResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD;
       
       // Track nodes for centrality
-      nodesInPath.add(fromResolved.hash);
-      nodesInPath.add(toResolved.hash);
+      nodesInPath.add(fromResult.hash);
+      nodesInPath.add(toResult.hash);
       
       // Track bridge nodes (middle of path = not first or last)
       if (i > 0) {
-        nodeBridgeCounts.set(fromResolved.hash, (nodeBridgeCounts.get(fromResolved.hash) || 0) + 1);
+        nodeBridgeCounts.set(fromResult.hash, (nodeBridgeCounts.get(fromResult.hash) || 0) + 1);
       }
       
       // Calculate combined confidence for this hop
-      const hopConfidence = fromResolved.confidence * toResolved.confidence;
+      const hopConfidence = fromResult.confidence * toResult.confidence;
       
       // For uncertain edges, apply threshold; certain edges always included
       if (!isCertainObservation && hopConfidence < confidenceThreshold) continue;
@@ -722,8 +706,8 @@ export function buildMeshTopology(
       
       // Add edge observation using helper
       addEdgeObservation(
-        fromResolved.hash,
-        toResolved.hash,
+        fromResult.hash,
+        toResult.hash,
         hopConfidence,
         isCertainObservation,
         hopDistanceFromLocal
