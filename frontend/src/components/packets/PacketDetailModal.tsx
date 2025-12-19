@@ -15,6 +15,7 @@ import { SignalIndicator, getSignalQualityLabel } from './SignalIndicator';
 import { PacketDirection, getPacketStatusText, getPacketStatusColor } from './PacketDirection';
 import { PathMapVisualization } from './PathMapVisualization';
 import { useStats, usePackets } from '@/lib/stores/useStore';
+import { useHubNodeSet } from '@/lib/stores/useTopologyStore';
 import { buildNeighborAffinity } from '@/lib/mesh-topology';
 import { buildPrefixLookup } from '@/lib/prefix-disambiguation';
 
@@ -77,6 +78,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
   // Get neighbors, packets, and local node info from store for path visualization
   const stats = useStats();
   const packets = usePackets();
+  const hubNodes = useHubNodeSet();
 
   const payloadTypeName =
     packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
@@ -275,6 +277,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
                     localHash={stats?.local_hash}
                     neighborAffinity={neighborAffinity}
                     prefixLookup={prefixLookup}
+                    hubNodes={[...hubNodes]}
                   />
                 </div>
               )}
