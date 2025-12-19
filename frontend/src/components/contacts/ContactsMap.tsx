@@ -665,6 +665,19 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     triggerDeepAnalysis();
   }, [triggerDeepAnalysis]);
   
+  // Handler to close DeepAnalysisModal (ESC or manual close)
+  // Gracefully resets state without breaking ongoing processes
+  const handleCloseDeepAnalysis = useCallback(() => {
+    setShowDeepAnalysisModal(false);
+    setAnalysisStep('fetching');
+    // Reset tracking refs to clean state
+    wasDeepLoadingRef.current = false;
+    wasComputingRef.current = false;
+    buildingStartTimeRef.current = 0;
+    // Don't trigger topology reveal if closed mid-process
+    setPendingTopologyReveal(false);
+  }, []);
+  
   // ═══════════════════════════════════════════════════════════════════════════════
   // Edge Animation System (state declarations - effect is after filteredCertainPolylines)
   // - "Trace" effect: lines draw from point A to B
@@ -1402,6 +1415,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           isOpen={showDeepAnalysisModal}
           currentStep={analysisStep}
           packetCount={packetCacheState.packetCount}
+          onClose={handleCloseDeepAnalysis}
         />
         
         {/* Map controls - top right */}
