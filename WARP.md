@@ -284,7 +284,6 @@ isExiting: boolean              // Edge retraction animation in progress
 nodeOpacities: Map<string, number>  // Per-node opacity for Direct toggle animation
 edgeAnimProgress: Map<string, number>  // Per-edge trace progress (0=retracted, 1=extended)
 edgeAnimProgressRef: ref        // Ref copy for capturing state at animation start
-isAnimatingInitial: boolean     // Prevents edge flash on toggle-on
 ```
 
 **Icon Creation (Leaflet DivIcon):**

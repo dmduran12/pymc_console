@@ -642,6 +642,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     if (pendingTopologyReveal && !showDeepAnalysisModal) {
       // Small delay to let the modal fully unmount and user see the map
       const timer = setTimeout(() => {
+        // Force a fresh animation by resetting all edge state first
+        // This ensures edges animate even if topology was already "on"
+        setEdgeAnimProgress(new Map());
+        knownEdgesRef.current = new Set();
+        lastEdgeSetRef.current = '';
+        
+        // Now enable topology - the animation effect will trigger
         setShowTopology(true);
         setPendingTopologyReveal(false);
       }, POST_MODAL_ANIMATION_DELAY_MS);
@@ -678,9 +685,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   
   // Track the last edge set to detect changes (for "pull more data" scenario)
   const lastEdgeSetRef = useRef<string>('');
-  
-  // Track if we're in the middle of initial animation (to prevent flash)
-  const [isAnimatingInitial, setIsAnimatingInitial] = useState(false);
   
   // Cubic ease-in-out helper
   const easeInOutCubic = (t: number): number => {
@@ -931,9 +935,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       requestAnimationFrame(animateExit);
     }
     
-    // Toggling ON: immediately set isAnimatingInitial to prevent blink
+    // Toggling ON: reset edge state for fresh animation start
     if (!wasShowing && isShowing) {
-      setIsAnimatingInitial(true);
+      // Reset all edge animation state - edges default to 0 until animated
+      setEdgeAnimProgress(new Map());
+      knownEdgesRef.current = new Set();
+      lastEdgeSetRef.current = '';
     }
   }, [showTopology, isExiting, easeOutCubic]);
   
@@ -1006,10 +1013,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       
       // Start trace animation for new edges (staggered by index)
       if (newEdgeKeys.length > 0) {
-        // Mark that we're animating (prevents flash from default values)
-        // This applies to BOTH initial toggle AND data updates with new edges
-        setIsAnimatingInitial(true);
-        
         let startTime: number | null = null;
         const staggerDelay = Math.min(100, ANIMATION_DURATION / newEdgeKeys.length / 2);
         
@@ -1035,9 +1038,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const totalDuration = ANIMATION_DURATION + (newEdgeKeys.length - 1) * staggerDelay;
           if (elapsed < totalDuration) {
             requestAnimationFrame(animateTrace);
-          } else {
-            // Animation complete
-            setIsAnimatingInitial(false);
           }
         };
         
@@ -1144,9 +1144,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         {/* Draw validated topology edges - animated trace effect */}
         {(showTopology || isExiting) && filteredCertainPolylines.map(({ from, to, edge }) => {
           // Get animation progress for this edge
-          // Default to 0 (hidden) if we're in initial animation phase, otherwise 1 (fully visible)
-          const defaultProgress = isAnimatingInitial ? 0 : 1;
-          const traceProgress = edgeAnimProgress.get(edge.key) ?? defaultProgress;
+          // ALWAYS default to 0 - edges must be explicitly animated in
+          // The animation effect will set progress > 0 when ready
+          const traceProgress = edgeAnimProgress.get(edge.key) ?? 0;
           
           // Don't render edges that haven't started animating (or have fully retracted)
           if (traceProgress <= 0) return null;
