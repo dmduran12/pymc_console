@@ -14,26 +14,27 @@ import { parsePath, getHashPrefix } from '@/lib/path-utils';
 // Design System Constants
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Uniform marker size for all nodes
-const MARKER_SIZE = 16;
-const RING_THICKNESS = 3;
+// Uniform marker size for all nodes (outer dimension)
+const MARKER_SIZE = 14;
+// Ring thickness - thick enough for small donut hole
+const RING_THICKNESS = 5;
 
-// Design palette - sophisticated, minimal
+// Design palette - sophisticated, minimal, low contrast against dark map
 const DESIGN = {
-  // Primary node color (purple/lavender accent)
-  nodeColor: '#B49DFF',        // --accent-primary lavender
-  // Local node - distinct but harmonious
-  localColor: '#60A5FA',       // Blue for local
+  // Primary node color - deep royal blue-purple, dark and subtle
+  nodeColor: '#4338CA',        // Deep indigo/royal blue
+  // Local node - slightly brighter but still muted
+  localColor: '#4F46E5',       // Indigo-600
   // Edge colors  
-  edgeColor: 'rgba(140, 150, 170, 0.5)',  // Neutral gray
-  loopEdgeColor: '#B49DFF',    // Same as nodes - indicates redundant path
-  // Hub indicator
-  hubColor: '#B49DFF',         // Same purple, but filled
+  edgeColor: 'rgba(100, 110, 130, 0.45)',  // Mid gray, subtle
+  loopEdgeColor: '#6366F1',    // Indigo-500 - slightly brighter for loops
+  // Hub indicator - same as nodes
+  hubColor: '#4338CA',
 };
 
 /**
  * Create a ring (torus) icon for standard nodes.
- * Elegant, minimal design - unfilled circle with stroke.
+ * Thick ring with small donut hole - no stroke, just the ring itself.
  */
 function createRingIcon(color: string = DESIGN.nodeColor): L.DivIcon {
   return L.divIcon({
@@ -54,7 +55,7 @@ function createRingIcon(color: string = DESIGN.nodeColor): L.DivIcon {
 
 /**
  * Create a filled dot icon for hub nodes.
- * Filled circle indicates importance/centrality.
+ * Same outer dimension as ring - no border/stroke.
  */
 function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
   return L.divIcon({
@@ -64,7 +65,6 @@ function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
       height: ${MARKER_SIZE}px;
       background-color: ${color};
       border-radius: 50%;
-      border: 2px solid rgba(13, 14, 18, 0.9);
       box-sizing: border-box;
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
@@ -74,23 +74,21 @@ function createFilledIcon(color: string = DESIGN.hubColor): L.DivIcon {
 }
 
 /**
- * Create local node icon - filled, distinct color.
+ * Create local node icon - filled, same size as other nodes, no stroke.
  */
 function createLocalIcon(): L.DivIcon {
   return L.divIcon({
     className: 'map-local-marker',
     html: `<div style="
-      width: ${MARKER_SIZE + 2}px;
-      height: ${MARKER_SIZE + 2}px;
+      width: ${MARKER_SIZE}px;
+      height: ${MARKER_SIZE}px;
       background-color: ${DESIGN.localColor};
       border-radius: 50%;
-      border: 2px solid rgba(13, 14, 18, 0.9);
       box-sizing: border-box;
-      box-shadow: 0 0 8px ${DESIGN.localColor}40;
     "></div>`,
-    iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
-    iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
-    popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
+    iconSize: [MARKER_SIZE, MARKER_SIZE],
+    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
+    popupAnchor: [0, -MARKER_SIZE / 2],
   });
 }
 
@@ -967,36 +965,34 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             <LegendTooltip text="All nodes shown in network accent color. Hubs are filled; others are rings." />
           </div>
           <div className="flex flex-col gap-1">
-            {/* Ring node indicator */}
+            {/* Ring node indicator - thick ring like actual markers */}
             <div className="flex items-center gap-1.5">
               <div 
                 className="w-3 h-3 rounded-full flex-shrink-0" 
                 style={{ 
                   background: 'transparent',
-                  border: `2.5px solid ${DESIGN.nodeColor}`,
+                  border: `3px solid ${DESIGN.nodeColor}`,
                   boxSizing: 'border-box',
                 }}
               />
               <span className="text-text-muted">Node</span>
             </div>
-            {/* Hub filled indicator */}
+            {/* Hub filled indicator - no border */}
             <div className="flex items-center gap-1.5">
               <div 
                 className="w-3 h-3 rounded-full flex-shrink-0" 
                 style={{ 
                   backgroundColor: DESIGN.hubColor,
-                  border: '1.5px solid rgba(13,14,18,0.8)',
                 }}
               />
               <span className="text-text-muted">Hub</span>
             </div>
-            {/* Local node */}
+            {/* Local node - no border */}
             <div className="flex items-center gap-1.5">
               <div 
                 className="w-3 h-3 rounded-full flex-shrink-0" 
                 style={{ 
                   backgroundColor: DESIGN.localColor,
-                  border: '1.5px solid rgba(13,14,18,0.8)',
                 }}
               />
               <span className="text-text-muted">Local</span>
