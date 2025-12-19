@@ -385,6 +385,31 @@ export function buildPrefixLookup(
       if (candidates[0].totalAppearances > candidates[1].totalAppearances * 2) {
         confidence = Math.min(1, confidence + 0.2);
       }
+      
+      // ═══ DOMINANT FORWARDER BOOST ═══════════════════════════════════════════
+      // If one candidate is overwhelmingly the last hop (position 1) to local,
+      // that's extremely strong evidence it's our direct neighbor/gateway.
+      // This handles the case where an observer node receives almost all traffic
+      // through a single rooftop repeater.
+      //
+      // Criteria (all must be met for boost):
+      // - At least 100 total observations at position 1 across all candidates
+      // - Best candidate has 95%+ of position-1 appearances
+      // - Best candidate has at least 50 position-1 appearances (absolute minimum)
+      const pos1Index = 0; // Position 1 = last hop = index 0
+      const bestPos1Count = candidates[0].positionCounts[pos1Index] || 0;
+      const secondPos1Count = candidates[1].positionCounts[pos1Index] || 0;
+      const totalPos1 = bestPos1Count + secondPos1Count;
+      
+      if (totalPos1 >= 100 && bestPos1Count >= 50) {
+        const pos1Ratio = bestPos1Count / totalPos1;
+        if (pos1Ratio >= 0.95) {
+          // This candidate is dominant at position 1 - major confidence boost
+          // Scale boost by how dominant (95% = +0.3, 99% = +0.4, 100% = +0.5)
+          const dominanceBoost = 0.3 + (pos1Ratio - 0.95) * 4; // 0.3 to 0.5
+          confidence = Math.min(1, confidence + dominanceBoost);
+        }
+      }
     }
     
     // Build position-specific best matches
