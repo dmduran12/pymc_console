@@ -616,40 +616,65 @@ export function buildMeshTopology(
     }
     
     // === LAST HOP → LOCAL INFERENCE (ALL PACKET TYPES) ===
-    // The last element in the path is always our direct neighbor who forwarded to us
-    // This is a 100% CERTAIN edge - we received the packet directly from them!
+    // The last forwarder is the node that sent us the packet directly.
+    // The forwarded_path may end with local's prefix (e.g., ["78", "24", "19"])
+    // so we need to find the last NON-LOCAL prefix in the path.
     if (localHash && path.length >= 1) {
-      const lastHopPrefix = path[path.length - 1];
+      // Find the last hop that isn't local
+      let lastHopIndex = path.length - 1;
+      const localPrefixUpper = localPrefix?.toUpperCase();
       
-      // Resolve the last hop using disambiguation system
-      const lastHopResult = resolvePrefix(prefixLookup, lastHopPrefix, {
-        position: path.length, // 1-indexed position (last element)
-        adjacentPrefixes: path.length > 1 ? [path[path.length - 2]] : [],
-        isLastHop: true,
-      });
+      // Skip local's prefix if it's at the end
+      if (localPrefixUpper && path[lastHopIndex]?.toUpperCase() === localPrefixUpper) {
+        lastHopIndex--;
+      }
       
-      if (lastHopResult.hash && lastHopResult.hash !== localHash) {
-        // This edge touches local directly - hop distance = 0
-        //
-        // ALWAYS mark last-hop-to-local as certain because we definitively received
-        // the packet from SOMEONE. The disambiguation system picks the most likely
-        // candidate, and we trust that resolution. This is critical for setups where
-        // an observer receives through a single gateway with prefix collisions.
-        const isCertain = true;
-        const confidence = lastHopResult.confidence; // Use boosted confidence for averaging
+      // Must have at least one non-local hop
+      if (lastHopIndex < 0) {
+        // Path only contains local, skip
+      } else {
+        const lastHopPrefix = path[lastHopIndex];
         
-        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
+        // Resolve the last hop using disambiguation system
+        const lastHopResult = resolvePrefix(prefixLookup, lastHopPrefix, {
+          position: lastHopIndex + 1, // 1-indexed position
+          adjacentPrefixes: lastHopIndex > 0 ? [path[lastHopIndex - 1]] : [],
+          isLastHop: true,
+        });
         
-        // Track for centrality
-        nodesInPath.add(lastHopResult.hash);
-        nodesInPath.add(localHash);
+        if (lastHopResult.hash && lastHopResult.hash !== localHash) {
+          // This edge touches local directly - hop distance = 0
+          //
+          // ALWAYS mark last-hop-to-local as certain because we definitively received
+          // the packet from SOMEONE. The disambiguation system picks the most likely
+          // candidate, and we trust that resolution. This is critical for setups where
+          // an observer receives through a single gateway with prefix collisions.
+          const isCertain = true;
+          const confidence = lastHopResult.confidence; // Use boosted confidence for averaging
+          
+          addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
+          
+          // Track for centrality
+          nodesInPath.add(lastHopResult.hash);
+          nodesInPath.add(localHash);
+        }
       }
     }
     
     // Process consecutive pairs in the path - these are actual RF links
+    // Skip pairs that touch local (already handled above with guaranteed certainty)
     for (let i = 0; i < path.length - 1; i++) {
       const fromPrefix = path[i];
       const toPrefix = path[i + 1];
+      
+      // Skip if either end is local - we already handled last-hop-to-local above
+      if (localPrefix) {
+        const fromUpper = fromPrefix?.toUpperCase();
+        const toUpper = toPrefix?.toUpperCase();
+        const localUpper = localPrefix.toUpperCase();
+        if (fromUpper === localUpper || toUpper === localUpper) continue;
+      }
+      
       const isToLastHop = (i + 1) === path.length - 1;
       
       // Resolve both ends using disambiguation system with context
