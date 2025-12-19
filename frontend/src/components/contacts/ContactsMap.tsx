@@ -25,8 +25,8 @@ const DESIGN = {
   nodeColor: '#4338CA',        // Deep indigo/royal blue
   // Local node - slightly brighter but still muted
   localColor: '#4F46E5',       // Indigo-600
-  // Edge colors - knocked back with 70% black tone for subtlety
-  edgeColor: 'rgba(50, 55, 65, 0.55)',     // Dark gray (70% toward black)
+  // Edge colors - solid colors for crisp rendering (no alpha to avoid overlap artifacts)
+  edgeColor: '#3B3F4A',        // Dark gray - solid, no transparency
   loopEdgeColor: '#3730A3',    // Indigo-800 darkened (70% black mix)
   // Hub indicator - 25% brighter, saturated royal blue-purple
   hubColor: '#6366F1',         // Indigo-500 (brighter, still saturated)
@@ -409,12 +409,12 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
     if (positions.length > 0 && !hasFitted.current) {
       hasFitted.current = true;
       if (positions.length === 1) {
-        map.setView(positions[0], 13);
+        map.setView(positions[0], 14);
       } else {
-        // Tighter padding for better initial framing of the mesh
+        // Minimal padding for tighter framing of the mesh
         map.fitBounds(positions, { 
-          padding: [40, 40],
-          maxZoom: 14
+          padding: [15, 15],
+          maxZoom: 16
         });
       }
     }
@@ -531,8 +531,42 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const [soloHubs, setSoloHubs] = useState(false);
   const [soloDirect, setSoloDirect] = useState(false);
   
-  // Show/hide topology toggle
-  const [showTopology, setShowTopology] = useState(true);
+  // Show/hide topology toggle (default OFF for cleaner initial view)
+  const [showTopology, setShowTopology] = useState(false);
+  
+  // Animation state for edge fade-in
+  const [edgeOpacity, setEdgeOpacity] = useState(0);
+  
+  // Animate edges when topology is toggled on
+  useEffect(() => {
+    if (showTopology) {
+      // Animate in with cubic ease-in-out over 2 seconds
+      let startTime: number | null = null;
+      const duration = 2000; // 2 seconds
+      
+      const animate = (timestamp: number) => {
+        if (!startTime) startTime = timestamp;
+        const elapsed = timestamp - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Cubic ease-in-out: 4t³ for t<0.5, 1-(-2t+2)³/2 for t≥0.5
+        const eased = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        
+        setEdgeOpacity(eased);
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      
+      requestAnimationFrame(animate);
+    } else {
+      // Instant off
+      setEdgeOpacity(0);
+    }
+  }, [showTopology]);
   
   // Build set of hub nodes and zero-hop nodes for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
@@ -697,7 +731,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         <FitBoundsOnce positions={allPositions} />
         
         {/* Draw validated topology edges - gray, thickness indicates strength */}
-        {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
+        {/* Only render when opacity > 0 (topology enabled and animating/visible) */}
+        {edgeOpacity > 0 && filteredCertainPolylines.map(({ from, to, edge }) => {
           // All edges are neutral gray - thickness conveys strength
           const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
           const isLoopEdge = meshTopology.loopEdgeKeys.has(edge.key);
@@ -717,26 +752,24 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           if (isLoopEdge) {
             const { line1, line2 } = getParallelOffsets(from, to, weight * 1.5);
             return (
-              <>
+              <span key={`loop-edge-${edge.key}`}>
                 {/* Double line for loop edge - indicates redundant path */}
                 <Polyline
-                  key={`loop-edge-1-${edge.key}`}
                   positions={line1}
                   pathOptions={{
                     color: DESIGN.loopEdgeColor,
                     weight: Math.max(1.5, weight * 0.6),
-                    opacity: 0.9,
+                    opacity: 0.9 * edgeOpacity,
                     lineCap: 'round',
                     lineJoin: 'round',
                   }}
                 />
                 <Polyline
-                  key={`loop-edge-2-${edge.key}`}
                   positions={line2}
                   pathOptions={{
                     color: DESIGN.loopEdgeColor,
                     weight: Math.max(1.5, weight * 0.6),
-                    opacity: 0.9,
+                    opacity: 0.9 * edgeOpacity,
                     lineCap: 'round',
                     lineJoin: 'round',
                   }}
@@ -758,7 +791,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     </div>
                   </Tooltip>
                 </Polyline>
-              </>
+              </span>
             );
           }
           
@@ -770,7 +803,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               pathOptions={{
                 color: DESIGN.edgeColor,
                 weight,
-                opacity: 1,
+                opacity: edgeOpacity * 0.7, // Subtle, not overpowering
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
