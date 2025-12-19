@@ -28,6 +28,8 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 ### Neighbors
 - **Interactive map** — OpenStreetMap view with neighbor positions
 - **Neighbor list** — RSSI, SNR, last seen, direct vs relayed
+- **Mesh topology graph** — Visualizes network connections inferred from packet paths
+- **Intelligent disambiguation** — Resolves ambiguous node prefixes using geographic + co-occurrence analysis
 
 ![Neighbors](docs/images/neighbors.png)
 
@@ -199,6 +201,29 @@ Select **Uninstall** from the menu. This removes:
 - `/etc/pymc_repeater` (configuration)  
 - `/var/log/pymc_repeater` (logs)
 - The systemd service
+
+## How It Works
+
+### Mesh Topology Analysis
+
+The dashboard reconstructs network topology from packet paths. MeshCore packets contain 2-character hex prefixes representing the route through the mesh:
+
+```
+Packet path: ["FA", "79", "24", "19"]
+           Origin → Hop1 → Hop2 → Local
+```
+
+**Disambiguation Challenge**: Multiple nodes may share the same 2-char prefix (1 in 256 collision chance). The system uses three-factor scoring to resolve ambiguity:
+
+1. **Position evidence (25%)** — Where in paths does this prefix typically appear?
+2. **Co-occurrence evidence (25%)** — Which prefixes appear adjacent to this one?
+3. **Geographic evidence (50%)** — How close is the candidate to known anchor points?
+
+**Key techniques:**
+- **Source-Geographic Correlation**: Position-1 prefixes scored by distance from packet origin
+- **Next-Hop Anchor Correlation**: Upstream prefixes scored by distance from already-resolved downstream nodes
+
+The system loads up to 20,000 packets (~7 days of traffic) to build comprehensive topology evidence.
 
 ## Development
 
