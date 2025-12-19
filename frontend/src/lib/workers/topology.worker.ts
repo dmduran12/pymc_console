@@ -68,11 +68,13 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
     const { packets, neighbors, localHash, localLat, localLon } = payload;
     
     // Run the expensive computation
+    // Use default confidence threshold (0.5) to capture more topology
+    // Edge certainty is now determined by disambiguation confidence, not this threshold
     const topology = buildMeshTopology(
       packets,
       neighbors,
       localHash,
-      0.8, // confidenceThreshold
+      0.5, // confidenceThreshold - lower to capture uncertain edges too
       localLat,
       localLon
     );

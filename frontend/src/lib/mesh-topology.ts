@@ -822,18 +822,7 @@ export function buildMeshTopology(
       }
     }
     
-    // === DEBUG: Log paths where node 24 appears ===
-    if (process.env.NODE_ENV === 'development' && effectivePath.some(p => p === '24')) {
-      console.log(`[mesh-topology] DEBUG: Path with 24:`, {
-        effective: effectivePath,
-        effectiveLength,
-        original: originalPath,
-        srcHash: packet.src_hash?.slice(0, 8),
-        willProcessConsecutivePairs: effectiveLength >= 2,
-      });
-    }
-    
-    // Process consecutive pairs in the EFFECTIVE path (local already stripped)
+    // Process consecutive pairs
     for (let i = 0; i < effectiveLength - 1; i++) {
       const fromPrefix = effectivePath[i];
       const toPrefix = effectivePath[i + 1];
