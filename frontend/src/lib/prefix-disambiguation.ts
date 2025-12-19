@@ -52,6 +52,12 @@ export interface DisambiguationCandidate {
   /** Distance to local node in meters (if calculable) */
   distanceToLocal?: number;
   
+  // ─── Source-Geographic Evidence (NEW) ────────────────────────────────────────
+  /** Evidence score from source-geographic correlation at position 1 */
+  srcGeoEvidenceScore: number;
+  /** Number of position-1 observations with geographic evidence */
+  srcGeoEvidenceCount: number;
+  
   // ─── Combined Scores ─────────────────────────────────────────────────────────
   /** 0-1: Score based on path position consistency */
   positionScore: number;
@@ -195,6 +201,8 @@ export function buildPrefixLookup(
       latitude: localLat,
       longitude: localLon,
       distanceToLocal: 0,
+      srcGeoEvidenceScore: 0,
+      srcGeoEvidenceCount: 0,
       positionScore: 0,
       cooccurrenceScore: 0,
       geographicScore: 1.0, // Local is always at distance 0
@@ -258,6 +266,8 @@ export function buildPrefixLookup(
       latitude: neighbor.latitude,
       longitude: neighbor.longitude,
       distanceToLocal,
+      srcGeoEvidenceScore: 0,
+      srcGeoEvidenceCount: 0,
       positionScore: 0,
       cooccurrenceScore: 0,
       geographicScore: geoScore, // Pre-calculated
@@ -271,11 +281,24 @@ export function buildPrefixLookup(
   
   // ─── Step 2: Analyze packets for position and co-occurrence data ─────────────
   // Use centralized path parsing from path-utils.ts
+  // 
+  // NEW: Source-Geographic Correlation
+  // When a prefix appears at position 1 (last hop to local), we can use the packet's
+  // src_hash to determine which candidate is geographically plausible. If the source
+  // node is close to candidate A but far from candidate B, that's strong evidence
+  // that A is the actual forwarder.
+  
   for (const packet of packets) {
     const parsed = parsePacketPath(packet, localHash);
     if (!parsed || parsed.effectiveLength === 0) continue;
     
     const path = parsed.effective; // Local already stripped
+    
+    // Get source node info for geographic correlation
+    const srcHash = packet.src_hash;
+    const srcNeighbor = srcHash ? neighbors[srcHash] : undefined;
+    const srcHasCoords = srcNeighbor?.latitude && srcNeighbor?.longitude &&
+      (srcNeighbor.latitude !== 0 || srcNeighbor.longitude !== 0);
     
     // Process each element in the effective path
     for (let i = 0; i < path.length; i++) {
@@ -291,6 +314,54 @@ export function buildPrefixLookup(
       for (const candidate of candidates) {
         candidate.positionCounts[positionIndex]++;
         candidate.totalAppearances++;
+        
+        // === SOURCE-GEOGRAPHIC CORRELATION (NEW) ===
+        // For position 1 (last hop) with multiple candidates, use source location
+        // to score which candidate is geographically plausible as the forwarder.
+        //
+        // Logic: The last hop must be within RF range of BOTH:
+        //   1. The source (or previous hop in chain)
+        //   2. The local node
+        // A candidate that is close to local AND on a reasonable path from source
+        // is more likely to be the actual forwarder.
+        if (position === 1 && candidates.length > 1 && srcHasCoords && 
+            candidate.latitude && candidate.longitude) {
+          // Calculate distance from source to this candidate
+          const distToSrc = calculateDistance(
+            srcNeighbor!.latitude!, srcNeighbor!.longitude!,
+            candidate.latitude, candidate.longitude
+          );
+          
+          // Score based on source proximity (closer = more likely forwarder)
+          // A gateway node receiving from the mesh should be within reasonable range
+          // of nodes it forwards packets from.
+          let evidence = 0;
+          if (distToSrc < 500) {
+            evidence = 1.0;   // Very close to source - strong evidence
+          } else if (distToSrc < 2000) {
+            evidence = 0.8;   // Within 2km - good evidence
+          } else if (distToSrc < 5000) {
+            evidence = 0.5;   // Within 5km - moderate evidence
+          } else if (distToSrc < 10000) {
+            evidence = 0.3;   // Within 10km - weak evidence
+          } else {
+            evidence = 0.1;   // Far from source - unlikely but possible via multi-hop
+          }
+          
+          // Also factor in distance to local (closer to local = better gateway candidate)
+          if (candidate.distanceToLocal !== undefined) {
+            if (candidate.distanceToLocal < 500) {
+              evidence *= 1.2;  // Close to local - boost
+            } else if (candidate.distanceToLocal < 2000) {
+              evidence *= 1.0;  // Reasonable
+            } else {
+              evidence *= 0.8;  // Far from local - less likely to be our gateway
+            }
+          }
+          
+          candidate.srcGeoEvidenceScore += evidence;
+          candidate.srcGeoEvidenceCount++;
+        }
         
         // Track adjacent prefixes (before and after in path)
         if (i > 0) {
@@ -355,11 +426,25 @@ export function buildPrefixLookup(
       // Geographic score is pre-calculated during candidate creation
       // (includes distance-based scoring and zero_hop boost)
       
-      // Combined score
+      // Combined score (base calculation)
       candidate.combinedScore = 
         candidate.positionScore * SCORE_WEIGHTS.position +
         candidate.cooccurrenceScore * SCORE_WEIGHTS.cooccurrence +
         candidate.geographicScore * SCORE_WEIGHTS.geographic;
+      
+      // === SOURCE-GEOGRAPHIC EVIDENCE BOOST ===
+      // If this candidate has accumulated evidence from src_hash correlation,
+      // boost its combined score. This is CANDIDATE-SPECIFIC evidence (unlike
+      // position counts which are shared across all candidates for a prefix).
+      if (candidate.srcGeoEvidenceCount > 0) {
+        const avgEvidence = candidate.srcGeoEvidenceScore / candidate.srcGeoEvidenceCount;
+        // Weight by observation count (more observations = more reliable)
+        // Cap at 50 observations to prevent runaway scores
+        const observationWeight = Math.min(candidate.srcGeoEvidenceCount / 50, 1);
+        // Boost is up to 0.3 (30% of max score) based on evidence strength and count
+        const srcGeoBoost = avgEvidence * observationWeight * 0.3;
+        candidate.combinedScore += srcGeoBoost;
+      }
     }
   }
   
@@ -424,6 +509,29 @@ export function buildPrefixLookup(
           
           confidence = newConfidence;
         }
+      }
+      
+      // ═══ SOURCE-GEOGRAPHIC EVIDENCE BOOST ═══════════════════════════════════════
+      // If the best candidate has significantly more source-geographic evidence
+      // than the runner-up, that's strong candidate-specific evidence.
+      // This differentiates candidates that otherwise have identical position stats.
+      const bestSrcGeoEvidence = candidates[0].srcGeoEvidenceScore;
+      const secondSrcGeoEvidence = candidates[1].srcGeoEvidenceScore;
+      const bestSrcGeoCount = candidates[0].srcGeoEvidenceCount;
+      
+      if (bestSrcGeoCount >= 10 && bestSrcGeoEvidence > secondSrcGeoEvidence * 1.5) {
+        // Best candidate has 50%+ more geographic evidence - boost confidence
+        const evidenceRatio = secondSrcGeoEvidence > 0 
+          ? bestSrcGeoEvidence / (bestSrcGeoEvidence + secondSrcGeoEvidence)
+          : 1.0;
+        const srcGeoConfBoost = Math.min(0.3, (evidenceRatio - 0.5) * 0.6); // Up to +0.3
+        const newConfidence = Math.min(1, confidence + srcGeoConfBoost);
+        
+        if (process.env.NODE_ENV === 'development' && srcGeoConfBoost > 0.05) {
+          console.log(`[disambiguation] Prefix ${prefix}: SRC-GEO BOOST! bestEvidence=${bestSrcGeoEvidence.toFixed(1)}, secondEvidence=${secondSrcGeoEvidence.toFixed(1)}, boost=${srcGeoConfBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
+        }
+        
+        confidence = newConfidence;
       }
     }
     

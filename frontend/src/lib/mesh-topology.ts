@@ -930,6 +930,48 @@ export function buildMeshTopology(
     }
   }
   
+  // DEBUG: Log edges involving prefix 24
+  if (process.env.NODE_ENV === 'development') {
+    const edges24 = [...accumulators.values()].filter(acc => 
+      acc.fromHash.toUpperCase().startsWith('24') || 
+      acc.toHash.toUpperCase().startsWith('24')
+    );
+    console.log(`[mesh-topology] DEBUG: Edges involving prefix 24:`, {
+      count: edges24.length,
+      edges: edges24.map(acc => ({
+        key: acc.key,
+        from: acc.fromHash.slice(0, 8),
+        to: acc.toHash.slice(0, 8),
+        totalCount: acc.count,
+        certainCount: acc.certainCount,
+        uncertainCount: acc.uncertainCount,
+        meetsThreshold: acc.certainCount >= MIN_EDGE_VALIDATIONS,
+        avgConf: (acc.confidenceSum / acc.count).toFixed(2),
+      })),
+    });
+    
+    // Also log prefix 24 disambiguation result
+    const prefix24Result = prefixLookup.get('24');
+    if (prefix24Result) {
+      console.log(`[mesh-topology] DEBUG: Prefix 24 disambiguation:`, {
+        candidateCount: prefix24Result.candidates.length,
+        bestMatch: prefix24Result.bestMatch?.slice(0, 16),
+        confidence: prefix24Result.confidence.toFixed(3),
+        isUnambiguous: prefix24Result.isUnambiguous,
+        candidates: prefix24Result.candidates.slice(0, 5).map(c => ({
+          hash: c.hash.slice(0, 16),
+          pos1Count: c.positionCounts[0],
+          totalAppearances: c.totalAppearances,
+          geoScore: c.geographicScore.toFixed(2),
+          combinedScore: c.combinedScore.toFixed(3),
+          distanceToLocal: c.distanceToLocal?.toFixed(0) ?? 'unknown',
+        })),
+      });
+    } else {
+      console.log(`[mesh-topology] DEBUG: Prefix 24 NOT FOUND in lookup!`);
+    }
+  }
+  
   // Convert accumulators to edges
   // Only include edges with MIN_EDGE_VALIDATIONS (3+) certain observations
   const edges: TopologyEdge[] = [];
