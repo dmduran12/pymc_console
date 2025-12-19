@@ -1267,6 +1267,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           <Marker
             position={[localNode.latitude, localNode.longitude]}
             icon={createLocalIcon()}
+            zIndexOffset={1000}
             eventHandlers={{
               mouseover: () => setHoveredMarker('local'),
               mouseout: () => setHoveredMarker(null),
