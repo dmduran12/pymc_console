@@ -631,12 +631,12 @@ export function buildMeshTopology(
       if (lastHopResult.hash && lastHopResult.hash !== localHash) {
         // This edge touches local directly - hop distance = 0
         //
-        // Use the disambiguation confidence which includes the dominant forwarder boost.
-        // An edge is "certain" if the disambiguation confidence meets our threshold.
-        // This allows edges with prefix collisions to still be validated when the
-        // disambiguation system is highly confident (e.g., dominant forwarder).
-        const isCertain = lastHopResult.confidence >= CERTAINTY_CONFIDENCE_THRESHOLD;
-        const confidence = lastHopResult.confidence;
+        // ALWAYS mark last-hop-to-local as certain because we definitively received
+        // the packet from SOMEONE. The disambiguation system picks the most likely
+        // candidate, and we trust that resolution. This is critical for setups where
+        // an observer receives through a single gateway with prefix collisions.
+        const isCertain = true;
+        const confidence = lastHopResult.confidence; // Use boosted confidence for averaging
         
         addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
         
