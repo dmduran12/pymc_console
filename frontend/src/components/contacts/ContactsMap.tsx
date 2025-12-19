@@ -551,11 +551,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const wasDeepLoadingRef = useRef(false);
   const wasComputingRef = useRef(false);
   
+  // Extract primitive values to avoid object reference changes triggering infinite loops
+  const isDeepLoading = packetCacheState.isDeepLoading;
+  
   // Derive analysis step from packet cache and topology states
   useEffect(() => {
     if (!showDeepAnalysisModal) return;
-    
-    const { isDeepLoading } = packetCacheState;
     
     // Step 1 → 2: Fetching complete, start analyzing
     if (wasDeepLoadingRef.current && !isDeepLoading) {
@@ -578,7 +579,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     wasDeepLoadingRef.current = isDeepLoading;
     wasComputingRef.current = isComputingTopology;
-  }, [showDeepAnalysisModal, packetCacheState, isComputingTopology, analysisStep]);
+  }, [showDeepAnalysisModal, isDeepLoading, isComputingTopology, analysisStep]);
   
   // Handler for Deep Analysis button
   const handleDeepAnalysis = useCallback(() => {
