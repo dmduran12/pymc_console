@@ -577,10 +577,14 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     }
     
     // Step 3 → complete: Topology compute finished
-    // Ensure minimum 1.7s display time for "Building Topology" step
-    if (wasComputingRef.current && !isComputingTopology && analysisStep === 'building') {
+    // Trigger when: we're in building step AND topology is not computing
+    // (either it finished, or it was already done before we started)
+    if (analysisStep === 'building' && !isComputingTopology && buildingStartTimeRef.current > 0) {
       const elapsed = Date.now() - buildingStartTimeRef.current;
       const remainingDelay = Math.max(0, MIN_BUILDING_TIME_MS - elapsed);
+      
+      // Reset to prevent re-triggering
+      buildingStartTimeRef.current = 0;
       
       setTimeout(() => {
         setAnalysisStep('complete');
