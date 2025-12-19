@@ -555,6 +555,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Track the last edge set to detect changes (for "pull more data" scenario)
   const lastEdgeSetRef = useRef<string>('');
   
+  // Track if we're in the middle of initial animation (to prevent flash)
+  const [isAnimatingInitial, setIsAnimatingInitial] = useState(false);
+  
   // Cubic ease-in-out helper
   const easeInOutCubic = (t: number): number => {
     return t < 0.5
@@ -675,6 +678,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       lastEdgeSetRef.current = '';
       animStartWeightsRef.current = new Map();
       animTargetWeightsRef.current = new Map();
+      setIsAnimatingInitial(false);
       return;
     }
     
@@ -741,6 +745,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       
       // Start trace animation for new edges (staggered by index)
       if (newEdgeKeys.length > 0) {
+        // Mark that we're animating (prevents flash from default values)
+        if (isInitialToggle) {
+          setIsAnimatingInitial(true);
+        }
+        
         let startTime: number | null = null;
         const staggerDelay = Math.min(100, ANIMATION_DURATION / newEdgeKeys.length / 2);
         
@@ -766,6 +775,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const totalDuration = ANIMATION_DURATION + (newEdgeKeys.length - 1) * staggerDelay;
           if (elapsed < totalDuration) {
             requestAnimationFrame(animateTrace);
+          } else {
+            // Animation complete
+            setIsAnimatingInitial(false);
           }
         };
         
@@ -871,8 +883,10 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Draw validated topology edges - animated trace effect */}
         {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
-          // Get animation progress for this edge (0 = not visible, 1 = fully drawn)
-          const traceProgress = edgeAnimProgress.get(edge.key) ?? 1;
+          // Get animation progress for this edge
+          // Default to 0 (hidden) if we're in initial animation phase, otherwise 1 (fully visible)
+          const defaultProgress = isAnimatingInitial ? 0 : 1;
+          const traceProgress = edgeAnimProgress.get(edge.key) ?? defaultProgress;
           
           // Don't render edges that haven't started animating
           if (traceProgress <= 0) return null;
