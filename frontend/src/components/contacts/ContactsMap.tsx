@@ -141,11 +141,24 @@ function inferZeroHopNeighbors(
       continue;
     }
     
-    // Method 4: (Fallback) The LAST element in the path is the node that transmitted to us.
+    // Method 4: (Fallback) The LAST non-local element in the path is the node that transmitted to us.
     // Only use this if we don't already have edges from topology
     // Note: This is less reliable for prefix collisions
+    // Note: forwarded_path may include local's prefix at the end, so we need to skip it
     if (path.length > 0 && (!topologyEdges || topologyEdges.length === 0)) {
-      const lastHopPrefix = path[path.length - 1].toUpperCase();
+      // Find the last hop that isn't local
+      let lastHopIndex = path.length - 1;
+      const localPrefixUpper = localHash?.startsWith('0x') 
+        ? localHash.slice(2).toUpperCase() 
+        : localHash?.slice(0, 2).toUpperCase();
+      
+      if (localPrefixUpper && path[lastHopIndex]?.toUpperCase() === localPrefixUpper) {
+        lastHopIndex--;
+      }
+      
+      if (lastHopIndex < 0) continue; // Path only contains local
+      
+      const lastHopPrefix = path[lastHopIndex].toUpperCase();
       
       // Find neighbors matching this prefix
       const matchingHashes = prefixToHash.get(lastHopPrefix) || [];
