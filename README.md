@@ -25,17 +25,20 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 
 ![Statistics](docs/images/statistics.png)
 
-### Neighbors
-- **Interactive map** — OpenStreetMap view with neighbor positions
-- **Neighbor list** — RSSI, SNR, last seen, direct vs relayed
+### Neighbors & Topology
+- **Interactive map** — OpenStreetMap with dark theme and neighbor positions
 - **Mesh topology graph** — Visualizes network connections inferred from packet paths
-- **Intelligent disambiguation** — Resolves ambiguous node prefixes using geographic + co-occurrence analysis
+- **Edge thickness** — Line width scales with validation count (5-100+ observations)
+- **Intelligent disambiguation** — Resolves prefix collisions using multi-factor scoring
+- **Filter toggles** — Solo view for hub nodes or direct neighbors
+- **Loop detection** — Identifies redundant paths for network resilience (H₁ homology)
 
 ![Neighbors](docs/images/neighbors.png)
 
 ### Packets
 - **Searchable history** — Filter by type, route, time range
 - **Packet details** — Hash, path, payload, signal info, duplicates
+- **Path visualization** — Interactive map showing packet route with confidence indicators
 
 ### Settings
 - **Mode toggle** — Forward (repeating) or Monitor (RX only)
@@ -220,10 +223,22 @@ Packet path: ["FA", "79", "24", "19"]
 3. **Geographic evidence (50%)** — How close is the candidate to known anchor points?
 
 **Key techniques:**
+- **Score-weighted redistribution**: Appearance counts are redistributed proportionally by combined score, giving candidate-specific estimates even when raw counts are shared
 - **Source-Geographic Correlation**: Position-1 prefixes scored by distance from packet origin
 - **Next-Hop Anchor Correlation**: Upstream prefixes scored by distance from already-resolved downstream nodes
 
 The system loads up to 20,000 packets (~7 days of traffic) to build comprehensive topology evidence.
+
+### Edge Rendering
+
+Topology edges are rendered with visual cues indicating confidence:
+
+- **Line thickness** — Scales from 1.5px (5 validations) to 10px (100+ validations)
+- **Validation threshold** — Edges require 5+ certain observations to render
+- **Certainty conditions** — An edge is "certain" when:
+  - Both endpoints have ≥60% confidence, OR
+  - The destination has ≥90% confidence, OR
+  - It's the last hop to local node
 
 ## Development
 
