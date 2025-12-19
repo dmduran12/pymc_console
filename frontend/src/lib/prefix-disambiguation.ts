@@ -393,35 +393,34 @@ export function buildPrefixLookup(
       // through a single rooftop repeater.
       //
       // Criteria (all must be met for boost):
-      // - Confidence already >= 50% (other factors support this candidate)
       // - At least 20 total observations at position 1 across colliding candidates
-      // - Best candidate has 90%+ of position-1 appearances
+      // - Best candidate has 80%+ of position-1 appearances
       // - Best candidate has at least 10 position-1 appearances (absolute minimum)
-      if (confidence >= 0.5) {
-        const pos1Index = 0; // Position 1 = last hop = index 0
-        const bestPos1Count = candidates[0].positionCounts[pos1Index] || 0;
-        const secondPos1Count = candidates[1].positionCounts[pos1Index] || 0;
-        const totalPos1 = bestPos1Count + secondPos1Count;
-        
-        // Debug logging in development
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`[disambiguation] Prefix ${prefix}: bestPos1=${bestPos1Count}, secondPos1=${secondPos1Count}, total=${totalPos1}, conf=${confidence.toFixed(2)}`);
-        }
-        
-        if (totalPos1 >= 20 && bestPos1Count >= 10) {
-          const pos1Ratio = bestPos1Count / totalPos1;
-          if (pos1Ratio >= 0.90) {
-            // This candidate is dominant at position 1 - major confidence boost
-            // Scale boost by how dominant (90% = +0.25, 95% = +0.35, 100% = +0.5)
-            const dominanceBoost = 0.25 + (pos1Ratio - 0.90) * 2.5; // 0.25 to 0.5
-            const newConfidence = Math.min(1, confidence + dominanceBoost);
-            
-            if (process.env.NODE_ENV === 'development') {
-              console.log(`[disambiguation] Prefix ${prefix}: DOMINANT BOOST! ratio=${pos1Ratio.toFixed(2)}, boost=${dominanceBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
-            }
-            
-            confidence = newConfidence;
+      //
+      // NOTE: No confidence floor - position dominance alone is strong evidence
+      const pos1Index = 0; // Position 1 = last hop = index 0
+      const bestPos1Count = candidates[0].positionCounts[pos1Index] || 0;
+      const secondPos1Count = candidates[1].positionCounts[pos1Index] || 0;
+      const totalPos1 = bestPos1Count + secondPos1Count;
+      
+      // Debug logging in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[disambiguation] Prefix ${prefix}: bestPos1=${bestPos1Count}, secondPos1=${secondPos1Count}, total=${totalPos1}, conf=${confidence.toFixed(2)}`);
+      }
+      
+      if (totalPos1 >= 20 && bestPos1Count >= 10) {
+        const pos1Ratio = bestPos1Count / totalPos1;
+        if (pos1Ratio >= 0.80) {
+          // This candidate is dominant at position 1 - major confidence boost
+          // Scale boost by how dominant (80% = +0.3, 90% = +0.45, 100% = +0.6)
+          const dominanceBoost = 0.30 + (pos1Ratio - 0.80) * 1.5; // 0.30 to 0.60
+          const newConfidence = Math.min(1, confidence + dominanceBoost);
+          
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[disambiguation] Prefix ${prefix}: DOMINANT BOOST! ratio=${pos1Ratio.toFixed(2)}, boost=${dominanceBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
           }
+          
+          confidence = newConfidence;
         }
       }
     }
