@@ -17,14 +17,11 @@ import {
   Pause,
   ChevronDown,
   Sliders,
-  Loader2,
-  Database,
-  RefreshCw
 } from 'lucide-react';
 import { version } from '../../../package.json';
 import wifiIcon from '@/assets/WCM_Waves.gif';
 import clsx from 'clsx';
-import { useStore, usePrefetchForRoute, usePacketCacheState, useClearPacketCache } from '@/lib/stores/useStore';
+import { useStore, usePrefetchForRoute } from '@/lib/stores/useStore';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { formatUptime } from '@/lib/format';
 import { POLLING_INTERVALS } from '@/lib/constants';
@@ -32,7 +29,6 @@ import { POLLING_INTERVALS } from '@/lib/constants';
 const navigation = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
   { name: 'Contacts', to: '/contacts', icon: Users },
-  { name: 'Packets', to: '/packets', icon: Radio },
   { name: 'Statistics', to: '/statistics', icon: BarChart3 },
   { name: 'System', to: '/system', icon: Cpu },
   { name: 'Logs', to: '/logs', icon: FileText },
@@ -45,8 +41,6 @@ export function Sidebar() {
   const { pathname } = useLocation();
   const { stats, fetchStats, setMode, setDutyCycle, sendAdvert } = useStore();
   const prefetchForRoute = usePrefetchForRoute();
-  const cacheState = usePacketCacheState();
-  const clearCache = useClearPacketCache();
   const [isOpen, setIsOpen] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(true);
   const [sending, setSending] = useState(false);
@@ -108,8 +102,6 @@ export function Sidebar() {
   }, [isOpen]);
 
   const noiseFloor = stats?.noise_floor_dbm;
-  const dutyCycleUsed = stats?.duty_cycle_percent ?? 0;
-  const dutyCycleMax = stats?.config?.duty_cycle?.max_airtime_percent ?? 10;
 
   // Read mode and duty cycle from config (where backend stores them)
   const currentMode = stats?.config?.repeater?.mode ?? 'forward';
@@ -251,66 +243,9 @@ export function Sidebar() {
   // Status panel renderer (bottom of sidebar)
   const renderStatusPanel = () => (
     <div className="mt-auto border-t border-white/5">
-      {/* Packet Cache Status */}
-      <div className="px-3 py-3">
-        <div className="bg-white/[0.03] rounded-xl p-3">
-          {(cacheState.isLoading || cacheState.isDeepLoading) ? (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 text-accent-secondary animate-spin" />
-                <span className="type-data-xs text-accent-secondary">
-                  {cacheState.statusMessage || (cacheState.isLoading ? 'Loading...' : 'Building topology...')}
-                </span>
-              </div>
-              {cacheState.packetCount > 0 && (
-                <div className="flex items-center justify-between pl-6">
-                  <span className="type-data-xs text-text-muted">Cached</span>
-                  <span className="type-data-xs text-text-secondary tabular-nums">
-                    {cacheState.packetCount.toLocaleString()}
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-accent-primary" />
-                <span className="type-data-xs text-text-muted">Packets</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="type-data text-text-primary tabular-nums">
-                  {cacheState.packetCount.toLocaleString()}
-                </span>
-                <button
-                  onClick={clearCache}
-                  className="p-1 hover:bg-white/10 rounded transition-colors"
-                  title="Refresh packet cache"
-                >
-                  <RefreshCw className="w-3 h-3 text-text-muted hover:text-text-primary" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Live status & version */}
-      <div className="px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-success opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-success" />
-          </span>
-          <span className="type-data-xs text-text-muted uppercase tracking-wide">Live</span>
-        </div>
-        {stats?.version && (
-          <span className="type-data-xs text-text-muted">v{stats.version}</span>
-        )}
-      </div>
-
       {/* Uptime */}
       {stats?.uptime_seconds !== undefined && (
-        <div className="px-4 pb-3 flex items-center gap-2">
+        <div className="px-4 py-3 flex items-center gap-2">
           <Clock className="w-3.5 h-3.5 text-text-muted" />
           <span className="type-data-xs text-text-secondary tabular-nums">
             {formatUptime(stats.uptime_seconds)} uptime
@@ -321,7 +256,7 @@ export function Sidebar() {
       {/* RF Noise Floor */}
       <div className="px-3 pb-3">
         <div className="bg-white/[0.03] rounded-xl p-3">
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Radio className="w-4 h-4 text-accent-primary" />
               <span className="type-data-xs text-text-muted">Noise Floor</span>
@@ -333,25 +268,18 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Duty Cycle Display */}
-      <div className="px-3 pb-4">
-        <div className="bg-white/[0.03] rounded-xl p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <Gauge className="w-4 h-4 text-accent-secondary" />
-              <span className="type-data-xs text-text-muted">Airtime</span>
-            </div>
-            <span className="type-data-xs text-text-primary tabular-nums">
-              {dutyCycleUsed.toFixed(1)}%
-            </span>
-          </div>
-          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-accent-secondary rounded-full transition-all duration-500"
-              style={{ width: `${Math.min((dutyCycleUsed / dutyCycleMax) * 100, 100)}%` }}
-            />
-          </div>
+      {/* Live status & version - at the very bottom */}
+      <div className="px-4 py-3 flex items-center justify-between border-t border-white/5">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-success opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-success" />
+          </span>
+          <span className="type-data-xs text-text-muted uppercase tracking-wide">Live</span>
         </div>
+        {stats?.version && (
+          <span className="type-data-xs text-text-muted">v{stats.version}</span>
+        )}
       </div>
     </div>
   );
