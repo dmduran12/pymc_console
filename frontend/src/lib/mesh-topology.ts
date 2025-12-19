@@ -875,6 +875,26 @@ export function buildMeshTopology(
       
       const isCertainObservation = bothHighConfidence || toIsVeryHighConfidence || toIsConfidentLastHop;
       
+      // DEBUG: Log edges TO prefix 24 (temporarily enabled in all envs)
+      if (toPrefix === '24') {
+        console.log(`[edge-debug] Edge TO 24:`, {
+          fromPrefix,
+          toPrefix,
+          fromHash: fromResult.hash?.slice(0, 8),
+          toHash: toResult.hash?.slice(0, 8),
+          fromConf: fromResult.confidence.toFixed(3),
+          toConf: toResult.confidence.toFixed(3),
+          isToLastHop,
+          toPosition,
+          bothHighConf: bothHighConfidence,
+          toVeryHigh: toIsVeryHighConfidence,
+          toConfLastHop: toIsConfidentLastHop,
+          isCertain: isCertainObservation,
+          threshold: CERTAINTY_CONFIDENCE_THRESHOLD,
+          packetHash: packet.packet_hash?.slice(0, 8),
+        });
+      }
+      
       // Track nodes for centrality
       nodesInPath.add(fromResult.hash);
       nodesInPath.add(toResult.hash);
@@ -947,8 +967,8 @@ export function buildMeshTopology(
     }
   }
   
-  // DEBUG: Log edges involving prefix 24
-  if (process.env.NODE_ENV === 'development') {
+  // DEBUG: Log edges involving prefix 24 (temporarily enabled in all envs)
+  if (true) {
     const edges24 = [...accumulators.values()].filter(acc => 
       acc.fromHash.toUpperCase().startsWith('24') || 
       acc.toHash.toUpperCase().startsWith('24')

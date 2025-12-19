@@ -567,8 +567,8 @@ export function buildPrefixLookup(
       const secondPos1Count = candidates[1].positionCounts[pos1Index] || 0;
       const totalPos1 = bestPos1Count + secondPos1Count;
       
-      // Debug logging in development
-      if (process.env.NODE_ENV === 'development') {
+      // Debug logging (temporarily enabled for prefix 24)
+      if (prefix === '24') {
         console.log(`[disambiguation] Prefix ${prefix}: bestPos1=${bestPos1Count}, secondPos1=${secondPos1Count}, total=${totalPos1}, conf=${confidence.toFixed(2)}`);
       }
       

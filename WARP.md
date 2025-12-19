@@ -145,10 +145,16 @@ src/
 │   ├── constants.ts       # App constants
 │   ├── format.ts          # Formatting utilities
 │   ├── packet-utils.ts    # Packet processing helpers
-│   ├── mesh-topology.ts   # Mesh network analysis (affinity, topology graph)
+│   ├── path-utils.ts      # Centralized path parsing and iteration utilities
+│   ├── packet-cache.ts    # Deep packet loading (20K limit) with caching
+│   ├── mesh-topology.ts   # Mesh network analysis (affinity, topology graph, edge building)
+│   ├── prefix-disambiguation.ts # Multi-factor prefix→node disambiguation system
+│   ├── topology-service.ts # Web Worker orchestration for topology computation
 │   ├── hooks/             # usePolling, useDebounce, useThemeColors
-│   ├── stores/useStore.ts # Zustand store (stats, packets, logs, UI)
-│   └── theme/             # Theme system (ThemeContext, config, hooks)
+│   ├── stores/useStore.ts # Zustand store (stats, packets, logs, UI, topology)
+│   ├── theme/             # Theme system (ThemeContext, config, hooks)
+│   └── workers/           # Web Workers (topology computation off main thread)
+│       └── topology.worker.ts # Topology computation worker
 └── types/api.ts           # TypeScript interfaces for API responses
 ```
 
@@ -178,12 +184,42 @@ const { stats } = useStore();       // Avoid
 - Background images and color schemes are decoupled (can be mixed independently)
 - localStorage persistence with automatic migration from legacy keys
 
-**Mesh Topology** (`src/lib/mesh-topology.ts`): Network analysis utilities:
-- `buildNeighborAffinity()` - Builds frequency + proximity scores for neighbor relationships
-- `buildMeshTopology()` - Creates graph edges with confidence-weighted connections
-- `matchPrefix()`, `prefixMatches()`, `getHashPrefix()` - Shared prefix matching logic
-- Uses Haversine distance for proximity scoring (<100m=1.0, <500m=0.9, <1km=0.7, etc.)
-- Combined score = frequency × 0.6 + proximity × 0.4
+**Mesh Topology System** (`src/lib/`): Multi-layered network analysis with intelligent prefix disambiguation.
+
+**Core Files:**
+- `prefix-disambiguation.ts` - Three-factor scoring system for resolving 2-char hex prefixes to nodes
+- `mesh-topology.ts` - Edge building, validation, and graph construction
+- `path-utils.ts` - Centralized path parsing: `parsePath()`, `iteratePathEdges()`, `extractPrefixFromHash()`
+- `packet-cache.ts` - Deep packet loading with 20K limit for comprehensive topology
+- `topology-service.ts` - Web Worker orchestration for off-main-thread computation
+
+**Disambiguation Scoring** (3 factors):
+- **Position (25%)** - How often a candidate appears at each path position
+- **Co-occurrence (25%)** - How often pairs of prefixes appear adjacent in paths
+- **Geographic (50%)** - Distance-based scoring using coordinates
+
+**Special Correlations:**
+- **Source-Geographic Correlation** - Position-1 prefixes scored by distance from packet's `src_hash` location
+- **Next-Hop Anchor Correlation** - Position 2+ prefixes use next hop's location as anchor for recursive disambiguation
+
+**Edge Certainty Logic:**
+Edges are marked "certain" when:
+- Both endpoints have ≥0.6 confidence, OR
+- The destination node has ≥0.9 confidence (even if source is ambiguous), OR
+- Destination is the local node (last hop)
+
+**Key Constants:**
+- `DEEP_FETCH_LIMIT = 20000` - Packets loaded for topology analysis (~7 days)
+- `MIN_EDGE_VALIDATIONS = 5` - Minimum observations for edge certainty
+- `CERTAINTY_CONFIDENCE_THRESHOLD = 0.6` - Minimum confidence for certain edges
+- `confidenceThreshold = 0.5` - Minimum confidence for edge inclusion
+
+**Geographic Scoring Bands:**
+- VERY_CLOSE (<500m) = 1.0
+- CLOSE (<2km) = 0.9
+- MEDIUM (<5km) = 0.7
+- FAR (<10km) = 0.5
+- VERY_FAR (<20km) = 0.3
 
 ### Backend API
 
@@ -327,30 +363,73 @@ MeshCore packets contain a `path` field with 2-character hex prefixes representi
 ```typescript
 // Example path: ["FA", "79", "24", "19"]
 // FA → 79 → 24 → 19 (local node)
+// Position:  0    1    2    3 (last hop)
 ```
 
-### Path Resolution (`PathMapVisualization.tsx`)
+### Path Resolution (`prefix-disambiguation.ts`)
 
-1. **Prefix Matching**: Each 2-char prefix is matched against known nodes
-   - Full hash `0x19ABCD...` → prefix `19`
-   - Local node hash format is `0xNN` (e.g., `0x19`) → extract with `hash.slice(2)`
+The disambiguation system uses multi-factor analysis to resolve ambiguous 2-char prefixes:
 
-2. **Confidence Scoring**:
-   - 1 match = 100% confidence (exact)
-   - N matches = weighted by affinity score (frequency + proximity)
-   - 0 matches = unknown (gray)
+1. **Evidence Collection** (per-prefix statistics):
+   - `positionCounts[0-4]` - How often prefix appears at each position
+   - `cooccurrenceCount` - How often prefix appears adjacent to known prefixes  
+   - `srcGeoEvidenceScore` - Correlation with packet source locations (position 1)
 
-3. **Color Coding** (hop badges):
-   - Green (`text-accent-success`): 100% - exact match
-   - Yellow (`text-accent-secondary`): 50-99% - high confidence
-   - Orange (`text-signal-poor`): 25-49% - medium confidence  
-   - Red (`text-accent-danger`): 1-24% - low confidence
-   - Gray (`text-text-muted`): 0% - unknown
+2. **Three-Factor Scoring**:
+   - **Position (25%)**: Normalized count at observed position vs total observations
+   - **Co-occurrence (25%)**: Adjacent prefix relationships from historical data
+   - **Geographic (50%)**: Distance from anchor point (source for pos-1, next-hop for pos-2+)
 
-4. **Special Cases**:
-   - Last hop verified against local node hash
-   - Zero-hop neighbors (direct) get boosted confidence
-   - Proximity scoring uses Haversine distance when coordinates available
+3. **Special Disambiguation Techniques**:
+
+   **Source-Geographic Correlation** (position 1):
+   When prefix appears at position 1, score candidates by distance from packet's source node:
+   ```typescript
+   // If packet src_hash is known and has coordinates,
+   // candidates closer to source get higher scores
+   srcGeoEvidenceScore += distanceScore(candidate.location, srcLocation)
+   ```
+
+   **Next-Hop Anchor Correlation** (position 2+):
+   Use the already-resolved next hop as an anchor for upstream disambiguation:
+   ```typescript
+   // If downstream node (position i+1) is resolved with high confidence,
+   // use its location to score upstream candidates at position i
+   geoScore = distanceScore(candidate.location, nextHop.location)
+   ```
+
+4. **Confidence Thresholds**:
+   - ≥0.9 = Very high confidence (used for edge certainty)
+   - ≥0.6 = High confidence (certain edge threshold)
+   - ≥0.5 = Included in topology (default threshold)
+   - <0.5 = Excluded from edges
+
+### Path Visualization (`PathMapVisualization.tsx`)
+
+**Color Coding** (hop badges):
+- Green (`text-accent-success`): 100% - exact match (unique prefix)
+- Yellow (`text-accent-secondary`): 50-99% - high confidence
+- Orange (`text-signal-poor`): 25-49% - medium confidence  
+- Red (`text-accent-danger`): 1-24% - low confidence
+- Gray (`text-text-muted`): 0% - unknown prefix
+
+### Centralized Path Utilities (`path-utils.ts`)
+
+```typescript
+import { parsePath, iteratePathEdges, extractPrefixFromHash } from '@/lib/path-utils';
+
+// Parse raw path to normalized array
+const hops = parsePath(packet.path);  // ["FA", "79", "24", "19"]
+
+// Iterate edge pairs (from → to)
+for (const { from, to, fromIndex, toIndex } of iteratePathEdges(hops)) {
+  // from="FA", to="79", fromIndex=0, toIndex=1
+}
+
+// Extract prefix from various hash formats
+extractPrefixFromHash("0x19ABCDEF")  // "19"
+extractPrefixFromHash("0x19")        // "19"  (local node format)
+```
 
 ## Common Tasks
 
