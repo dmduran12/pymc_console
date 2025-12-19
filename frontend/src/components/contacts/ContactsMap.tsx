@@ -73,24 +73,48 @@ function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefine
 }
 
 /**
- * Analyze packets to determine which neighbors are zero-hop (direct RF contact with local).
+ * Analyze packets and topology to determine which neighbors are zero-hop (direct RF contact with local).
  * 
  * A neighbor is considered zero-hop if we've DIRECTLY received RF signal from them.
  * This is determined by:
- * 1. route_type = 1 (DIRECT) AND src_hash matches - they sent directly to us
- * 2. Empty path AND src_hash matches - no forwarding, direct reception
- * 3. Last hop prefix matches their hash prefix - they were the final RF hop to local
+ * 1. Topology edges with hopDistanceFromLocal === 0 (most reliable - uses disambiguation)
+ * 2. route_type = 1 (DIRECT) AND src_hash matches - they sent directly to us
+ * 3. Empty path AND src_hash matches - no forwarding, direct reception
+ * 4. Last hop prefix matches their hash prefix (fallback when no topology available)
  * 
- * IMPORTANT: The last hop in a path represents the node that transmitted the signal
- * we actually received. All other nodes in the path are multi-hop (we didn't hear them).
+ * IMPORTANT: The topology approach (method 1) is preferred because it uses the centralized
+ * prefix disambiguation system which considers position consistency, co-occurrence patterns,
+ * and geographic proximity to resolve prefix collisions.
  * 
  * @param packets - All received packets
  * @param neighbors - Known neighbors (to match prefixes to full hashes)
+ * @param topologyEdges - Optional validated edges from topology (preferred for disambiguation)
+ * @param localHash - Local node hash (for matching topology edges)
  */
-function inferZeroHopNeighbors(packets: Packet[], neighbors: Record<string, NeighborInfo>): Set<string> {
+function inferZeroHopNeighbors(
+  packets: Packet[], 
+  neighbors: Record<string, NeighborInfo>,
+  topologyEdges?: { fromHash: string; toHash: string; hopDistanceFromLocal: number }[],
+  localHash?: string
+): Set<string> {
   const zeroHopNodes = new Set<string>();
   
-  // Build prefix -> full hash lookup for matching path prefixes to neighbors
+  // Method 1: Use topology edges with hopDistanceFromLocal === 0
+  // This is the most reliable method because it uses the disambiguation system
+  if (topologyEdges && localHash) {
+    for (const edge of topologyEdges) {
+      if (edge.hopDistanceFromLocal === 0) {
+        // This edge connects directly to local
+        if (edge.fromHash === localHash && edge.toHash !== localHash) {
+          zeroHopNodes.add(edge.toHash);
+        } else if (edge.toHash === localHash && edge.fromHash !== localHash) {
+          zeroHopNodes.add(edge.fromHash);
+        }
+      }
+    }
+  }
+  
+  // Build prefix -> full hash lookup for fallback prefix matching
   const prefixToHash = new Map<string, string[]>();
   for (const hash of Object.keys(neighbors)) {
     const prefix = hash.slice(0, 2).toUpperCase();
@@ -103,24 +127,24 @@ function inferZeroHopNeighbors(packets: Packet[], neighbors: Record<string, Neig
     // Skip if no source hash
     if (!packet.src_hash) continue;
     
-    // Method 1: route_type = 1 (DIRECT) means the source sent directly to us
+    // Method 2: route_type = 1 (DIRECT) means the source sent directly to us
     const routeType = packet.route_type ?? packet.route;
     if (routeType === 1) {
       zeroHopNodes.add(packet.src_hash);
       continue;
     }
     
-    // Method 2: Empty path means we received directly from source (no relays)
+    // Method 3: Empty path means we received directly from source (no relays)
     const path = packet.forwarded_path ?? packet.original_path;
     if (!path || path.length === 0) {
       zeroHopNodes.add(packet.src_hash);
       continue;
     }
     
-    // Method 3: The LAST element in the path is the node that transmitted to us.
-    // This is the node we actually heard via RF - our direct neighbor for this packet.
-    // Note: path elements are 2-char prefixes, we need to match to full hashes.
-    if (path.length > 0) {
+    // Method 4: (Fallback) The LAST element in the path is the node that transmitted to us.
+    // Only use this if we don't already have edges from topology
+    // Note: This is less reliable for prefix collisions
+    if (path.length > 0 && (!topologyEdges || topologyEdges.length === 0)) {
       const lastHopPrefix = path[path.length - 1].toUpperCase();
       
       // Find neighbors matching this prefix
@@ -131,12 +155,10 @@ function inferZeroHopNeighbors(packets: Packet[], neighbors: Record<string, Neig
         zeroHopNodes.add(matchingHashes[0]);
       } else if (matchingHashes.length > 1) {
         // Multiple neighbors share this prefix - add all as candidates
-        // (In practice, the topology affinity scoring will help disambiguate)
         for (const hash of matchingHashes) {
           zeroHopNodes.add(hash);
         }
       }
-      // If no matches, it's an unknown node (not in our neighbors list yet)
     }
   }
   
@@ -332,10 +354,16 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Get packets for SNR calculation (lightweight, still needed)
   const packets = usePackets();
   
-  // Infer zero-hop neighbors from packet analysis
+  // Infer zero-hop neighbors from packet analysis AND topology edges
+  // Topology edges use the disambiguation system for more accurate prefix resolution
   const zeroHopNeighbors = useMemo(() => {
-    return inferZeroHopNeighbors(packets, neighbors);
-  }, [packets, neighbors]);
+    return inferZeroHopNeighbors(
+      packets, 
+      neighbors, 
+      meshTopology.validatedEdges,  // Use disambiguated edges
+      localHash
+    );
+  }, [packets, neighbors, meshTopology.validatedEdges, localHash]);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
