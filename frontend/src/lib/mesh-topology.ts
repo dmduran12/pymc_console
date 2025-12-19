@@ -239,9 +239,10 @@ export function buildNeighborAffinity(
   }
   
   // Analyze packets for hop positions and frequency
-  // NOTE: MeshCore paths are [first_hop, ..., last_hop] where last_hop is the node
-  // that transmitted the packet to us. Local is NOT appended to the path.
-  // So hop distance is relative to the END of the path (which is our direct neighbor).
+  // NOTE: The forwarded_path MAY include local's prefix at the end (e.g., ["78", "24", "19"])
+  // We need to skip local's prefix so the last forwarder is correctly identified as position 1.
+  const localPrefix = localHash ? getHashPrefix(localHash).toUpperCase() : null;
+  
   for (const packet of packets) {
     // Note: paths may be JSON strings or arrays depending on API version
     let path = packet.forwarded_path ?? packet.original_path;
@@ -256,12 +257,19 @@ export function buildNeighborAffinity(
     }
     
     if (path && Array.isArray(path) && path.length >= 1) {
-      // Process ALL paths - the last element is always the node that forwarded to us
+      // Remove local's prefix from the end if present
+      let effectivePath = path;
+      if (localPrefix && path.length > 0 && path[path.length - 1].toUpperCase() === localPrefix) {
+        effectivePath = path.slice(0, -1);
+      }
+      if (effectivePath.length === 0) continue;
+      
+      // Process the path - last element is the node that forwarded to us (1-hop)
       // Hop positions: last element = 1-hop (direct forwarder), second-to-last = 2-hop, etc.
-      for (let i = 0; i < path.length; i++) {
-        const prefix = path[i];
+      for (let i = 0; i < effectivePath.length; i++) {
+        const prefix = effectivePath[i];
         // hopDistance from local: last element = 1 (direct), second-to-last = 2, etc.
-        const hopDistance = path.length - i;
+        const hopDistance = effectivePath.length - i;
         
         // Find matching neighbors and update their hop stats
         for (const [hash, aff] of affinity) {
@@ -272,8 +280,8 @@ export function buildNeighborAffinity(
             const hopIndex = Math.min(hopDistance - 1, 4); // Cap at 5 positions
             aff.hopPositionCounts[hopIndex]++;
             
-            // Track direct forwards specifically (last element in path)
-            if (i === path.length - 1) {
+            // Track direct forwards specifically (last element in effective path)
+            if (i === effectivePath.length - 1) {
               aff.directForwardCount++;
             }
           }
