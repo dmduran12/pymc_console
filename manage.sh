@@ -964,8 +964,8 @@ do_upgrade() {
  ─────────────────────────────────────
 
  Select upgrade type:" 19 65 2 \
-        "full" "Full Upgrade (Core + Repeater + Console)" \
-        "console" "Console Only (Dashboard UI only)" 3>&1 1>&2 2>&3)
+        "console" "Console Only (Update Dashboard UI)" \
+        "full" "Full Upgrade (Core + Repeater + Console)" 3>&1 1>&2 2>&3)
     
     if [ -z "$upgrade_type" ]; then
         return 0
