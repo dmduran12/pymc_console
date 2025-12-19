@@ -54,7 +54,16 @@ const SIGNAL_COLORS = {
   zeroHop: '#4338CA',    // Deep royal blue for zero-hop/direct neighbors
 };
 
-// Calculate mean SNR from packets for a given source hash
+/**
+ * Calculate mean SNR from packets for a given source hash.
+ * 
+ * IMPORTANT: The SNR value in a packet is what the LOCAL NODE measured when receiving.
+ * For multi-hop packets, this SNR reflects the LAST HOP quality (neighbor → local),
+ * NOT the RF link quality to the original source.
+ * 
+ * This function returns the mean SNR for display purposes, but consumers should
+ * understand this is only meaningful for direct (zero-hop) neighbors.
+ */
 function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefined {
   const nodePackets = packets.filter(p => p.src_hash === srcHash && p.snr !== undefined);
   if (nodePackets.length === 0) return undefined;
@@ -64,43 +73,70 @@ function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefine
 }
 
 /**
- * Analyze packets to determine which neighbors are zero-hop (direct RF contact).
+ * Analyze packets to determine which neighbors are zero-hop (direct RF contact with local).
  * 
- * A neighbor is considered zero-hop if we've received packets from them that:
- * 1. Have route_type = 1 (DIRECT) - meaning the packet wasn't relayed
- * 2. OR have an empty/short path where src_hash is the origin
- * 3. OR the last element of the path is the src_hash (they were last hop to us)
+ * A neighbor is considered zero-hop if we've DIRECTLY received RF signal from them.
+ * This is determined by:
+ * 1. route_type = 1 (DIRECT) AND src_hash matches - they sent directly to us
+ * 2. Empty path AND src_hash matches - no forwarding, direct reception
+ * 3. Last hop prefix matches their hash prefix - they were the final RF hop to local
  * 
- * This is inferred from packet analysis similar to meshcoretomqtt's approach.
+ * IMPORTANT: The last hop in a path represents the node that transmitted the signal
+ * we actually received. All other nodes in the path are multi-hop (we didn't hear them).
+ * 
+ * @param packets - All received packets
+ * @param neighbors - Known neighbors (to match prefixes to full hashes)
  */
-function inferZeroHopNeighbors(packets: Packet[]): Set<string> {
+function inferZeroHopNeighbors(packets: Packet[], neighbors: Record<string, NeighborInfo>): Set<string> {
   const zeroHopNodes = new Set<string>();
+  
+  // Build prefix -> full hash lookup for matching path prefixes to neighbors
+  const prefixToHash = new Map<string, string[]>();
+  for (const hash of Object.keys(neighbors)) {
+    const prefix = hash.slice(0, 2).toUpperCase();
+    const existing = prefixToHash.get(prefix) || [];
+    existing.push(hash);
+    prefixToHash.set(prefix, existing);
+  }
   
   for (const packet of packets) {
     // Skip if no source hash
     if (!packet.src_hash) continue;
     
-    // Method 1: route_type = 1 (DIRECT) means zero-hop
-    // route_type can be in 'route' or 'route_type' field
+    // Method 1: route_type = 1 (DIRECT) means the source sent directly to us
     const routeType = packet.route_type ?? packet.route;
     if (routeType === 1) {
       zeroHopNodes.add(packet.src_hash);
       continue;
     }
     
-    // Method 2: Check path - if path is empty or src is at end, it's direct
+    // Method 2: Empty path means we received directly from source (no relays)
     const path = packet.forwarded_path ?? packet.original_path;
     if (!path || path.length === 0) {
-      // No path means we received directly from source
       zeroHopNodes.add(packet.src_hash);
       continue;
     }
     
-    // Method 3: If the last element in the path matches src_hash,
-    // it means that node was the last hop to reach us (zero-hop from us)
+    // Method 3: The LAST element in the path is the node that transmitted to us.
+    // This is the node we actually heard via RF - our direct neighbor for this packet.
+    // Note: path elements are 2-char prefixes, we need to match to full hashes.
     if (path.length > 0) {
-      const lastHop = path[path.length - 1];
-      zeroHopNodes.add(lastHop);
+      const lastHopPrefix = path[path.length - 1].toUpperCase();
+      
+      // Find neighbors matching this prefix
+      const matchingHashes = prefixToHash.get(lastHopPrefix) || [];
+      
+      if (matchingHashes.length === 1) {
+        // Unique match - we know exactly which neighbor forwarded to us
+        zeroHopNodes.add(matchingHashes[0]);
+      } else if (matchingHashes.length > 1) {
+        // Multiple neighbors share this prefix - add all as candidates
+        // (In practice, the topology affinity scoring will help disambiguate)
+        for (const hash of matchingHashes) {
+          zeroHopNodes.add(hash);
+        }
+      }
+      // If no matches, it's an unknown node (not in our neighbors list yet)
     }
   }
   
@@ -223,15 +259,22 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
         </div>
       )}
       
-      {/* Signal info */}
-      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
-        {meanSnr !== undefined && (
-          <div className="text-text-secondary">SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)}</strong></div>
-        )}
-        {neighbor.rssi !== undefined && (
-          <div className="text-text-secondary">RSSI: <strong className="text-text-primary">{neighbor.rssi}</strong></div>
-        )}
-      </div>
+      {/* Signal info - only meaningful for direct neighbors */}
+      {isZeroHop && (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+          {meanSnr !== undefined && (
+            <div className="text-text-secondary">SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)}</strong></div>
+          )}
+          {neighbor.rssi !== undefined && (
+            <div className="text-text-secondary">RSSI: <strong className="text-text-primary">{neighbor.rssi}</strong></div>
+          )}
+        </div>
+      )}
+      {!isZeroHop && (meanSnr !== undefined || neighbor.rssi !== undefined) && (
+        <div className="text-[10px] text-text-muted italic">
+          Signal metrics shown are from relay, not direct RF
+        </div>
+      )}
       
       {/* Last seen */}
       <div className="text-[10px] text-text-muted mt-1">
@@ -291,8 +334,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   
   // Infer zero-hop neighbors from packet analysis
   const zeroHopNeighbors = useMemo(() => {
-    return inferZeroHopNeighbors(packets);
-  }, [packets]);
+    return inferZeroHopNeighbors(packets, neighbors);
+  }, [packets, neighbors]);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
@@ -584,6 +627,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             <Popup>
               <div className="text-sm">
                 <strong className="text-base">{localNode.name}</strong>
+                {localHash && (
+                  <span className="ml-2 font-mono text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">
+                    {localHash.startsWith('0x') ? localHash.slice(2).toUpperCase() : localHash.slice(0, 2).toUpperCase()}
+                  </span>
+                )}
                 <br />
                 <span className="text-accent-tertiary font-medium">This Node (Local)</span>
                 <br />
@@ -604,14 +652,24 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const isHub = meshTopology.hubNodes.includes(hash);
           const centrality = meshTopology.centrality.get(hash) || 0;
           
-          // Hub nodes get amber, zero-hop gets the SIGNAL_COLORS.zeroHop (deep blue), others by signal
+          // Calculate SNR (only meaningful for zero-hop neighbors)
           const meanSnr = calculateMeanSnr(packets, hash);
           const displaySnr = meanSnr ?? neighbor.snr;
-          const color = isHub
-            ? '#FBBF24' // amber-400 for hub nodes
-            : isZeroHop 
-              ? SIGNAL_COLORS.zeroHop // Deep royal blue for direct
-              : getSignalColor(displaySnr);
+          
+          // Color logic:
+          // - Hub nodes: amber (they're important network infrastructure)
+          // - Zero-hop (direct RF contact): color by SNR (we actually heard them)
+          // - Multi-hop: neutral gray (SNR not meaningful - we didn't hear them directly)
+          let color: string;
+          if (isHub) {
+            color = '#FBBF24'; // amber-400 for hub nodes
+          } else if (isZeroHop) {
+            // For direct neighbors, color by signal quality
+            color = getSignalColor(displaySnr);
+          } else {
+            // Multi-hop nodes - neutral color since we didn't hear them directly
+            color = SIGNAL_COLORS.unknown; // Gray for multi-hop
+          }
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           const isHovered = hoveredMarker === hash;
