@@ -534,39 +534,33 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Show/hide topology toggle (default OFF for cleaner initial view)
   const [showTopology, setShowTopology] = useState(false);
   
-  // Animation state for edge fade-in
-  const [edgeOpacity, setEdgeOpacity] = useState(0);
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Edge Animation System (state declarations - effect is after filteredCertainPolylines)
+  // - "Trace" effect: lines draw from point A to B
+  // - Thickness growth: existing edges animate to new weight when data changes
+  // ═══════════════════════════════════════════════════════════════════════════════
   
-  // Animate edges when topology is toggled on
-  useEffect(() => {
-    if (showTopology) {
-      // Animate in with cubic ease-in-out over 2 seconds
-      let startTime: number | null = null;
-      const duration = 2000; // 2 seconds
-      
-      const animate = (timestamp: number) => {
-        if (!startTime) startTime = timestamp;
-        const elapsed = timestamp - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Cubic ease-in-out: 4t³ for t<0.5, 1-(-2t+2)³/2 for t≥0.5
-        const eased = progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-        
-        setEdgeOpacity(eased);
-        
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
-      };
-      
-      requestAnimationFrame(animate);
-    } else {
-      // Instant off
-      setEdgeOpacity(0);
-    }
-  }, [showTopology]);
+  const ANIMATION_DURATION = 2000; // 2 seconds
+  
+  // Track animation progress per edge (0 = not started, 1 = complete)
+  const [edgeAnimProgress, setEdgeAnimProgress] = useState<Map<string, number>>(new Map());
+  
+  // Track previous weights for thickness animation
+  const prevWeightsRef = useRef<Map<string, number>>(new Map());
+  const [weightAnimProgress, setWeightAnimProgress] = useState(1); // 0-1 for weight interpolation
+  
+  // Track which edges we've seen before (for detecting new edges)
+  const knownEdgesRef = useRef<Set<string>>(new Set());
+  
+  // Track the last edge set to detect changes (for "pull more data" scenario)
+  const lastEdgeSetRef = useRef<string>('');
+  
+  // Cubic ease-in-out helper
+  const easeInOutCubic = (t: number): number => {
+    return t < 0.5
+      ? 4 * t * t * t
+      : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  };
   
   // Build set of hub nodes and zero-hop nodes for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
@@ -667,6 +661,129 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       return true;
     });
   }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet, showTopology, localConnectedNodes]);
+  
+  // ─── Edge Animation Effect (must be after filteredCertainPolylines) ───
+  useEffect(() => {
+    if (!showTopology) {
+      // When toggled off, reset animation state
+      setEdgeAnimProgress(new Map());
+      knownEdgesRef.current = new Set();
+      lastEdgeSetRef.current = '';
+      return;
+    }
+    
+    // Build current weight signature (detects both new edges and weight changes)
+    const currentWeightSignature = filteredCertainPolylines
+      .map(p => `${p.edge.key}:${p.edge.certainCount}`)
+      .sort()
+      .join(',');
+    
+    // Detect if this is a toggle-on (no previous edges) or data update (edges changed)
+    const isInitialToggle = knownEdgesRef.current.size === 0;
+    const edgesChanged = lastEdgeSetRef.current !== '' && lastEdgeSetRef.current !== currentWeightSignature;
+    
+    if (isInitialToggle || edgesChanged) {
+      // Find new edges that need trace animation
+      const newEdgeKeys: string[] = [];
+      const existingEdgeKeys: string[] = [];
+      
+      for (const { edge } of filteredCertainPolylines) {
+        if (!knownEdgesRef.current.has(edge.key)) {
+          newEdgeKeys.push(edge.key);
+        } else {
+          existingEdgeKeys.push(edge.key);
+        }
+      }
+      
+      // Store previous weights before updating (for thickness animation)
+      if (edgesChanged && existingEdgeKeys.length > 0) {
+        // Keep existing weights as "previous" for interpolation
+        // They're already in prevWeightsRef from last update
+        setWeightAnimProgress(0);
+      }
+      
+      // Initialize new edges at progress 0
+      setEdgeAnimProgress(prev => {
+        const next = new Map(prev);
+        for (const key of newEdgeKeys) {
+          next.set(key, 0);
+        }
+        // Ensure existing edges are at 1
+        for (const key of existingEdgeKeys) {
+          if (!next.has(key)) {
+            next.set(key, 1);
+          }
+        }
+        return next;
+      });
+      
+      // Start trace animation for new edges (staggered by index)
+      if (newEdgeKeys.length > 0) {
+        let startTime: number | null = null;
+        const staggerDelay = Math.min(100, ANIMATION_DURATION / newEdgeKeys.length / 2);
+        
+        const animateTrace = (timestamp: number) => {
+          if (!startTime) startTime = timestamp;
+          const elapsed = timestamp - startTime;
+          
+          setEdgeAnimProgress(prev => {
+            const next = new Map(prev);
+            
+            newEdgeKeys.forEach((key, index) => {
+              const edgeStartTime = index * staggerDelay;
+              const edgeElapsed = Math.max(0, elapsed - edgeStartTime);
+              const progress = Math.min(edgeElapsed / ANIMATION_DURATION, 1);
+              const eased = easeInOutCubic(progress);
+              next.set(key, eased);
+            });
+            
+            return next;
+          });
+          
+          // Continue animation if not all complete
+          const totalDuration = ANIMATION_DURATION + (newEdgeKeys.length - 1) * staggerDelay;
+          if (elapsed < totalDuration) {
+            requestAnimationFrame(animateTrace);
+          }
+        };
+        
+        requestAnimationFrame(animateTrace);
+      }
+      
+      // Animate weight growth for existing edges
+      if (edgesChanged) {
+        let startTime: number | null = null;
+        
+        const animateWeight = (timestamp: number) => {
+          if (!startTime) startTime = timestamp;
+          const elapsed = timestamp - startTime;
+          const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+          const eased = easeInOutCubic(progress);
+          
+          setWeightAnimProgress(eased);
+          
+          if (progress < 1) {
+            requestAnimationFrame(animateWeight);
+          }
+        };
+        
+        requestAnimationFrame(animateWeight);
+      }
+      
+      // Update known edges
+      for (const key of newEdgeKeys) {
+        knownEdgesRef.current.add(key);
+      }
+    }
+    
+    // Update current weights for next comparison
+    for (const { edge } of filteredCertainPolylines) {
+      const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+      prevWeightsRef.current.set(edge.key, weight);
+    }
+    
+    lastEdgeSetRef.current = currentWeightSignature;
+  }, [showTopology, filteredCertainPolylines, meshTopology.maxCertainCount, easeInOutCubic, ANIMATION_DURATION]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -730,11 +847,19 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         <FitBoundsOnce positions={allPositions} />
         
-        {/* Draw validated topology edges - gray, thickness indicates strength */}
-        {/* Only render when opacity > 0 (topology enabled and animating/visible) */}
-        {edgeOpacity > 0 && filteredCertainPolylines.map(({ from, to, edge }) => {
-          // All edges are neutral gray - thickness conveys strength
-          const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+        {/* Draw validated topology edges - animated trace effect */}
+        {showTopology && filteredCertainPolylines.map(({ from, to, edge }) => {
+          // Get animation progress for this edge (0 = not visible, 1 = fully drawn)
+          const traceProgress = edgeAnimProgress.get(edge.key) ?? 1;
+          
+          // Don't render edges that haven't started animating
+          if (traceProgress <= 0) return null;
+          
+          // Calculate target weight and animate if weight changed
+          const targetWeight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+          const prevWeight = prevWeightsRef.current.get(edge.key) ?? targetWeight;
+          const animatedWeight = prevWeight + (targetWeight - prevWeight) * weightAnimProgress;
+          
           const isLoopEdge = meshTopology.loopEdgeKeys.has(edge.key);
           
           // Calculate link quality percentage for tooltip
@@ -748,9 +873,19 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
           const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
           
+          // For trace animation: interpolate the "to" position based on progress
+          // This creates the "drawing" effect from point A to B
+          const animatedTo: [number, number] = [
+            from[0] + (to[0] - from[0]) * traceProgress,
+            from[1] + (to[1] - from[1]) * traceProgress,
+          ];
+          
+          // Opacity fades in with the trace
+          const opacity = Math.min(traceProgress * 1.5, 1) * 0.7;
+          
           // Loop edges: render as parallel double-lines in accent color
           if (isLoopEdge) {
-            const { line1, line2 } = getParallelOffsets(from, to, weight * 1.5);
+            const { line1, line2 } = getParallelOffsets(from, animatedTo, animatedWeight * 1.5);
             return (
               <span key={`loop-edge-${edge.key}`}>
                 {/* Double line for loop edge - indicates redundant path */}
@@ -758,8 +893,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   positions={line1}
                   pathOptions={{
                     color: DESIGN.loopEdgeColor,
-                    weight: Math.max(1.5, weight * 0.6),
-                    opacity: 0.9 * edgeOpacity,
+                    weight: Math.max(1.5, animatedWeight * 0.6),
+                    opacity: opacity * 1.3,
                     lineCap: 'round',
                     lineJoin: 'round',
                   }}
@@ -768,8 +903,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   positions={line2}
                   pathOptions={{
                     color: DESIGN.loopEdgeColor,
-                    weight: Math.max(1.5, weight * 0.6),
-                    opacity: 0.9 * edgeOpacity,
+                    weight: Math.max(1.5, animatedWeight * 0.6),
+                    opacity: opacity * 1.3,
                     lineCap: 'round',
                     lineJoin: 'round',
                   }}
@@ -795,15 +930,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             );
           }
           
-          // Standard edge: single gray line
+          // Standard edge: single gray line with trace animation
           return (
             <Polyline
               key={`edge-${edge.key}`}
-              positions={[from, to]}
+              positions={[from, animatedTo]}
               pathOptions={{
                 color: DESIGN.edgeColor,
-                weight,
-                opacity: edgeOpacity * 0.7, // Subtle, not overpowering
+                weight: animatedWeight,
+                opacity,
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
