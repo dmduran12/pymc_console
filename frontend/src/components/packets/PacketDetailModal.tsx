@@ -16,6 +16,7 @@ import { PacketDirection, getPacketStatusText, getPacketStatusColor } from './Pa
 import { PathMapVisualization } from './PathMapVisualization';
 import { useStats, usePackets } from '@/lib/stores/useStore';
 import { buildNeighborAffinity } from '@/lib/mesh-topology';
+import { buildPrefixLookup } from '@/lib/prefix-disambiguation';
 
 interface PacketDetailModalProps {
   packet: Packet;
@@ -114,6 +115,20 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
       stats?.local_hash
     );
   }, [packets, neighbors, stats?.config?.repeater?.latitude, stats?.config?.repeater?.longitude, stats?.local_hash]);
+  
+  // Build prefix disambiguation lookup for accurate confidence scoring
+  const prefixLookup = useMemo(() => {
+    if (!packets.length || !neighbors || Object.keys(neighbors).length === 0) {
+      return undefined;
+    }
+    return buildPrefixLookup(
+      packets,
+      neighbors,
+      stats?.local_hash,
+      stats?.config?.repeater?.latitude,
+      stats?.config?.repeater?.longitude
+    );
+  }, [packets, neighbors, stats?.local_hash, stats?.config?.repeater?.latitude, stats?.config?.repeater?.longitude]);
   
   const payloadDecoded = tryDecodePayload(packet.payload);
   const hasPayload = packet.payload && packet.payload.length > 0;
@@ -259,6 +274,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
                     localNode={localNode}
                     localHash={stats?.local_hash}
                     neighborAffinity={neighborAffinity}
+                    prefixLookup={prefixLookup}
                   />
                 </div>
               )}
