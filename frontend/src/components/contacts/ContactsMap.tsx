@@ -663,12 +663,18 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   }, [neighborsWithLocation, soloHubs, soloDirect, hubConnectedNodes, directNodeSet, showTopology, localConnectedNodes]);
   
   // ─── Edge Animation Effect (must be after filteredCertainPolylines) ───
+  // Track "snapshot" of weights at animation start for smooth interpolation
+  const animStartWeightsRef = useRef<Map<string, number>>(new Map());
+  const animTargetWeightsRef = useRef<Map<string, number>>(new Map());
+  
   useEffect(() => {
     if (!showTopology) {
       // When toggled off, reset animation state
       setEdgeAnimProgress(new Map());
       knownEdgesRef.current = new Set();
       lastEdgeSetRef.current = '';
+      animStartWeightsRef.current = new Map();
+      animTargetWeightsRef.current = new Map();
       return;
     }
     
@@ -695,12 +701,28 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         }
       }
       
-      // Store previous weights before updating (for thickness animation)
+      // CRITICAL: Capture current weights as "start" BEFORE we compute new targets
+      // This snapshot is what we interpolate FROM
       if (edgesChanged && existingEdgeKeys.length > 0) {
-        // Keep existing weights as "previous" for interpolation
-        // They're already in prevWeightsRef from last update
+        const startWeights = new Map<string, number>();
+        for (const key of existingEdgeKeys) {
+          // Use the previously stored weight (from last render cycle)
+          const prevWeight = prevWeightsRef.current.get(key);
+          if (prevWeight !== undefined) {
+            startWeights.set(key, prevWeight);
+          }
+        }
+        animStartWeightsRef.current = startWeights;
         setWeightAnimProgress(0);
       }
+      
+      // Compute and store target weights for all edges
+      const targetWeights = new Map<string, number>();
+      for (const { edge } of filteredCertainPolylines) {
+        const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+        targetWeights.set(edge.key, weight);
+      }
+      animTargetWeightsRef.current = targetWeights;
       
       // Initialize new edges at progress 0
       setEdgeAnimProgress(prev => {
@@ -751,7 +773,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       }
       
       // Animate weight growth for existing edges
-      if (edgesChanged) {
+      if (edgesChanged && existingEdgeKeys.length > 0) {
         let startTime: number | null = null;
         
         const animateWeight = (timestamp: number) => {
@@ -776,7 +798,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       }
     }
     
-    // Update current weights for next comparison
+    // Update prevWeightsRef with current computed weights (for NEXT update cycle)
     for (const { edge } of filteredCertainPolylines) {
       const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
       prevWeightsRef.current.set(edge.key, weight);
@@ -855,10 +877,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Don't render edges that haven't started animating
           if (traceProgress <= 0) return null;
           
-          // Calculate target weight and animate if weight changed
-          const targetWeight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
-          const prevWeight = prevWeightsRef.current.get(edge.key) ?? targetWeight;
-          const animatedWeight = prevWeight + (targetWeight - prevWeight) * weightAnimProgress;
+          // Calculate weight with smooth interpolation during weight animation
+          const targetWeight = animTargetWeightsRef.current.get(edge.key) 
+            ?? getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
+          const startWeight = animStartWeightsRef.current.get(edge.key) ?? targetWeight;
+          // Interpolate from start to target based on weight animation progress
+          const animatedWeight = startWeight + (targetWeight - startWeight) * weightAnimProgress;
           
           const isLoopEdge = meshTopology.loopEdgeKeys.has(edge.key);
           
