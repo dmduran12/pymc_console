@@ -116,8 +116,19 @@ export const useTopologyLastUpdated = () => useTopologyStoreBase((s) => s.lastUp
 // Computed selectors (derived data)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Hub node set for O(1) lookup */
-export const useHubNodeSet = () => useTopologyStoreBase((s) => new Set(s.topology.hubNodes));
+// Memoized hub node set - create once per hubNodes array reference
+let cachedHubNodeSet: Set<string> | null = null;
+let cachedHubNodesSource: string[] | null = null;
+
+/** Hub node set for O(1) lookup (memoized to prevent infinite re-renders) */
+export const useHubNodeSet = () => useTopologyStoreBase((s) => {
+  // Only create new Set if source array changed
+  if (s.topology.hubNodes !== cachedHubNodesSource) {
+    cachedHubNodesSource = s.topology.hubNodes;
+    cachedHubNodeSet = new Set(s.topology.hubNodes);
+  }
+  return cachedHubNodeSet!;
+});
 
 /** Edge count */
 export const useEdgeCount = () => useTopologyStoreBase((s) => s.topology.validatedEdges.length);
