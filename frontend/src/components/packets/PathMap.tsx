@@ -14,6 +14,10 @@ interface PathMapProps {
   localNode?: LocalNode;
   /** Hub node hashes for visual distinction */
   hubNodes?: string[];
+  /** Currently hovered hop index (for cross-highlighting with badges) */
+  hoveredHopIndex?: number | null;
+  /** Callback when hovering over a marker */
+  onHoverHop?: (index: number | null) => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -33,6 +37,10 @@ const DESIGN = {
   ambiguousColor: '#F9D26F', // Yellow - de-prioritized/ambiguous candidates
 };
 
+// Highlight color for hovered nodes
+const HIGHLIGHT_COLOR = '#B49DFF'; // Lavender accent
+const SOURCE_COLOR = '#39D98A';    // Green for source node
+
 /**
  * Create a simple ring/filled icon for path nodes.
  * No confidence stroke - disambiguation shown via color and opacity.
@@ -40,23 +48,37 @@ const DESIGN = {
  * @param isLocal - Whether this is the local node
  * @param isHub - Whether this is a hub node
  * @param isPrimary - Whether this is the primary (most likely) candidate
+ * @param isHighlighted - Whether this node is currently hovered
+ * @param isSource - Whether this is the packet source node
  */
 function createPathNodeIcon(
   isLocal: boolean,
   isHub: boolean,
-  isPrimary: boolean
+  isPrimary: boolean,
+  isHighlighted: boolean = false,
+  isSource: boolean = false
 ): L.DivIcon {
-  // Primary candidates use standard colors, secondary use yellow
-  const fillColor = isLocal 
-    ? DESIGN.localColor 
-    : isHub 
-      ? DESIGN.hubColor 
-      : isPrimary 
-        ? 'transparent' 
-        : DESIGN.ambiguousColor;
+  // Highlighted nodes get a ring around them
+  const highlightRing = isHighlighted 
+    ? `box-shadow: 0 0 0 3px ${HIGHLIGHT_COLOR}40, 0 0 8px ${HIGHLIGHT_COLOR}60;`
+    : '';
   
-  const borderColor = (isLocal || isHub || !isPrimary) ? 'transparent' : DESIGN.nodeColor;
-  const borderWidth = (isLocal || isHub || !isPrimary) ? 0 : RING_THICKNESS;
+  // Source nodes are green, others follow normal logic
+  let fillColor: string;
+  if (isSource) {
+    fillColor = SOURCE_COLOR;
+  } else if (isLocal) {
+    fillColor = DESIGN.localColor;
+  } else if (isHub) {
+    fillColor = DESIGN.hubColor;
+  } else if (isPrimary) {
+    fillColor = 'transparent';
+  } else {
+    fillColor = DESIGN.ambiguousColor;
+  }
+  
+  const borderColor = (isLocal || isHub || !isPrimary || isSource) ? 'transparent' : DESIGN.nodeColor;
+  const borderWidth = (isLocal || isHub || !isPrimary || isSource) ? 0 : RING_THICKNESS;
   
   return L.divIcon({
     className: 'path-node-marker',
@@ -67,6 +89,8 @@ function createPathNodeIcon(
       border-radius: 50%;
       border: ${borderWidth}px solid ${borderColor};
       box-sizing: border-box;
+      transition: box-shadow 0.15s ease;
+      ${highlightRing}
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -123,7 +147,13 @@ function PathLine({ positions }: { positions: [number, number][] }) {
  * PathMap component - renders the Leaflet map with path visualization
  * Styled to match ContactsMap (ring markers, subtle edges)
  */
-export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: PathMapProps) {
+export default function PathMap({ 
+  resolvedPath, 
+  localNode, 
+  hubNodes = [],
+  hoveredHopIndex,
+  onHoverHop,
+}: PathMapProps) {
   const hubSet = useMemo(() => new Set(hubNodes), [hubNodes]);
   
   // Build positions and markers from resolved path
@@ -138,6 +168,7 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
       candidate: PathCandidate;
       isHub: boolean;
       isPrimary: boolean;
+      isSource: boolean;
     }> = [];
     const pathLine: [number, number][] = [];
     
@@ -150,6 +181,9 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
       // For path line, use the most likely candidate
       const primaryCandidate = sortedCandidates[0];
       pathLine.push([primaryCandidate.latitude, primaryCandidate.longitude]);
+      
+      // Check if this is a source hop
+      const isSourceHop = 'isSource' in hop && hop.isSource === true;
       
       // Add markers for all candidates
       // Primary candidate (highest probability) gets full styling, others get yellow + low opacity
@@ -166,6 +200,7 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
           candidate,
           isHub: hubSet.has(candidate.hash),
           isPrimary,
+          isSource: isSourceHop,
         });
       });
     });
@@ -214,55 +249,71 @@ export default function PathMap({ resolvedPath, localNode, hubNodes = [] }: Path
       <PathLine positions={pathLine} />
       
       {/* Markers for each hop */}
-      {markers.map((marker) => (
-        <Marker
-          key={`${marker.hopIndex}-${marker.candidate.hash}`}
-          position={marker.position}
-          icon={createPathNodeIcon(
-            marker.candidate.isLocal || false,
-            marker.isHub,
-            marker.isPrimary
-          )}
-          opacity={marker.isPrimary ? 1 : 0.5} // Secondary candidates at 50% opacity
-        >
-          <Tooltip
-            permanent={false}
-            direction="top"
-            offset={[0, -12]}
+      {markers.map((marker) => {
+        const isHighlighted = hoveredHopIndex === marker.hopIndex;
+        
+        return (
+          <Marker
+            key={`${marker.hopIndex}-${marker.candidate.hash}`}
+            position={marker.position}
+            icon={createPathNodeIcon(
+              marker.candidate.isLocal || false,
+              marker.isHub,
+              marker.isPrimary,
+              isHighlighted,
+              marker.isSource
+            )}
+            opacity={marker.isPrimary ? 1 : 0.5}
+            eventHandlers={{
+              mouseover: () => onHoverHop?.(marker.hopIndex),
+              mouseout: () => onHoverHop?.(null),
+            }}
           >
-            <div className="text-xs">
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold">{marker.candidate.name}</span>
-                {marker.isHub && (
-                  <span 
-                    className="px-1 py-0.5 text-[8px] font-bold rounded"
-                    style={{ backgroundColor: '#FBBF24', color: '#000' }}
-                  >HUB</span>
+            <Tooltip
+              permanent={false}
+              direction="top"
+              offset={[0, -12]}
+            >
+              <div className="text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold">{marker.candidate.name}</span>
+                  {marker.isSource && (
+                    <span 
+                      className="px-1 py-0.5 text-[8px] font-bold rounded"
+                      style={{ backgroundColor: SOURCE_COLOR, color: '#000' }}
+                    >SRC</span>
+                  )}
+                  {marker.isHub && (
+                    <span 
+                      className="px-1 py-0.5 text-[8px] font-bold rounded"
+                      style={{ backgroundColor: '#FBBF24', color: '#000' }}
+                    >HUB</span>
+                  )}
+                  {marker.candidate.isLocal && (
+                    <span 
+                      className="px-1 py-0.5 text-[8px] font-bold rounded"
+                      style={{ backgroundColor: DESIGN.localColor, color: '#fff' }}
+                    >LOCAL</span>
+                  )}
+                </div>
+                <div className="text-text-muted font-mono text-[10px]">
+                  {marker.prefix} • {marker.candidate.hash.slice(0, 10)}...
+                </div>
+                {!marker.isPrimary && marker.candidateCount > 1 && (
+                  <div style={{ color: DESIGN.ambiguousColor }}>
+                    Alternative ({(marker.candidate.probability * 100).toFixed(0)}%)
+                  </div>
                 )}
-                {marker.candidate.isLocal && (
-                  <span 
-                    className="px-1 py-0.5 text-[8px] font-bold rounded"
-                    style={{ backgroundColor: DESIGN.localColor, color: '#fff' }}
-                  >LOCAL</span>
+                {marker.isPrimary && marker.candidateCount > 1 && (
+                  <div className="text-text-muted">
+                    {marker.candidateCount} candidates
+                  </div>
                 )}
               </div>
-              <div className="text-text-muted font-mono text-[10px]">
-                {marker.prefix} • {marker.candidate.hash.slice(0, 10)}...
-              </div>
-              {!marker.isPrimary && marker.candidateCount > 1 && (
-                <div style={{ color: DESIGN.ambiguousColor }}>
-                  Alternative ({(marker.candidate.probability * 100).toFixed(0)}%)
-                </div>
-              )}
-              {marker.isPrimary && marker.candidateCount > 1 && (
-                <div className="text-text-muted">
-                  {marker.candidateCount} candidates
-                </div>
-              )}
-            </div>
-          </Tooltip>
-        </Marker>
-      ))}
+            </Tooltip>
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }
