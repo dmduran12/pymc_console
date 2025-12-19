@@ -307,9 +307,19 @@ export function buildPrefixLookup(
   }
   
   // ─── Step 2: Analyze packets for position and co-occurrence data ─────────────
+  const localPrefix = localHash ? getHashPrefix(localHash) : null;
+  
   for (const packet of packets) {
-    const path = parsePath(packet);
+    let path = parsePath(packet);
     if (!path) continue;
+    
+    // Remove local node from path if present at the end
+    // The forwarded_path includes local (e.g., ["FA", "79", "24", "19"])
+    // We want position 1 to be the last forwarder, not local itself
+    if (localPrefix && path.length > 0 && path[path.length - 1] === localPrefix) {
+      path = path.slice(0, -1);
+    }
+    if (path.length === 0) continue;
     
     // Process each element in the path
     for (let i = 0; i < path.length; i++) {
