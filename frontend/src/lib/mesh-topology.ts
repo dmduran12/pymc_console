@@ -108,12 +108,17 @@ export interface TxDelayRecommendation {
   insufficientData?: boolean;
 }
 
+/** Minimum packets for weak edge (rendered underneath validated topology) */
+export const MIN_WEAK_EDGE_PACKETS = 5;
+
 /** Result of topology analysis */
 export interface MeshTopology {
   /** All edges with 3+ validations */
   edges: TopologyEdge[];
   /** Edges meeting validation threshold (for rendering) */
   validatedEdges: TopologyEdge[];
+  /** Weak edges: 5+ packets but below validation threshold (rendered underneath) */
+  weakEdges: TopologyEdge[];
   /** Legacy: certain edges (alias for validatedEdges) */
   certainEdges: TopologyEdge[];
   /** Legacy: uncertain edges (empty - we no longer render these) */
@@ -1155,12 +1160,16 @@ export function buildMeshTopology(
   }
   
   // Convert accumulators to edges
-  // Only include edges with MIN_EDGE_VALIDATIONS (3+) certain observations
+  // Only include edges with MIN_EDGE_VALIDATIONS (5+) certain observations
   const edges: TopologyEdge[] = [];
   const validatedEdges: TopologyEdge[] = [];
+  const weakEdges: TopologyEdge[] = [];
   let maxPacketCount = 0;
   let maxCertainCount = 0;
   const hubSet = new Set(hubNodes);
+  
+  // Build set of validated edge keys to avoid duplicates in weak edges
+  const validatedEdgeKeys = new Set<string>();
   
   for (const acc of accumulators.values()) {
     const avgConfidence = acc.confidenceSum / acc.count;
@@ -1170,7 +1179,7 @@ export function buildMeshTopology(
     // Check if either end is a hub node
     const isHubConnection = hubSet.has(acc.fromHash) || hubSet.has(acc.toHash);
     
-    // An edge meets the validation threshold if it has 3+ certain observations
+    // An edge meets the validation threshold if it has 5+ certain observations
     const meetsThreshold = acc.certainCount >= MIN_EDGE_VALIDATIONS;
     
     const edge: TopologyEdge = {
@@ -1188,9 +1197,17 @@ export function buildMeshTopology(
     
     edges.push(edge);
     
-    // Only include edges that meet the 3+ validation threshold
+    // Only include edges that meet the 5+ validation threshold
     if (meetsThreshold) {
       validatedEdges.push(edge);
+      validatedEdgeKeys.add(acc.key);
+    }
+  }
+  
+  // Build weak edges: 5+ packets but below validation threshold, excluding validated edges
+  for (const edge of edges) {
+    if (!validatedEdgeKeys.has(edge.key) && edge.packetCount >= MIN_WEAK_EDGE_PACKETS) {
+      weakEdges.push(edge);
     }
   }
   
@@ -1209,10 +1226,13 @@ export function buildMeshTopology(
     const bScore = b.certainCount + (b.isHubConnection ? 1000 : 0);
     return bScore - aScore;
   });
+  // Sort weak edges by packet count (weakest first for rendering order)
+  weakEdges.sort((a, b) => a.packetCount - b.packetCount);
   
   // Cap rendered edges for performance
   // Priority: Hub connections first, then by validation count (strong > moderate > weak)
   const cappedEdges = validatedEdges.slice(0, MAX_RENDERED_EDGES);
+  const cappedWeakEdges = weakEdges.slice(0, MAX_RENDERED_EDGES);
   
   // Build lookup map
   const edgeMap = new Map(edges.map(e => [e.key, e]));
@@ -1254,6 +1274,7 @@ export function buildMeshTopology(
   return { 
     edges, 
     validatedEdges: cappedEdges,
+    weakEdges: cappedWeakEdges,
     certainEdges: cappedEdges, // Legacy alias
     uncertainEdges: [], // No longer rendered
     edgeMap, 

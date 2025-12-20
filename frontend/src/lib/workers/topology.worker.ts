@@ -24,6 +24,7 @@ export interface TopologyWorkerRequest {
 export interface SerializedTopology {
   edges: MeshTopology['edges'];
   validatedEdges: MeshTopology['validatedEdges'];
+  weakEdges: MeshTopology['weakEdges'];
   certainEdges: MeshTopology['certainEdges'];
   uncertainEdges: MeshTopology['uncertainEdges'];
   maxPacketCount: number;
@@ -85,6 +86,7 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
     const serialized: SerializedTopology = {
       edges: topology.edges,
       validatedEdges: topology.validatedEdges,
+      weakEdges: topology.weakEdges,
       certainEdges: topology.certainEdges,
       uncertainEdges: topology.uncertainEdges,
       maxPacketCount: topology.maxPacketCount,

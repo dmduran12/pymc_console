@@ -26,6 +26,7 @@ function deserializeTopology(serialized: SerializedTopology): MeshTopology {
   return {
     edges: serialized.edges,
     validatedEdges: serialized.validatedEdges,
+    weakEdges: serialized.weakEdges ?? [],
     certainEdges: serialized.certainEdges,
     uncertainEdges: serialized.uncertainEdges,
     maxPacketCount: serialized.maxPacketCount,
@@ -47,6 +48,7 @@ function createEmptyTopology(): MeshTopology {
   return {
     edges: [],
     validatedEdges: [],
+    weakEdges: [],
     certainEdges: [],
     uncertainEdges: [],
     edgeMap: new Map(),

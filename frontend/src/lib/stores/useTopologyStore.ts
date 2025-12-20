@@ -30,6 +30,7 @@ function createEmptyTopology(): MeshTopology {
   return {
     edges: [],
     validatedEdges: [],
+    weakEdges: [],
     certainEdges: [],
     uncertainEdges: [],
     edgeMap: new Map(),
@@ -85,6 +86,9 @@ export const useValidatedEdges = () => useTopologyStoreBase((s) => s.topology.va
 
 /** All edges (including unvalidated) */
 export const useAllEdges = () => useTopologyStoreBase((s) => s.topology.edges);
+
+/** Weak edges (5+ packets but below validation threshold) */
+export const useWeakEdges = () => useTopologyStoreBase((s) => s.topology.weakEdges);
 
 /** Hub node hashes */
 export const useHubNodes = () => useTopologyStoreBase((s) => s.topology.hubNodes);
