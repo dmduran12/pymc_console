@@ -84,9 +84,12 @@ export const CERTAINTY_CONFIDENCE_THRESHOLD = 0.6;
 /** Maximum edges to render (performance cap) */
 export const MAX_RENDERED_EDGES = 100;
 
+/** Minimum edge packet count required for TX delay recommendations */
+export const MIN_PACKETS_FOR_TX_DELAY = 100;
+
 /**
  * Recommended TX delay settings for a node based on traffic analysis.
- * Used to suggest optimal tx_delay_factor and direct.tx_delay_factor for hub nodes.
+ * Used to suggest optimal tx_delay_factor and direct.tx_delay_factor.
  */
 export interface TxDelayRecommendation {
   /** Recommended tx_delay_factor (0.5-1.5, higher = more conservative) */
@@ -101,6 +104,8 @@ export interface TxDelayRecommendation {
   collisionRisk: number;
   /** Confidence in recommendation (0-1, based on sample size) */
   confidence: number;
+  /** True if insufficient data (<100 packets) to make recommendation */
+  insufficientData?: boolean;
 }
 
 /** Result of topology analysis */
@@ -133,7 +138,7 @@ export interface MeshTopology {
   loops: NetworkLoop[];
   /** Set of edge keys that are part of at least one loop */
   loopEdgeKeys: Set<string>;
-  /** TX delay recommendations for hub nodes (hash -> recommendation) */
+  /** TX delay recommendations for all nodes with sufficient data (hash -> recommendation) */
   txDelayRecommendations: Map<string, TxDelayRecommendation>;
 }
 
@@ -666,33 +671,36 @@ export function findNetworkLoops(
 }
 
 /**
- * Calculate TX delay recommendations for hub nodes based on their unique network position.
+ * Calculate TX delay recommendations for all nodes based on their unique network position.
  * 
- * The algorithm analyzes each hub's unique situation:
- * - Edge packet count (total packets flowing through edges connected to this hub)
- * - Number of direct neighbors (topology edges connected to this hub)
- * - Raw centrality score (bridge count / path count, un-normalized)
- * - Edge validation strength (how well-validated the hub's connections are)
+ * The algorithm analyzes each node's unique situation:
+ * - Edge packet count (total packets flowing through edges connected to this node)
+ * - Number of direct neighbors (topology edges connected to this node)
+ * - Edge validation strength (how well-validated the node's connections are)
  * 
- * Each hub gets a different recommendation based on its actual traffic load and
- * connectivity, NOT normalized values that make all hubs look similar.
+ * Nodes with <100 packets get an "insufficient data" result.
  * 
- * @param hubHashes - Array of hub node hashes
  * @param edges - All topology edges
  * @param nodePathCounts - Map of node hash -> number of paths it appeared in
  * @param packets - All packets for timing analysis
- * @returns Map of hub hash -> TxDelayRecommendation
+ * @returns Map of node hash -> TxDelayRecommendation
  */
 function calculateNodeTxDelays(
-  hubHashes: string[],
   edges: TopologyEdge[],
   nodePathCounts: Map<string, number>,
   packets: Packet[]
 ): Map<string, TxDelayRecommendation> {
   const recommendations = new Map<string, TxDelayRecommendation>();
   
-  if (hubHashes.length === 0 || packets.length === 0) {
+  if (edges.length === 0 || packets.length === 0) {
     return recommendations;
+  }
+  
+  // Collect all unique node hashes from edges
+  const allNodes = new Set<string>();
+  for (const edge of edges) {
+    allNodes.add(edge.fromHash);
+    allNodes.add(edge.toHash);
   }
   
   // Calculate time span of packet data (for packets/minute calculation)
@@ -705,24 +713,24 @@ function calculateNodeTxDelays(
     ? (timestamps[timestamps.length - 1] - timestamps[0]) / 60
     : 1;
   
-  // Pre-compute per-hub metrics that will actually differ between hubs
-  const hubMetrics = new Map<string, {
-    edgePacketCount: number;      // Total packets on edges touching this hub
+  // Pre-compute per-node metrics
+  const nodeMetrics = new Map<string, {
+    edgePacketCount: number;      // Total packets on edges touching this node
     directNeighborCount: number;  // Count of unique neighbors from edges
     avgEdgeValidation: number;    // Average certainCount of connected edges
     maxEdgeValidation: number;    // Max certainCount of connected edges
-    pathCount: number;            // Paths this hub appeared in
+    pathCount: number;            // Paths this node appeared in
   }>();
   
-  // Find max values across all hubs for relative comparison
+  // Find max values across all nodes for relative comparison
   let maxEdgePacketCount = 0;
   let maxPathCount = 0;
   let maxNeighborCount = 0;
   
-  for (const hubHash of hubHashes) {
-    // Find all edges connected to this hub
+  for (const nodeHash of allNodes) {
+    // Find all edges connected to this node
     const connectedEdges = edges.filter(
-      e => e.fromHash === hubHash || e.toHash === hubHash
+      e => e.fromHash === nodeHash || e.toHash === nodeHash
     );
     
     // Count unique neighbors from edges
@@ -732,7 +740,7 @@ function calculateNodeTxDelays(
     let maxCertain = 0;
     
     for (const edge of connectedEdges) {
-      const otherHash = edge.fromHash === hubHash ? edge.toHash : edge.fromHash;
+      const otherHash = edge.fromHash === nodeHash ? edge.toHash : edge.fromHash;
       neighborHashes.add(otherHash);
       totalPacketCount += edge.packetCount;
       totalCertainCount += edge.certainCount;
@@ -743,9 +751,9 @@ function calculateNodeTxDelays(
     const avgValidation = connectedEdges.length > 0 
       ? totalCertainCount / connectedEdges.length 
       : 0;
-    const pathCount = nodePathCounts.get(hubHash) || 0;
+    const pathCount = nodePathCounts.get(nodeHash) || 0;
     
-    hubMetrics.set(hubHash, {
+    nodeMetrics.set(nodeHash, {
       edgePacketCount: totalPacketCount,
       directNeighborCount,
       avgEdgeValidation: avgValidation,
@@ -753,24 +761,38 @@ function calculateNodeTxDelays(
       pathCount,
     });
     
-    // Track maximums
-    maxEdgePacketCount = Math.max(maxEdgePacketCount, totalPacketCount);
-    maxPathCount = Math.max(maxPathCount, pathCount);
-    maxNeighborCount = Math.max(maxNeighborCount, directNeighborCount);
+    // Track maximums (only from nodes with sufficient data)
+    if (totalPacketCount >= MIN_PACKETS_FOR_TX_DELAY) {
+      maxEdgePacketCount = Math.max(maxEdgePacketCount, totalPacketCount);
+      maxPathCount = Math.max(maxPathCount, pathCount);
+      maxNeighborCount = Math.max(maxNeighborCount, directNeighborCount);
+    }
   }
   
-  // Now calculate recommendations with metrics that differ per-hub
-  for (const hubHash of hubHashes) {
-    const metrics = hubMetrics.get(hubHash)!;
+  // Now calculate recommendations for all nodes
+  for (const nodeHash of allNodes) {
+    const metrics = nodeMetrics.get(nodeHash)!;
     
-    // Traffic intensity: this hub's edge packets / minute
-    // This WILL differ between hubs based on their actual traffic
+    // Check if insufficient data
+    if (metrics.edgePacketCount < MIN_PACKETS_FOR_TX_DELAY) {
+      recommendations.set(nodeHash, {
+        txDelayFactor: 0,
+        directTxDelayFactor: 0,
+        trafficIntensity: 0,
+        directNeighborCount: metrics.directNeighborCount,
+        collisionRisk: 0,
+        confidence: 0,
+        insufficientData: true,
+      });
+      continue;
+    }
+    
+    // Traffic intensity: this node's edge packets / minute
     const trafficIntensity = timeSpanMinutes > 0 
       ? metrics.edgePacketCount / timeSpanMinutes 
       : 0;
     
-    // Relative load factors (0-1, relative to busiest hub)
-    // These create differentiation between hubs
+    // Relative load factors (0-1, relative to busiest node with sufficient data)
     const relativeTraffic = maxEdgePacketCount > 0 
       ? metrics.edgePacketCount / maxEdgePacketCount 
       : 0;
@@ -781,7 +803,7 @@ function calculateNodeTxDelays(
       ? metrics.pathCount / maxPathCount 
       : 0;
     
-    // Collision risk based on this hub's actual metrics
+    // Collision risk based on this node's actual metrics
     // Weight: neighbors (40%), traffic (35%), path centrality (25%)
     const collisionRisk = (
       relativeNeighbors * 0.40 + 
@@ -795,7 +817,6 @@ function calculateNodeTxDelays(
     let txDelayFactor = 0.7 + (collisionRisk * 0.6);
     
     // Additional adjustment for absolute neighbor count
-    // High absolute counts need more delay regardless of relative position
     if (metrics.directNeighborCount >= 8) {
       txDelayFactor += 0.15;
     } else if (metrics.directNeighborCount >= 5) {
@@ -811,19 +832,19 @@ function calculateNodeTxDelays(
     // Direct TX delay is typically 30-40% of flood delay
     const directTxDelayFactor = Math.round(txDelayFactor * 0.35 * 100) / 100;
     
-    // Confidence based on edge validation strength for THIS hub
-    // Well-validated edges = more confident recommendation
+    // Confidence based on edge validation strength for THIS node
     const validationConfidence = Math.min(metrics.avgEdgeValidation / 10, 1);
     const sampleConfidence = Math.min(packets.length / 500, 1);
     const confidence = Math.round((validationConfidence * 0.6 + sampleConfidence * 0.4) * 100) / 100;
     
-    recommendations.set(hubHash, {
+    recommendations.set(nodeHash, {
       txDelayFactor,
       directTxDelayFactor,
       trafficIntensity: Math.round(trafficIntensity * 10) / 10,
       directNeighborCount: metrics.directNeighborCount,
       collisionRisk: Math.round(collisionRisk * 100) / 100,
       confidence,
+      insufficientData: false,
     });
   }
   
@@ -1216,10 +1237,9 @@ export function buildMeshTopology(
     })));
   }
   
-  // === TX DELAY RECOMMENDATIONS FOR HUB NODES ===
-  // Calculate recommended tx_delay and direct.tx_delay settings for hub nodes
+  // === TX DELAY RECOMMENDATIONS FOR ALL NODES ===
+  // Calculate recommended tx_delay and direct.tx_delay for all nodes with sufficient data
   const txDelayRecommendations = calculateNodeTxDelays(
-    hubNodes,
     edges,
     nodePathCounts,
     sortedPackets
@@ -1227,16 +1247,8 @@ export function buildMeshTopology(
   
   // Log tx delay recommendations in development
   if (process.env.NODE_ENV === 'development' && txDelayRecommendations.size > 0) {
-    console.log(`[mesh-topology] TX delay recommendations for ${txDelayRecommendations.size} hubs:`,
-      [...txDelayRecommendations.entries()].map(([hash, rec]) => ({
-        hash: hash.slice(0, 10),
-        txDelay: rec.txDelayFactor,
-        directDelay: rec.directTxDelayFactor,
-        traffic: `${rec.trafficIntensity}/min`,
-        neighbors: rec.directNeighborCount,
-        risk: rec.collisionRisk,
-      }))
-    );
+    const withData = [...txDelayRecommendations.values()].filter(r => !r.insufficientData).length;
+    console.log(`[mesh-topology] TX delay recommendations: ${withData} nodes with data, ${txDelayRecommendations.size - withData} insufficient`);
   }
   
   return { 
