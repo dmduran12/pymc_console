@@ -166,6 +166,8 @@ interface ContactsMapProps {
   localNode?: LocalNode;
   localHash?: string;  // Local node's hash for zero-hop detection
   onRemoveNode?: (hash: string) => void;
+  selectedNodeHash?: string | null;  // Hash of node to zoom to and open popup
+  onNodeSelected?: () => void;  // Callback when selection is handled
 }
 
 // Legacy signal colors (kept for popup display)
@@ -372,9 +374,9 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
   
   return (
     <div className="min-w-[200px]">
-      {/* === ROW 1: Name + Badges === */}
+      {/* === ROW 1: Name + Badges + Remove === */}
       <div className="flex items-center gap-1.5 mb-1">
-        <span className="text-[14px] font-semibold text-text-primary truncate">{name}</span>
+        <span className="text-[14px] font-semibold text-text-primary truncate flex-1">{name}</span>
         {isHub && (
           <span className="px-1 py-0.5 text-[7px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
         )}
@@ -388,6 +390,15 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
           >
             {hopLabel}
           </span>
+        )}
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            className="p-0.5 text-text-muted/40 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            title="Remove node"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         )}
       </div>
       
@@ -476,23 +487,12 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
         </div>
       )}
       
-      {/* === REPEATER BADGE + REMOVE === */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {neighbor.is_repeater && (
-            <span className="text-[8px] uppercase px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-400">Repeater</span>
-          )}
+      {/* === REPEATER BADGE === */}
+      {neighbor.is_repeater && (
+        <div className="flex items-center">
+          <span className="text-[8px] uppercase px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-400">Repeater</span>
         </div>
-        {onRemove && (
-          <button
-            onClick={onRemove}
-            className="flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] text-red-400/70 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
-          >
-            <X className="w-2.5 h-2.5" />
-            Remove
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -521,7 +521,45 @@ function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
-export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode }: ContactsMapProps) {
+// Component to zoom to a specific node and open its popup
+function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: { 
+  targetHash: string | null; 
+  nodeCoordinates: Map<string, [number, number]>;
+  onComplete?: () => void;
+}) {
+  const map = useMap();
+  const processedRef = useRef<string | null>(null);
+  
+  useEffect(() => {
+    if (!targetHash || targetHash === processedRef.current) return;
+    
+    const coords = nodeCoordinates.get(targetHash);
+    if (!coords) return;
+    
+    processedRef.current = targetHash;
+    
+    // Zoom to node with animation
+    map.flyTo(coords, 15, { duration: 0.5 });
+    
+    // After zoom completes, open the popup
+    setTimeout(() => {
+      // Find the marker layer and open its popup
+      map.eachLayer((layer) => {
+        if (layer instanceof L.Marker) {
+          const pos = layer.getLatLng();
+          if (Math.abs(pos.lat - coords[0]) < 0.0001 && Math.abs(pos.lng - coords[1]) < 0.0001) {
+            layer.openPopup();
+          }
+        }
+      });
+      onComplete?.();
+    }, 600);
+  }, [targetHash, nodeCoordinates, map, onComplete]);
+  
+  return null;
+}
+
+export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected }: ContactsMapProps) {
   // Track hover state per marker (setHoveredMarker used for events, hoveredMarker reserved for future use)
   const [, setHoveredMarker] = useState<string | null>(null);
   
@@ -1314,6 +1352,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         />
         
         <FitBoundsOnce positions={allPositions} />
+        <ZoomToNode targetHash={selectedNodeHash || null} nodeCoordinates={nodeCoordinates} onComplete={onNodeSelected} />
         
         {/* Draw validated topology edges - animated trace effect */}
         {(showTopology || isExiting) && filteredCertainPolylines.map(({ from, to, edge }) => {

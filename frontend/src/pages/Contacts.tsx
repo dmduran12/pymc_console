@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
-import { useHubNodes } from '@/lib/stores/useTopologyStore';
-import { Signal, Radio, MapPin, Repeat, Users, X, Network } from 'lucide-react';
+import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
+import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
@@ -17,14 +17,45 @@ function getSignalColor(snr?: number): string {
   return 'bg-[var(--signal-critical)]';
 }
 
+// Calculate distance between two coordinates in meters using Haversine formula
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Format distance for display
+function formatDistance(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters)}m`;
+  return `${(meters / 1000).toFixed(1)}km`;
+}
+
+// Sort options
+type SortField = 'lastHeard' | 'distance' | 'centrality';
+type SortDirection = 'asc' | 'desc';
+
 export default function Contacts() {
   const { stats } = useStore();
   const hiddenContacts = useHiddenContacts();
   const hideContact = useHideContact();
   const hubNodes = useHubNodes();
+  const centrality = useCentrality();
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
+  
+  // Sort state
+  const [sortField, setSortField] = useState<SortField>('lastHeard');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  
+  // Selected node for zoom-to-map
+  const [selectedNodeHash, setSelectedNodeHash] = useState<string | null>(null);
   
   const contacts = stats?.neighbors ?? {};
   
@@ -34,8 +65,6 @@ export default function Contacts() {
       Object.entries(contacts).filter(([hash]) => !hiddenContacts.has(hash))
     );
   }, [contacts, hiddenContacts]);
-  
-  const contactEntries = Object.entries(visibleContacts);
   
   // Get local node info from config
   const localNode = stats?.config?.repeater ? {
@@ -47,13 +76,87 @@ export default function Contacts() {
   // Get local hash for zero-hop detection
   const localHash = stats?.local_hash;
   
+  // Calculate distances for all contacts
+  const contactDistances = useMemo(() => {
+    const distances = new Map<string, number | null>();
+    if (!localNode?.latitude || !localNode?.longitude) return distances;
+    
+    for (const [hash, contact] of Object.entries(visibleContacts)) {
+      if (contact.latitude && contact.longitude && contact.latitude !== 0 && contact.longitude !== 0) {
+        distances.set(hash, calculateDistance(
+          localNode.latitude, localNode.longitude,
+          contact.latitude, contact.longitude
+        ));
+      } else {
+        distances.set(hash, null);
+      }
+    }
+    return distances;
+  }, [visibleContacts, localNode]);
+  
+  // Sort contacts based on current sort field and direction
+  const sortedContacts = useMemo(() => {
+    const entries = Object.entries(visibleContacts);
+    
+    return entries.sort(([hashA, contactA], [hashB, contactB]) => {
+      let comparison = 0;
+      
+      switch (sortField) {
+        case 'lastHeard':
+          comparison = (contactA.last_seen || 0) - (contactB.last_seen || 0);
+          break;
+        case 'distance':
+          const distA = contactDistances.get(hashA) ?? null;
+          const distB = contactDistances.get(hashB) ?? null;
+          // Null/undefined distances go to the end
+          if (distA === null && distB === null) comparison = 0;
+          else if (distA === null) comparison = 1;
+          else if (distB === null) comparison = -1;
+          else comparison = distA - distB;
+          break;
+        case 'centrality':
+          const centA = centrality.get(hashA) || 0;
+          const centB = centrality.get(hashB) || 0;
+          comparison = centA - centB;
+          break;
+      }
+      
+      return sortDirection === 'desc' ? -comparison : comparison;
+    });
+  }, [visibleContacts, sortField, sortDirection, contactDistances, centrality]);
+  
   // Count contacts with location data
-  const contactsWithLocation = contactEntries.filter(
+  const contactsWithLocation = sortedContacts.filter(
     ([, n]) => n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0
   ).length;
   
   // Hub nodes from topology store (computed by worker)
   const hubNodeSet = useMemo(() => new Set(hubNodes), [hubNodes]);
+  
+  // Handle sort button click
+  const handleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction
+      setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc');
+    } else {
+      // Switch field, default to desc
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  }, [sortField]);
+  
+  // Handle node row click
+  const handleNodeClick = useCallback((hash: string) => {
+    const contact = visibleContacts[hash];
+    if (contact?.latitude && contact?.longitude && contact.latitude !== 0 && contact.longitude !== 0) {
+      setSelectedNodeHash(hash);
+    }
+  }, [visibleContacts]);
+  
+  // Clear selection after map zooms
+  const handleNodeSelected = useCallback(() => {
+    setSelectedNodeHash(null);
+  }, []);
 
   return (
     <div className="section-gap">
@@ -64,7 +167,7 @@ export default function Contacts() {
           Contacts
         </h1>
         <div className="flex items-baseline gap-3 sm:gap-4">
-          <span className="roster-title tabular-nums">{contactEntries.length} node{contactEntries.length !== 1 ? 's' : ''}</span>
+          <span className="roster-title tabular-nums">{sortedContacts.length} node{sortedContacts.length !== 1 ? 's' : ''}</span>
           {contactsWithLocation > 0 && (
             <span className="roster-title flex items-baseline gap-1.5 tabular-nums">
               <MapPin className="w-3.5 h-3.5 relative top-[2px]" />
@@ -81,6 +184,8 @@ export default function Contacts() {
           localNode={localNode}
           localHash={localHash}
           onRemoveNode={hideContact}
+          selectedNodeHash={selectedNodeHash}
+          onNodeSelected={handleNodeSelected}
         />
       </div>
 
@@ -91,22 +196,73 @@ export default function Contacts() {
             <Users className="chart-title-icon" />
             Discovered Nodes
           </div>
-          <span className="type-data-xs text-text-muted tabular-nums">
-            {contactEntries.length} total
-          </span>
+          
+          {/* Sort controls */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handleSort('lastHeard')}
+              className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
+                sortField === 'lastHeard' 
+                  ? 'bg-accent-primary/20 text-accent-primary' 
+                  : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+              }`}
+              title="Sort by last heard"
+            >
+              <Clock className="w-3 h-3" />
+              <span className="hidden sm:inline">Recent</span>
+              {sortField === 'lastHeard' && (
+                <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+              )}
+            </button>
+            <button
+              onClick={() => handleSort('distance')}
+              className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
+                sortField === 'distance' 
+                  ? 'bg-accent-primary/20 text-accent-primary' 
+                  : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+              }`}
+              title="Sort by distance"
+            >
+              <Ruler className="w-3 h-3" />
+              <span className="hidden sm:inline">Distance</span>
+              {sortField === 'distance' && (
+                <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+              )}
+            </button>
+            <button
+              onClick={() => handleSort('centrality')}
+              className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
+                sortField === 'centrality' 
+                  ? 'bg-accent-primary/20 text-accent-primary' 
+                  : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+              }`}
+              title="Sort by network centrality"
+            >
+              <Activity className="w-3 h-3" />
+              <span className="hidden sm:inline">Centrality</span>
+              {sortField === 'centrality' && (
+                <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+              )}
+            </button>
+          </div>
         </div>
         
-        {contactEntries.length > 0 ? (
+        {sortedContacts.length > 0 ? (
           <div className="roster-list">
-            {contactEntries.map(([hash, contact], index) => {
+            {sortedContacts.map(([hash, contact], index) => {
               const hasLocation = contact.latitude && contact.longitude && 
                                   contact.latitude !== 0 && contact.longitude !== 0;
               const displayName = contact.node_name || contact.name || 'Unknown';
               const isHub = hubNodeSet.has(hash);
+              const distance = contactDistances.get(hash);
+              const nodeCentrality = centrality.get(hash) || 0;
               
               return (
                 <div key={hash}>
-                  <div className={`roster-row ${isHub ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''}`}>
+                  <div 
+                    className={`roster-row ${isHub ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${hasLocation ? 'cursor-pointer hover:bg-white/[0.02]' : ''}`}
+                    onClick={() => handleNodeClick(hash)}
+                  >
                     {/* Icon with signal indicator */}
                     <div className="relative">
                       <div className="roster-icon">
@@ -149,8 +305,17 @@ export default function Contacts() {
                           <span className="type-data-xs tabular-nums">{contact.snr.toFixed(1)} dB</span>
                         </div>
                       )}
-                      {hasLocation && (
-                        <MapPin className="w-3.5 h-3.5 text-accent-tertiary" />
+                      {distance !== null && distance !== undefined && (
+                        <div className="flex items-center gap-1 text-accent-tertiary">
+                          <Ruler className="w-3 h-3" />
+                          <span className="type-data-xs tabular-nums">{formatDistance(distance)}</span>
+                        </div>
+                      )}
+                      {nodeCentrality > 0 && (
+                        <div className="flex items-center gap-1 text-amber-400/70">
+                          <Activity className="w-3 h-3" />
+                          <span className="type-data-xs tabular-nums">{(nodeCentrality * 100).toFixed(0)}%</span>
+                        </div>
                       )}
                     </div>
                     
@@ -161,7 +326,10 @@ export default function Contacts() {
                     
                     {/* Remove button */}
                     <button
-                      onClick={() => setPendingRemove({ hash, name: displayName })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingRemove({ hash, name: displayName });
+                      }}
                       className="ml-2 p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
                       title="Remove node"
                     >
@@ -170,7 +338,7 @@ export default function Contacts() {
                   </div>
                   
                   {/* Separator between rows */}
-                  {index < contactEntries.length - 1 && (
+                  {index < sortedContacts.length - 1 && (
                     <div className="roster-separator" />
                   )}
                 </div>
