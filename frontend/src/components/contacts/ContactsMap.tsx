@@ -51,7 +51,6 @@ function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1): 
       border: ${RING_THICKNESS}px solid ${color};
       box-sizing: border-box;
       opacity: ${opacity};
-      transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1);
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -75,7 +74,6 @@ function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1):
       border-radius: 50%;
       box-sizing: border-box;
       opacity: ${opacity};
-      transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1);
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -316,6 +314,16 @@ function LegendTooltip({ text }: { text: string }) {
   );
 }
 
+// TX delay recommendation type (imported from topology)
+interface TxDelayRec {
+  txDelayFactor: number;
+  directTxDelayFactor: number;
+  trafficIntensity: number;
+  directNeighborCount: number;
+  collisionRisk: number;
+  confidence: number;
+}
+
 // Compact node popup content
 interface NodePopupContentProps {
   hash: string;
@@ -328,9 +336,10 @@ interface NodePopupContentProps {
   meanSnr?: number;
   neighbor: NeighborInfo;
   onRemove?: () => void;
+  txDelayRec?: TxDelayRec;
 }
 
-function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality, affinity, meanSnr, neighbor, onRemove }: NodePopupContentProps) {
+function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
   const [copied, setCopied] = useState(false);
   
   const copyHash = () => {
@@ -382,6 +391,23 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
       {isHub && centrality > 0 && (
         <div className="text-text-secondary text-xs mb-1">
           <strong style={{ color: '#FBBF24' }}>Hub ({(centrality * 100).toFixed(0)}% centrality)</strong>
+        </div>
+      )}
+      
+      {/* TX Delay Recommendations for Hub nodes */}
+      {isHub && txDelayRec && (
+        <div className="mt-2 pt-2 border-t border-white/10">
+          <div className="text-[10px] text-text-muted mb-1 font-medium">Recommended TX Delays</div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+            <div className="text-text-secondary">tx_delay: <strong className="text-amber-400">{txDelayRec.txDelayFactor.toFixed(2)}</strong></div>
+            <div className="text-text-secondary">direct: <strong className="text-amber-400">{txDelayRec.directTxDelayFactor.toFixed(2)}</strong></div>
+          </div>
+          <div className="mt-1 text-[10px] text-text-muted">
+            {txDelayRec.trafficIntensity.toFixed(1)} pkt/min · {txDelayRec.directNeighborCount} neighbors
+            {txDelayRec.confidence < 0.5 && (
+              <span className="text-accent-warning"> · low confidence</span>
+            )}
+          </div>
         </div>
       )}
       
@@ -881,6 +907,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     // Build animation targets - only for nodes whose visibility actually changed
     const animationTargets: Array<{ hash: string; startOpacity: number; targetOpacity: number }> = [];
     
+    console.log('[ContactsMap] Animation effect triggered:', {
+      wasDirectMode, wasHubsMode, isDirectMode, isHubsMode,
+      hubConnectedSize: hubConnected.size,
+      directNodesSize: directNodes.size,
+      neighborsCount: allNeighborHashes.length,
+    });
+    
     for (const hash of allNeighborHashes) {
       const wasVisible = isVisibleInMode(hash, wasDirectMode, wasHubsMode);
       const nowVisible = isVisibleInMode(hash, isDirectMode, isHubsMode);
@@ -894,6 +927,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         });
       }
     }
+    
+    console.log('[ContactsMap] Animation targets:', animationTargets.length, 'nodes to animate');
     
     if (animationTargets.length === 0) return;
     
@@ -1401,13 +1436,21 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Icon selection with opacity:
           // - Hubs: filled dot (indicates importance)
           // - All other nodes: ring/torus (elegant, minimal)
+          // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
+          const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
           const icon = isHub 
-            ? createFilledIcon(DESIGN.hubColor, nodeOpacity) 
-            : createRingIcon(DESIGN.nodeColor, nodeOpacity);
+            ? createFilledIcon(DESIGN.hubColor, quantizedOpacity) 
+            : createRingIcon(DESIGN.nodeColor, quantizedOpacity);
+          
+          // Use quantized opacity in key to force icon update when opacity bucket changes
+          const opacityKey = Math.round(quantizedOpacity * 20);
+          
+          // Get TX delay recommendation for hub nodes
+          const txDelayRec = isHub ? meshTopology.txDelayRecommendations.get(hash) : undefined;
           
           return (
             <Marker
-              key={hash}
+              key={`${hash}-${opacityKey}`}
               position={[neighbor.latitude, neighbor.longitude]}
               icon={icon}
               eventHandlers={{
@@ -1426,6 +1469,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   affinity={affinity}
                   meanSnr={meanSnr}
                   neighbor={neighbor}
+                  txDelayRec={txDelayRec}
                   onRemove={onRemoveNode ? () => setPendingRemove({ hash, name }) : undefined}
                 />
               </Popup>
