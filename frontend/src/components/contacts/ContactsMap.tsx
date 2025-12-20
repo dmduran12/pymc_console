@@ -325,7 +325,16 @@ interface TxDelayRec {
   insufficientData?: boolean;
 }
 
-// Node popup content with refined typography
+// Full affinity data from topology
+interface FullAffinity {
+  frequency: number;
+  directForwardCount: number;
+  typicalHopPosition: number;
+  distanceMeters: number | null;
+  hopPositionCounts: number[];
+}
+
+// Node popup content - compact, information-rich
 interface NodePopupContentProps {
   hash: string;
   hashPrefix: string;
@@ -333,11 +342,18 @@ interface NodePopupContentProps {
   isHub: boolean;
   isZeroHop: boolean;
   centrality: number;
-  affinity?: { frequency: number; directForwardCount: number; typicalHopPosition: number };
+  affinity?: FullAffinity;
   meanSnr?: number;
   neighbor: NeighborInfo;
   onRemove?: () => void;
   txDelayRec?: TxDelayRec;
+}
+
+// Format distance for display
+function formatDistance(meters: number | null): string {
+  if (meters === null) return '—';
+  if (meters < 1000) return `${Math.round(meters)}m`;
+  return `${(meters / 1000).toFixed(1)}km`;
 }
 
 function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
@@ -349,137 +365,130 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
     setTimeout(() => setCopied(false), 1500);
   };
   
+  // Determine hop label
+  const hopLabel = isZeroHop ? 'Direct' 
+    : affinity?.typicalHopPosition ? `${affinity.typicalHopPosition}-hop` 
+    : null;
+  
   return (
-    <div className="min-w-[180px] max-w-[240px]">
-      {/* === HEADER: Name + Role Badge === */}
-      <div className="flex items-center gap-2">
-        <h3 className="text-[15px] font-semibold text-text-primary leading-tight tracking-tight truncate">
-          {name}
-        </h3>
+    <div className="min-w-[200px]">
+      {/* === ROW 1: Name + Badges === */}
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="text-[14px] font-semibold text-text-primary truncate">{name}</span>
         {isHub && (
-          <span 
-            className="shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded"
-            style={{ backgroundColor: '#FBBF24', color: '#000' }}
-          >
-            Hub
-          </span>
+          <span className="px-1 py-0.5 text-[7px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
         )}
-        {isZeroHop && !isHub && (
+        {hopLabel && (
           <span 
-            className="shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded"
-            style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}
+            className="px-1 py-0.5 text-[7px] font-bold uppercase rounded"
+            style={{ 
+              backgroundColor: isZeroHop ? SIGNAL_COLORS.zeroHop : 'rgba(255,255,255,0.1)', 
+              color: isZeroHop ? '#fff' : 'rgba(255,255,255,0.6)' 
+            }}
           >
-            Direct
+            {hopLabel}
           </span>
         )}
       </div>
       
-      {/* === SUBHEADER: Hash + Actions === */}
-      <div className="flex items-center gap-2 mt-1">
-        <code className="text-[11px] text-text-muted font-mono bg-white/5 px-1.5 py-0.5 rounded">
-          {hashPrefix}
-        </code>
-        <button
-          onClick={copyHash}
-          className="p-0.5 hover:bg-white/10 rounded transition-colors"
-          title="Copy full hash"
-        >
-          {copied 
-            ? <Check className="w-3 h-3 text-accent-success" /> 
-            : <Copy className="w-3 h-3 text-text-muted hover:text-text-secondary" />
-          }
+      {/* === ROW 2: Hash + Copy + Quick Stats === */}
+      <div className="flex items-center gap-1.5 text-[10px] text-text-muted mb-2">
+        <code className="font-mono bg-white/5 px-1 py-0.5 rounded">{hashPrefix}</code>
+        <button onClick={copyHash} className="p-0.5 hover:bg-white/10 rounded" title="Copy hash">
+          {copied ? <Check className="w-2.5 h-2.5 text-accent-success" /> : <Copy className="w-2.5 h-2.5" />}
         </button>
-        {/* Inline metadata */}
-        <span className="text-[10px] text-text-muted">
-          {affinity && affinity.frequency > 0 && `${affinity.frequency} pkts`}
-          {affinity && affinity.frequency > 0 && neighbor.advert_count && neighbor.advert_count > 0 && ' · '}
-          {neighbor.advert_count !== undefined && neighbor.advert_count > 0 && `${neighbor.advert_count} advs`}
-        </span>
+        <span className="text-text-muted/60">·</span>
+        <span>{formatRelativeTime(neighbor.last_seen)}</span>
+        {affinity?.distanceMeters && (
+          <>
+            <span className="text-text-muted/60">·</span>
+            <span>{formatDistance(affinity.distanceMeters)}</span>
+          </>
+        )}
       </div>
       
-      {/* === DIVIDER === */}
-      <div className="h-px bg-white/10 my-2.5" />
-      
-      {/* === ROLE DETAIL (Hub centrality) === */}
-      {isHub && centrality > 0 && (
-        <p className="text-[11px] text-amber-400/90 font-medium mb-2">
-          {(centrality * 100).toFixed(0)}% centrality
-        </p>
-      )}
-      
-      {/* === SIGNAL METRICS (Zero-hop only) === */}
-      {isZeroHop && (meanSnr !== undefined || neighbor.rssi !== undefined) && (
-        <div className="flex gap-4 mb-2">
-          {meanSnr !== undefined && (
-            <div>
-              <p className="text-[9px] uppercase tracking-wider text-text-muted mb-0.5">SNR</p>
-              <p className="text-[13px] font-medium text-text-primary tabular-nums">{meanSnr.toFixed(1)}</p>
-            </div>
-          )}
-          {neighbor.rssi !== undefined && (
-            <div>
-              <p className="text-[9px] uppercase tracking-wider text-text-muted mb-0.5">RSSI</p>
-              <p className="text-[13px] font-medium text-text-primary tabular-nums">{neighbor.rssi}</p>
-            </div>
-          )}
+      {/* === METRICS GRID === */}
+      <div className="grid grid-cols-4 gap-x-2 gap-y-1.5 text-center mb-2">
+        {/* Packets */}
+        <div>
+          <p className="text-[8px] uppercase text-text-muted/60">Pkts</p>
+          <p className="text-[12px] font-medium tabular-nums">{affinity?.frequency || 0}</p>
         </div>
-      )}
+        {/* Adverts */}
+        <div>
+          <p className="text-[8px] uppercase text-text-muted/60">Advs</p>
+          <p className="text-[12px] font-medium tabular-nums">{neighbor.advert_count || 0}</p>
+        </div>
+        {/* SNR (zero-hop) or Centrality (hub) or Forwards */}
+        {isZeroHop && meanSnr !== undefined ? (
+          <div>
+            <p className="text-[8px] uppercase text-text-muted/60">SNR</p>
+            <p className="text-[12px] font-medium tabular-nums">{meanSnr.toFixed(1)}</p>
+          </div>
+        ) : isHub && centrality > 0 ? (
+          <div>
+            <p className="text-[8px] uppercase text-text-muted/60">Central</p>
+            <p className="text-[12px] font-medium tabular-nums text-amber-400">{(centrality * 100).toFixed(0)}%</p>
+          </div>
+        ) : (
+          <div>
+            <p className="text-[8px] uppercase text-text-muted/60">Fwds</p>
+            <p className="text-[12px] font-medium tabular-nums">{affinity?.directForwardCount || 0}</p>
+          </div>
+        )}
+        {/* RSSI (zero-hop) or Neighbors (topology) */}
+        {isZeroHop && neighbor.rssi !== undefined ? (
+          <div>
+            <p className="text-[8px] uppercase text-text-muted/60">RSSI</p>
+            <p className="text-[12px] font-medium tabular-nums">{neighbor.rssi}</p>
+          </div>
+        ) : txDelayRec && !txDelayRec.insufficientData ? (
+          <div>
+            <p className="text-[8px] uppercase text-text-muted/60">Nbrs</p>
+            <p className="text-[12px] font-medium tabular-nums">{txDelayRec.directNeighborCount}</p>
+          </div>
+        ) : (
+          <div>
+            <p className="text-[8px] uppercase text-text-muted/60">Fwds</p>
+            <p className="text-[12px] font-medium tabular-nums">{affinity?.directForwardCount || 0}</p>
+          </div>
+        )}
+      </div>
       
-      {/* === SIGNAL NOTE (Multi-hop) === */}
-      {!isZeroHop && (meanSnr !== undefined || neighbor.rssi !== undefined) && (
-        <p className="text-[10px] text-text-muted/70 italic mb-2">
-          Signal from relay, not direct
-        </p>
-      )}
-      
-      {/* === TX DELAY RECOMMENDATIONS === */}
+      {/* === TX DELAY (compact) === */}
       {txDelayRec && (
-        <div className="bg-white/[0.03] rounded-lg p-2.5 mb-2">
-          <p className="text-[9px] uppercase tracking-wider text-text-muted mb-1.5 font-medium">
-            Recommended TX Delays
-          </p>
+        <div className="flex items-center justify-between bg-white/[0.03] rounded px-2 py-1.5 mb-2">
+          <span className="text-[9px] uppercase text-text-muted/70">TX Delay</span>
           {txDelayRec.insufficientData ? (
-            <p className="text-[11px] text-text-muted/60 italic">
-              Insufficient data (&lt;100 packets)
-            </p>
+            <span className="text-[10px] text-text-muted/50 italic">Insufficient data</span>
           ) : (
-            <>
-              <div className="flex gap-4">
-                <div>
-                  <p className="text-[9px] text-text-muted/80">tx_delay</p>
-                  <p className="text-[14px] font-semibold text-amber-400 tabular-nums">
-                    {txDelayRec.txDelayFactor.toFixed(2)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[9px] text-text-muted/80">direct</p>
-                  <p className="text-[14px] font-semibold text-amber-400 tabular-nums">
-                    {txDelayRec.directTxDelayFactor.toFixed(2)}
-                  </p>
-                </div>
-              </div>
-              <p className="text-[9px] text-text-muted/60 mt-1.5">
-                {txDelayRec.trafficIntensity.toFixed(1)} pkt/min · {txDelayRec.directNeighborCount} neighbors
-                {txDelayRec.confidence < 0.5 && (
-                  <span className="text-amber-400/70"> · low confidence</span>
-                )}
-              </p>
-            </>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px]">
+                <span className="text-text-muted/60">flood </span>
+                <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span>
+              </span>
+              <span className="text-[11px]">
+                <span className="text-text-muted/60">direct </span>
+                <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span>
+              </span>
+            </div>
           )}
         </div>
       )}
       
-      {/* === FOOTER: Last seen + Remove === */}
+      {/* === REPEATER BADGE + REMOVE === */}
       <div className="flex items-center justify-between">
-        <p className="text-[10px] text-text-muted/50">
-          {formatRelativeTime(neighbor.last_seen)}
-        </p>
+        <div className="flex items-center gap-1">
+          {neighbor.is_repeater && (
+            <span className="text-[8px] uppercase px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-400">Repeater</span>
+          )}
+        </div>
         {onRemove && (
           <button
             onClick={onRemove}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] text-red-400/80 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+            className="flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] text-red-400/70 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
           >
-            <X className="w-3 h-3" />
+            <X className="w-2.5 h-2.5" />
             Remove
           </button>
         )}
