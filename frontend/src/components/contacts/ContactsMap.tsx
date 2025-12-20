@@ -322,9 +322,10 @@ interface TxDelayRec {
   directNeighborCount: number;
   collisionRisk: number;
   confidence: number;
+  insufficientData?: boolean;
 }
 
-// Compact node popup content
+// Node popup content with refined typography
 interface NodePopupContentProps {
   hash: string;
   hashPrefix: string;
@@ -349,100 +350,140 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
   };
   
   return (
-    <div className="text-sm min-w-[160px]">
-      {/* Header row: Name + pills */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <strong className="text-base leading-tight">{name}</strong>
-          {isHub && (
-            <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-full" style={{ backgroundColor: '#FBBF24', color: '#000' }}>HUB</span>
-          )}
-          {isZeroHop && !isHub && (
-            <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-full" style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}>DIRECT</span>
-          )}
-          {affinity && affinity.typicalHopPosition > 0 && !isZeroHop && !isHub && (
-            <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-surface-elevated text-text-secondary">{affinity.typicalHopPosition}-HOP</span>
-          )}
-        </div>
+    <div className="min-w-[180px] max-w-[240px]">
+      {/* === HEADER: Name + Role Badge === */}
+      <div className="flex items-center gap-2">
+        <h3 className="text-[15px] font-semibold text-text-primary leading-tight tracking-tight truncate">
+          {name}
+        </h3>
+        {isHub && (
+          <span 
+            className="shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded"
+            style={{ backgroundColor: '#FBBF24', color: '#000' }}
+          >
+            Hub
+          </span>
+        )}
+        {isZeroHop && !isHub && (
+          <span 
+            className="shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded"
+            style={{ backgroundColor: SIGNAL_COLORS.zeroHop, color: '#fff' }}
+          >
+            Direct
+          </span>
+        )}
       </div>
       
-      {/* Hash row: 2-char prefix + copy button */}
-      <div className="flex items-center gap-1.5 mt-1">
-        <span className="font-mono text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">{hashPrefix}</span>
+      {/* === SUBHEADER: Hash + Actions === */}
+      <div className="flex items-center gap-2 mt-1">
+        <code className="text-[11px] text-text-muted font-mono bg-white/5 px-1.5 py-0.5 rounded">
+          {hashPrefix}
+        </code>
         <button
           onClick={copyHash}
-          className="p-1 hover:bg-surface-elevated rounded transition-colors"
+          className="p-0.5 hover:bg-white/10 rounded transition-colors"
           title="Copy full hash"
         >
-          {copied ? <Check className="w-3 h-3 text-accent-success" /> : <Copy className="w-3 h-3 text-text-muted" />}
+          {copied 
+            ? <Check className="w-3 h-3 text-accent-success" /> 
+            : <Copy className="w-3 h-3 text-text-muted hover:text-text-secondary" />
+          }
         </button>
-        {/* Compact stats in header */}
-        {affinity && affinity.frequency > 0 && (
-          <span className="text-[10px] text-text-muted">{affinity.frequency} pkts</span>
-        )}
-        {neighbor.advert_count !== undefined && neighbor.advert_count > 0 && (
-          <span className="text-[10px] text-text-muted">{neighbor.advert_count} advs</span>
-        )}
+        {/* Inline metadata */}
+        <span className="text-[10px] text-text-muted">
+          {affinity && affinity.frequency > 0 && `${affinity.frequency} pkts`}
+          {affinity && affinity.frequency > 0 && neighbor.advert_count && neighbor.advert_count > 0 && ' · '}
+          {neighbor.advert_count !== undefined && neighbor.advert_count > 0 && `${neighbor.advert_count} advs`}
+        </span>
       </div>
       
-      <hr className="my-2 border-white/10" />
+      {/* === DIVIDER === */}
+      <div className="h-px bg-white/10 my-2.5" />
       
-      {/* Role info */}
+      {/* === ROLE DETAIL (Hub centrality) === */}
       {isHub && centrality > 0 && (
-        <div className="text-text-secondary text-xs mb-1">
-          <strong style={{ color: '#FBBF24' }}>Hub ({(centrality * 100).toFixed(0)}% centrality)</strong>
-        </div>
+        <p className="text-[11px] text-amber-400/90 font-medium mb-2">
+          {(centrality * 100).toFixed(0)}% centrality
+        </p>
       )}
       
-      {/* TX Delay Recommendations for Hub nodes */}
-      {isHub && txDelayRec && (
-        <div className="mt-2 pt-2 border-t border-white/10">
-          <div className="text-[10px] text-text-muted mb-1 font-medium">Recommended TX Delays</div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
-            <div className="text-text-secondary">tx_delay: <strong className="text-amber-400">{txDelayRec.txDelayFactor.toFixed(2)}</strong></div>
-            <div className="text-text-secondary">direct: <strong className="text-amber-400">{txDelayRec.directTxDelayFactor.toFixed(2)}</strong></div>
-          </div>
-          <div className="mt-1 text-[10px] text-text-muted">
-            {txDelayRec.trafficIntensity.toFixed(1)} pkt/min · {txDelayRec.directNeighborCount} neighbors
-            {txDelayRec.confidence < 0.5 && (
-              <span className="text-accent-warning"> · low confidence</span>
-            )}
-          </div>
-        </div>
-      )}
-      
-      {/* Signal info - only meaningful for direct neighbors */}
-      {isZeroHop && (
-        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+      {/* === SIGNAL METRICS (Zero-hop only) === */}
+      {isZeroHop && (meanSnr !== undefined || neighbor.rssi !== undefined) && (
+        <div className="flex gap-4 mb-2">
           {meanSnr !== undefined && (
-            <div className="text-text-secondary">SNR: <strong className="text-text-primary">{meanSnr.toFixed(1)}</strong></div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-text-muted mb-0.5">SNR</p>
+              <p className="text-[13px] font-medium text-text-primary tabular-nums">{meanSnr.toFixed(1)}</p>
+            </div>
           )}
           {neighbor.rssi !== undefined && (
-            <div className="text-text-secondary">RSSI: <strong className="text-text-primary">{neighbor.rssi}</strong></div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wider text-text-muted mb-0.5">RSSI</p>
+              <p className="text-[13px] font-medium text-text-primary tabular-nums">{neighbor.rssi}</p>
+            </div>
           )}
         </div>
       )}
+      
+      {/* === SIGNAL NOTE (Multi-hop) === */}
       {!isZeroHop && (meanSnr !== undefined || neighbor.rssi !== undefined) && (
-        <div className="text-[10px] text-text-muted italic">
-          Signal metrics shown are from relay, not direct RF
+        <p className="text-[10px] text-text-muted/70 italic mb-2">
+          Signal from relay, not direct
+        </p>
+      )}
+      
+      {/* === TX DELAY RECOMMENDATIONS === */}
+      {txDelayRec && (
+        <div className="bg-white/[0.03] rounded-lg p-2.5 mb-2">
+          <p className="text-[9px] uppercase tracking-wider text-text-muted mb-1.5 font-medium">
+            Recommended TX Delays
+          </p>
+          {txDelayRec.insufficientData ? (
+            <p className="text-[11px] text-text-muted/60 italic">
+              Insufficient data (&lt;100 packets)
+            </p>
+          ) : (
+            <>
+              <div className="flex gap-4">
+                <div>
+                  <p className="text-[9px] text-text-muted/80">tx_delay</p>
+                  <p className="text-[14px] font-semibold text-amber-400 tabular-nums">
+                    {txDelayRec.txDelayFactor.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[9px] text-text-muted/80">direct</p>
+                  <p className="text-[14px] font-semibold text-amber-400 tabular-nums">
+                    {txDelayRec.directTxDelayFactor.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[9px] text-text-muted/60 mt-1.5">
+                {txDelayRec.trafficIntensity.toFixed(1)} pkt/min · {txDelayRec.directNeighborCount} neighbors
+                {txDelayRec.confidence < 0.5 && (
+                  <span className="text-amber-400/70"> · low confidence</span>
+                )}
+              </p>
+            </>
+          )}
         </div>
       )}
       
-      {/* Last seen */}
-      <div className="text-[10px] text-text-muted mt-1">
-        {formatRelativeTime(neighbor.last_seen)}
+      {/* === FOOTER: Last seen + Remove === */}
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-text-muted/50">
+          {formatRelativeTime(neighbor.last_seen)}
+        </p>
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-red-400/80 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+          >
+            <X className="w-3 h-3" />
+            Remove
+          </button>
+        )}
       </div>
-      
-      {/* Remove button */}
-      {onRemove && (
-        <button
-          onClick={onRemove}
-          className="mt-2 w-full flex items-center justify-center gap-1 px-2 py-1 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors border border-red-500/30"
-        >
-          <X className="w-3 h-3" />
-          Remove
-        </button>
-      )}
     </div>
   );
 }
@@ -1445,8 +1486,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Use quantized opacity in key to force icon update when opacity bucket changes
           const opacityKey = Math.round(quantizedOpacity * 20);
           
-          // Get TX delay recommendation for hub nodes
-          const txDelayRec = isHub ? meshTopology.txDelayRecommendations.get(hash) : undefined;
+          // Get TX delay recommendation for this node
+          const txDelayRec = meshTopology.txDelayRecommendations.get(hash);
           
           return (
             <Marker
