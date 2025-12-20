@@ -666,18 +666,20 @@ export function findNetworkLoops(
 }
 
 /**
- * Calculate TX delay recommendations for hub nodes based on their traffic patterns.
+ * Calculate TX delay recommendations for hub nodes based on their unique network position.
  * 
- * The algorithm considers:
- * - Traffic intensity (packets/minute through the node)
- * - Number of direct neighbors (more = higher collision risk)
- * - Position in network (hub role = more forwarding)
- * - Centrality score (higher = more traffic load)
+ * The algorithm analyzes each hub's unique situation:
+ * - Edge packet count (total packets flowing through edges connected to this hub)
+ * - Number of direct neighbors (topology edges connected to this hub)
+ * - Raw centrality score (bridge count / path count, un-normalized)
+ * - Edge validation strength (how well-validated the hub's connections are)
+ * 
+ * Each hub gets a different recommendation based on its actual traffic load and
+ * connectivity, NOT normalized values that make all hubs look similar.
  * 
  * @param hubHashes - Array of hub node hashes
  * @param edges - All topology edges
  * @param nodePathCounts - Map of node hash -> number of paths it appeared in
- * @param centrality - Map of node hash -> centrality score
  * @param packets - All packets for timing analysis
  * @returns Map of hub hash -> TxDelayRecommendation
  */
@@ -685,7 +687,6 @@ function calculateNodeTxDelays(
   hubHashes: string[],
   edges: TopologyEdge[],
   nodePathCounts: Map<string, number>,
-  centrality: Map<string, number>,
   packets: Packet[]
 ): Map<string, TxDelayRecommendation> {
   const recommendations = new Map<string, TxDelayRecommendation>();
@@ -702,79 +703,127 @@ function calculateNodeTxDelays(
   
   const timeSpanMinutes = timestamps.length >= 2
     ? (timestamps[timestamps.length - 1] - timestamps[0]) / 60
-    : 1; // Default to 1 minute if we can't calculate
+    : 1;
   
-  // For each hub, calculate metrics and recommend delays
+  // Pre-compute per-hub metrics that will actually differ between hubs
+  const hubMetrics = new Map<string, {
+    edgePacketCount: number;      // Total packets on edges touching this hub
+    directNeighborCount: number;  // Count of unique neighbors from edges
+    avgEdgeValidation: number;    // Average certainCount of connected edges
+    maxEdgeValidation: number;    // Max certainCount of connected edges
+    pathCount: number;            // Paths this hub appeared in
+  }>();
+  
+  // Find max values across all hubs for relative comparison
+  let maxEdgePacketCount = 0;
+  let maxPathCount = 0;
+  let maxNeighborCount = 0;
+  
   for (const hubHash of hubHashes) {
-    // Count edges connected to this hub (direct neighbors)
+    // Find all edges connected to this hub
     const connectedEdges = edges.filter(
       e => e.fromHash === hubHash || e.toHash === hubHash
     );
-    const directNeighborCount = new Set(
-      connectedEdges.flatMap(e => [e.fromHash, e.toHash])
-    ).size - 1; // Subtract 1 to not count the hub itself
     
-    // Traffic intensity: paths through this node per minute
+    // Count unique neighbors from edges
+    const neighborHashes = new Set<string>();
+    let totalPacketCount = 0;
+    let totalCertainCount = 0;
+    let maxCertain = 0;
+    
+    for (const edge of connectedEdges) {
+      const otherHash = edge.fromHash === hubHash ? edge.toHash : edge.fromHash;
+      neighborHashes.add(otherHash);
+      totalPacketCount += edge.packetCount;
+      totalCertainCount += edge.certainCount;
+      maxCertain = Math.max(maxCertain, edge.certainCount);
+    }
+    
+    const directNeighborCount = neighborHashes.size;
+    const avgValidation = connectedEdges.length > 0 
+      ? totalCertainCount / connectedEdges.length 
+      : 0;
     const pathCount = nodePathCounts.get(hubHash) || 0;
-    const trafficIntensity = timeSpanMinutes > 0 ? pathCount / timeSpanMinutes : 0;
     
-    // Centrality score (already normalized 0-1)
-    const centralityScore = centrality.get(hubHash) || 0;
+    hubMetrics.set(hubHash, {
+      edgePacketCount: totalPacketCount,
+      directNeighborCount,
+      avgEdgeValidation: avgValidation,
+      maxEdgeValidation: maxCertain,
+      pathCount,
+    });
     
-    // Calculate collision risk (0-1)
-    // Based on: neighbor count, traffic intensity, and centrality
-    const neighborFactor = Math.min(directNeighborCount / 10, 1); // 10+ neighbors = max risk
-    const trafficFactor = Math.min(trafficIntensity / 30, 1); // 30+ pkt/min = max risk
-    const collisionRisk = (neighborFactor * 0.4 + trafficFactor * 0.3 + centralityScore * 0.3);
+    // Track maximums
+    maxEdgePacketCount = Math.max(maxEdgePacketCount, totalPacketCount);
+    maxPathCount = Math.max(maxPathCount, pathCount);
+    maxNeighborCount = Math.max(maxNeighborCount, directNeighborCount);
+  }
+  
+  // Now calculate recommendations with metrics that differ per-hub
+  for (const hubHash of hubHashes) {
+    const metrics = hubMetrics.get(hubHash)!;
+    
+    // Traffic intensity: this hub's edge packets / minute
+    // This WILL differ between hubs based on their actual traffic
+    const trafficIntensity = timeSpanMinutes > 0 
+      ? metrics.edgePacketCount / timeSpanMinutes 
+      : 0;
+    
+    // Relative load factors (0-1, relative to busiest hub)
+    // These create differentiation between hubs
+    const relativeTraffic = maxEdgePacketCount > 0 
+      ? metrics.edgePacketCount / maxEdgePacketCount 
+      : 0;
+    const relativeNeighbors = maxNeighborCount > 0 
+      ? metrics.directNeighborCount / maxNeighborCount 
+      : 0;
+    const relativePaths = maxPathCount > 0 
+      ? metrics.pathCount / maxPathCount 
+      : 0;
+    
+    // Collision risk based on this hub's actual metrics
+    // Weight: neighbors (40%), traffic (35%), path centrality (25%)
+    const collisionRisk = (
+      relativeNeighbors * 0.40 + 
+      relativeTraffic * 0.35 + 
+      relativePaths * 0.25
+    );
     
     // Calculate recommended tx_delay_factor
-    // Start with base value and adjust based on risk factors
-    let txDelayFactor = 0.8; // Start conservative
+    // Base value varies with collision risk (continuous, not stepped)
+    // Range: 0.7 (low risk) to 1.3 (high risk)
+    let txDelayFactor = 0.7 + (collisionRisk * 0.6);
     
-    // Increase delay for higher collision risk
-    if (collisionRisk > 0.7) {
-      txDelayFactor += 0.3;
-    } else if (collisionRisk > 0.5) {
-      txDelayFactor += 0.2;
-    } else if (collisionRisk > 0.3) {
-      txDelayFactor += 0.1;
-    }
-    
-    // Increase delay for many direct neighbors
-    if (directNeighborCount > 8) {
+    // Additional adjustment for absolute neighbor count
+    // High absolute counts need more delay regardless of relative position
+    if (metrics.directNeighborCount >= 8) {
       txDelayFactor += 0.15;
-    } else if (directNeighborCount > 5) {
-      txDelayFactor += 0.1;
-    } else if (directNeighborCount > 3) {
-      txDelayFactor += 0.05;
-    }
-    
-    // High-centrality nodes need more delay (they're forwarding a lot)
-    if (centralityScore > 0.8) {
-      txDelayFactor += 0.1;
-    } else if (centralityScore > 0.6) {
-      txDelayFactor += 0.05;
+    } else if (metrics.directNeighborCount >= 5) {
+      txDelayFactor += 0.08;
     }
     
     // Clamp to reasonable range (0.5 - 1.5)
     txDelayFactor = Math.max(0.5, Math.min(1.5, txDelayFactor));
     
-    // Direct TX delay is typically 30-40% of flood delay
-    // Lower because direct packets are targeted, less collision risk
-    const directTxDelayFactor = Math.round(txDelayFactor * 0.35 * 100) / 100;
+    // Round to 2 decimal places
     txDelayFactor = Math.round(txDelayFactor * 100) / 100;
     
-    // Confidence based on sample size
-    // More packets = higher confidence in recommendation
-    const confidence = Math.min(packets.length / 500, 1); // 500+ packets = full confidence
+    // Direct TX delay is typically 30-40% of flood delay
+    const directTxDelayFactor = Math.round(txDelayFactor * 0.35 * 100) / 100;
+    
+    // Confidence based on edge validation strength for THIS hub
+    // Well-validated edges = more confident recommendation
+    const validationConfidence = Math.min(metrics.avgEdgeValidation / 10, 1);
+    const sampleConfidence = Math.min(packets.length / 500, 1);
+    const confidence = Math.round((validationConfidence * 0.6 + sampleConfidence * 0.4) * 100) / 100;
     
     recommendations.set(hubHash, {
       txDelayFactor,
       directTxDelayFactor,
       trafficIntensity: Math.round(trafficIntensity * 10) / 10,
-      directNeighborCount,
+      directNeighborCount: metrics.directNeighborCount,
       collisionRisk: Math.round(collisionRisk * 100) / 100,
-      confidence: Math.round(confidence * 100) / 100,
+      confidence,
     });
   }
   
@@ -1173,7 +1222,6 @@ export function buildMeshTopology(
     hubNodes,
     edges,
     nodePathCounts,
-    centrality,
     sortedPackets
   );
   
