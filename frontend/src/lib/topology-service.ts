@@ -8,7 +8,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop } from '@/lib/mesh-topology';
+import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation } from '@/lib/mesh-topology';
 import type { 
   TopologyWorkerRequest, 
   TopologyWorkerMessage, 
@@ -16,7 +16,7 @@ import type {
 } from '@/lib/workers/topology.worker';
 
 // Re-export for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation };
 
 /** Listener for topology changes */
 export type TopologyListener = (topology: MeshTopology, computeTimeMs: number) => void;
@@ -38,6 +38,7 @@ function deserializeTopology(serialized: SerializedTopology): MeshTopology {
     centrality: new Map(serialized.centralityEntries),
     loops: serialized.loops ?? [],
     loopEdgeKeys: new Set(serialized.loopEdgeKeyEntries ?? []),
+    txDelayRecommendations: new Map(serialized.txDelayRecommendationEntries ?? []),
   };
 }
 
@@ -58,6 +59,7 @@ function createEmptyTopology(): MeshTopology {
     hubNodes: [],
     loops: [],
     loopEdgeKeys: new Set(),
+    txDelayRecommendations: new Map(),
   };
 }
 

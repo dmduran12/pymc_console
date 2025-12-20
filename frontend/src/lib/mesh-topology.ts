@@ -84,6 +84,25 @@ export const CERTAINTY_CONFIDENCE_THRESHOLD = 0.6;
 /** Maximum edges to render (performance cap) */
 export const MAX_RENDERED_EDGES = 100;
 
+/**
+ * Recommended TX delay settings for a node based on traffic analysis.
+ * Used to suggest optimal tx_delay_factor and direct.tx_delay_factor for hub nodes.
+ */
+export interface TxDelayRecommendation {
+  /** Recommended tx_delay_factor (0.5-1.5, higher = more conservative) */
+  txDelayFactor: number;
+  /** Recommended direct.tx_delay_factor (typically 30-40% of txDelayFactor) */
+  directTxDelayFactor: number;
+  /** Traffic intensity: packets per minute through this node */
+  trafficIntensity: number;
+  /** Number of direct (1-hop) neighbors observed */
+  directNeighborCount: number;
+  /** Estimated collision risk (0-1, higher = more delay needed) */
+  collisionRisk: number;
+  /** Confidence in recommendation (0-1, based on sample size) */
+  confidence: number;
+}
+
 /** Result of topology analysis */
 export interface MeshTopology {
   /** All edges with 3+ validations */
@@ -114,6 +133,8 @@ export interface MeshTopology {
   loops: NetworkLoop[];
   /** Set of edge keys that are part of at least one loop */
   loopEdgeKeys: Set<string>;
+  /** TX delay recommendations for hub nodes (hash -> recommendation) */
+  txDelayRecommendations: Map<string, TxDelayRecommendation>;
 }
 
 interface EdgeAccumulator {
@@ -645,6 +666,122 @@ export function findNetworkLoops(
 }
 
 /**
+ * Calculate TX delay recommendations for hub nodes based on their traffic patterns.
+ * 
+ * The algorithm considers:
+ * - Traffic intensity (packets/minute through the node)
+ * - Number of direct neighbors (more = higher collision risk)
+ * - Position in network (hub role = more forwarding)
+ * - Centrality score (higher = more traffic load)
+ * 
+ * @param hubHashes - Array of hub node hashes
+ * @param edges - All topology edges
+ * @param nodePathCounts - Map of node hash -> number of paths it appeared in
+ * @param centrality - Map of node hash -> centrality score
+ * @param packets - All packets for timing analysis
+ * @returns Map of hub hash -> TxDelayRecommendation
+ */
+function calculateNodeTxDelays(
+  hubHashes: string[],
+  edges: TopologyEdge[],
+  nodePathCounts: Map<string, number>,
+  centrality: Map<string, number>,
+  packets: Packet[]
+): Map<string, TxDelayRecommendation> {
+  const recommendations = new Map<string, TxDelayRecommendation>();
+  
+  if (hubHashes.length === 0 || packets.length === 0) {
+    return recommendations;
+  }
+  
+  // Calculate time span of packet data (for packets/minute calculation)
+  const timestamps = packets
+    .map(p => p.timestamp)
+    .filter((t): t is number => t !== undefined && t > 0)
+    .sort((a, b) => a - b);
+  
+  const timeSpanMinutes = timestamps.length >= 2
+    ? (timestamps[timestamps.length - 1] - timestamps[0]) / 60
+    : 1; // Default to 1 minute if we can't calculate
+  
+  // For each hub, calculate metrics and recommend delays
+  for (const hubHash of hubHashes) {
+    // Count edges connected to this hub (direct neighbors)
+    const connectedEdges = edges.filter(
+      e => e.fromHash === hubHash || e.toHash === hubHash
+    );
+    const directNeighborCount = new Set(
+      connectedEdges.flatMap(e => [e.fromHash, e.toHash])
+    ).size - 1; // Subtract 1 to not count the hub itself
+    
+    // Traffic intensity: paths through this node per minute
+    const pathCount = nodePathCounts.get(hubHash) || 0;
+    const trafficIntensity = timeSpanMinutes > 0 ? pathCount / timeSpanMinutes : 0;
+    
+    // Centrality score (already normalized 0-1)
+    const centralityScore = centrality.get(hubHash) || 0;
+    
+    // Calculate collision risk (0-1)
+    // Based on: neighbor count, traffic intensity, and centrality
+    const neighborFactor = Math.min(directNeighborCount / 10, 1); // 10+ neighbors = max risk
+    const trafficFactor = Math.min(trafficIntensity / 30, 1); // 30+ pkt/min = max risk
+    const collisionRisk = (neighborFactor * 0.4 + trafficFactor * 0.3 + centralityScore * 0.3);
+    
+    // Calculate recommended tx_delay_factor
+    // Start with base value and adjust based on risk factors
+    let txDelayFactor = 0.8; // Start conservative
+    
+    // Increase delay for higher collision risk
+    if (collisionRisk > 0.7) {
+      txDelayFactor += 0.3;
+    } else if (collisionRisk > 0.5) {
+      txDelayFactor += 0.2;
+    } else if (collisionRisk > 0.3) {
+      txDelayFactor += 0.1;
+    }
+    
+    // Increase delay for many direct neighbors
+    if (directNeighborCount > 8) {
+      txDelayFactor += 0.15;
+    } else if (directNeighborCount > 5) {
+      txDelayFactor += 0.1;
+    } else if (directNeighborCount > 3) {
+      txDelayFactor += 0.05;
+    }
+    
+    // High-centrality nodes need more delay (they're forwarding a lot)
+    if (centralityScore > 0.8) {
+      txDelayFactor += 0.1;
+    } else if (centralityScore > 0.6) {
+      txDelayFactor += 0.05;
+    }
+    
+    // Clamp to reasonable range (0.5 - 1.5)
+    txDelayFactor = Math.max(0.5, Math.min(1.5, txDelayFactor));
+    
+    // Direct TX delay is typically 30-40% of flood delay
+    // Lower because direct packets are targeted, less collision risk
+    const directTxDelayFactor = Math.round(txDelayFactor * 0.35 * 100) / 100;
+    txDelayFactor = Math.round(txDelayFactor * 100) / 100;
+    
+    // Confidence based on sample size
+    // More packets = higher confidence in recommendation
+    const confidence = Math.min(packets.length / 500, 1); // 500+ packets = full confidence
+    
+    recommendations.set(hubHash, {
+      txDelayFactor,
+      directTxDelayFactor,
+      trafficIntensity: Math.round(trafficIntensity * 10) / 10,
+      directNeighborCount,
+      collisionRisk: Math.round(collisionRisk * 100) / 100,
+      confidence: Math.round(confidence * 100) / 100,
+    });
+  }
+  
+  return recommendations;
+}
+
+/**
  * Analyze packets to build mesh topology with confidence-weighted edges.
  * 
  * TOPOLOGY PRINCIPLES:
@@ -1030,6 +1167,30 @@ export function buildMeshTopology(
     })));
   }
   
+  // === TX DELAY RECOMMENDATIONS FOR HUB NODES ===
+  // Calculate recommended tx_delay and direct.tx_delay settings for hub nodes
+  const txDelayRecommendations = calculateNodeTxDelays(
+    hubNodes,
+    edges,
+    nodePathCounts,
+    centrality,
+    sortedPackets
+  );
+  
+  // Log tx delay recommendations in development
+  if (process.env.NODE_ENV === 'development' && txDelayRecommendations.size > 0) {
+    console.log(`[mesh-topology] TX delay recommendations for ${txDelayRecommendations.size} hubs:`,
+      [...txDelayRecommendations.entries()].map(([hash, rec]) => ({
+        hash: hash.slice(0, 10),
+        txDelay: rec.txDelayFactor,
+        directDelay: rec.directTxDelayFactor,
+        traffic: `${rec.trafficIntensity}/min`,
+        neighbors: rec.directNeighborCount,
+        risk: rec.collisionRisk,
+      }))
+    );
+  }
+  
   return { 
     edges, 
     validatedEdges: cappedEdges,
@@ -1045,6 +1206,7 @@ export function buildMeshTopology(
     hubNodes,
     loops,
     loopEdgeKeys,
+    txDelayRecommendations,
   };
 }
 

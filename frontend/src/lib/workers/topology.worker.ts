@@ -6,7 +6,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop } from '@/lib/mesh-topology';
+import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop, type TxDelayRecommendation } from '@/lib/mesh-topology';
 
 // Message types
 export interface TopologyWorkerRequest {
@@ -38,6 +38,8 @@ export interface SerializedTopology {
   // Loop detection results
   loops: NetworkLoop[];
   loopEdgeKeyEntries: string[]; // Set serialized as array
+  // TX delay recommendations for hub nodes
+  txDelayRecommendationEntries: [string, TxDelayRecommendation][];
 }
 
 export interface TopologyWorkerResponse {
@@ -95,6 +97,7 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
       centralityEntries: Array.from(topology.centrality.entries()),
       loops: topology.loops,
       loopEdgeKeyEntries: Array.from(topology.loopEdgeKeys),
+      txDelayRecommendationEntries: Array.from(topology.txDelayRecommendations.entries()),
     };
     
     const computeTimeMs = performance.now() - startTime;

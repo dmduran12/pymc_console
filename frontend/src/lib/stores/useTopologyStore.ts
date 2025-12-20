@@ -6,10 +6,10 @@
  */
 
 import { create } from 'zustand';
-import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop } from '@/lib/topology-service';
+import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation } from '@/lib/topology-service';
 
 // Re-export types for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation };
 
 interface TopologyState {
   // Topology data
@@ -42,6 +42,7 @@ function createEmptyTopology(): MeshTopology {
     hubNodes: [],
     loops: [],
     loopEdgeKeys: new Set(),
+    txDelayRecommendations: new Map(),
   };
 }
 
@@ -149,3 +150,6 @@ export const useLoopCount = () => useTopologyStoreBase((s) => s.topology.loops.l
 export const useHasLocalLoop = () => useTopologyStoreBase((s) => 
   s.topology.loops.some(loop => loop.includesLocal)
 );
+
+/** TX delay recommendations for hub nodes */
+export const useTxDelayRecommendations = () => useTopologyStoreBase((s) => s.topology.txDelayRecommendations);
