@@ -538,8 +538,12 @@ function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: {
     
     processedRef.current = targetHash;
     
-    // Zoom to node with animation
-    map.flyTo(coords, 15, { duration: 0.5 });
+    // Zoom to node with smooth animation
+    // easeLinearity: 0.1 creates a cubic-like ease (lower = more easing)
+    map.flyTo(coords, 15, { 
+      duration: 1.0,
+      easeLinearity: 0.1  // Approximates easeInOutCubic
+    });
     
     // After zoom completes, open the popup
     setTimeout(() => {
@@ -553,7 +557,7 @@ function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: {
         }
       });
       onComplete?.();
-    }, 600);
+    }, 1100);
   }, [targetHash, nodeCoordinates, map, onComplete]);
   
   return null;
