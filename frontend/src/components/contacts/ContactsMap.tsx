@@ -639,6 +639,34 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     return lines;
   }, [meshTopology, nodeCoordinates]);
   
+  // Generate polylines for weak edges (5+ packets but below validation threshold)
+  // These are rendered underneath validated edges as a subtle background layer
+  const weakPolylines = useMemo(() => {
+    const lines: Array<{
+      from: [number, number];
+      to: [number, number];
+      edge: TopologyEdge;
+    }> = [];
+    
+    // Build set of validated edge keys to exclude duplicates
+    const validatedKeys = new Set(meshTopology.validatedEdges.map(e => e.key));
+    
+    for (const edge of meshTopology.weakEdges) {
+      // Skip if already in validated edges (shouldn't happen but safety check)
+      if (validatedKeys.has(edge.key)) continue;
+      
+      const fromCoords = nodeCoordinates.get(edge.fromHash);
+      const toCoords = nodeCoordinates.get(edge.toHash);
+      
+      // Only draw if both nodes have coordinates
+      if (!fromCoords || !toCoords) continue;
+      
+      lines.push({ from: fromCoords, to: toCoords, edge });
+    }
+    
+    return lines;
+  }, [meshTopology, nodeCoordinates]);
+  
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
     const positions: [number, number][] = [];
@@ -1166,8 +1194,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       return;
     }
     
+    // Combine validated and weak edges for animation
+    const allAnimatedEdges = [...filteredCertainPolylines, ...weakPolylines];
+    
     // Build current weight signature (detects both new edges and weight changes)
-    const currentWeightSignature = filteredCertainPolylines
+    const currentWeightSignature = allAnimatedEdges
       .map(p => `${p.edge.key}:${p.edge.certainCount}`)
       .sort()
       .join(',');
@@ -1181,7 +1212,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       const newEdgeKeys: string[] = [];
       const existingEdgeKeys: string[] = [];
       
-      for (const { edge } of filteredCertainPolylines) {
+      for (const { edge } of allAnimatedEdges) {
         if (!knownEdgesRef.current.has(edge.key)) {
           newEdgeKeys.push(edge.key);
         } else {
@@ -1293,7 +1324,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     }
     
     lastEdgeSetRef.current = currentWeightSignature;
-  }, [showTopology, isExiting, filteredCertainPolylines, meshTopology.maxCertainCount, easeInOutCubic, ANIMATION_DURATION]);
+  }, [showTopology, isExiting, filteredCertainPolylines, weakPolylines, meshTopology.maxCertainCount, easeInOutCubic, ANIMATION_DURATION]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -1357,6 +1388,35 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         <FitBoundsOnce positions={allPositions} />
         <ZoomToNode targetHash={selectedNodeHash || null} nodeCoordinates={nodeCoordinates} onComplete={onNodeSelected} />
+        
+        {/* Draw weak topology edges (underneath) - subtle 20% gray for emerging connections */}
+        {(showTopology || isExiting) && weakPolylines.map(({ from, to, edge }) => {
+          // Use same trace animation system but with simpler rendering
+          const traceProgress = edgeAnimProgress.get(edge.key) ?? 0;
+          
+          // Don't render edges that haven't started animating
+          if (traceProgress <= 0) return null;
+          
+          // Animate the "to" position for trace effect
+          const animatedTo: [number, number] = [
+            from[0] + (to[0] - from[0]) * traceProgress,
+            from[1] + (to[1] - from[1]) * traceProgress,
+          ];
+          
+          return (
+            <Polyline
+              key={`weak-edge-${edge.key}`}
+              positions={[from, animatedTo]}
+              pathOptions={{
+                color: '#ffffff',  // White at 20% opacity = subtle gray
+                weight: 1.5,
+                opacity: 0.2 * traceProgress,  // 20% opacity, fades with animation
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            />
+          );
+        })}
         
         {/* Draw validated topology edges - animated trace effect */}
         {(showTopology || isExiting) && filteredCertainPolylines.map(({ from, to, edge }) => {
