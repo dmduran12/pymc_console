@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
 import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
-import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity } from 'lucide-react';
+import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { HashBadge } from '@/components/ui/HashBadge';
@@ -54,6 +54,9 @@ export default function Contacts() {
   const [sortField, setSortField] = useState<SortField>('lastHeard');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  
   // Selected node for zoom-to-map
   const [selectedNodeHash, setSelectedNodeHash] = useState<string | null>(null);
   
@@ -94,9 +97,23 @@ export default function Contacts() {
     return distances;
   }, [visibleContacts, localNode]);
   
+  // Filter contacts based on search query
+  const filteredContacts = useMemo(() => {
+    if (!searchQuery.trim()) return visibleContacts;
+    
+    const query = searchQuery.toLowerCase().trim();
+    return Object.fromEntries(
+      Object.entries(visibleContacts).filter(([hash, contact]) => {
+        const name = (contact.node_name || contact.name || '').toLowerCase();
+        const prefix = hash.slice(2, 4).toLowerCase(); // Extract 2-char prefix from hash
+        return name.includes(query) || prefix.includes(query) || hash.toLowerCase().includes(query);
+      })
+    );
+  }, [visibleContacts, searchQuery]);
+  
   // Sort contacts based on current sort field and direction
   const sortedContacts = useMemo(() => {
-    const entries = Object.entries(visibleContacts);
+    const entries = Object.entries(filteredContacts);
     
     return entries.sort(([hashA, contactA], [hashB, contactB]) => {
       let comparison = 0;
@@ -123,7 +140,7 @@ export default function Contacts() {
       
       return sortDirection === 'desc' ? -comparison : comparison;
     });
-  }, [visibleContacts, sortField, sortDirection, contactDistances, centrality]);
+  }, [filteredContacts, sortField, sortDirection, contactDistances, centrality]);
   
   // Count contacts with location data
   const contactsWithLocation = sortedContacts.filter(
@@ -197,8 +214,30 @@ export default function Contacts() {
             Discovered Nodes
           </div>
           
-          {/* Sort controls */}
-          <div className="flex items-center gap-1">
+          {/* Search and sort controls */}
+          <div className="flex items-center gap-2">
+            {/* Search bar */}
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="w-24 sm:w-32 pl-6 pr-2 py-1 text-[10px] bg-white/5 border border-white/10 rounded-md text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary/50"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            
+            {/* Sort buttons */}
+            <div className="flex items-center gap-1">
             <button
               onClick={() => handleSort('lastHeard')}
               className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
@@ -244,6 +283,7 @@ export default function Contacts() {
                 <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
               )}
             </button>
+            </div>
           </div>
         </div>
         
