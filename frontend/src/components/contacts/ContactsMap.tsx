@@ -418,6 +418,15 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
         )}
       </div>
       
+      {/* === GPS COORDINATES === */}
+      <div className="text-[9px] text-text-muted/60 mb-2 font-mono">
+        {neighbor.latitude && neighbor.longitude && neighbor.latitude !== 0 && neighbor.longitude !== 0 ? (
+          <span>{neighbor.latitude.toFixed(5)}, {neighbor.longitude.toFixed(5)}</span>
+        ) : (
+          <span className="italic">No Location</span>
+        )}
+      </div>
+      
       {/* === METRICS GRID === */}
       <div className="grid grid-cols-4 gap-x-2 gap-y-1.5 text-center mb-2">
         {/* Packets */}
@@ -541,7 +550,7 @@ function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: {
     // Zoom to node with smooth animation
     // easeLinearity: 0.1 creates a cubic-like ease (lower = more easing)
     map.flyTo(coords, 15, { 
-      duration: 2.0,
+      duration: 2.5,
       easeLinearity: 0.1  // Approximates easeInOutCubic
     });
     
@@ -557,7 +566,7 @@ function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: {
         }
       });
       onComplete?.();
-    }, 2100);
+    }, 2600);
   }, [targetHash, nodeCoordinates, map, onComplete]);
   
   return null;
@@ -857,6 +866,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   
   // Build set of hub nodes and zero-hop nodes for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
+  
+  // Identify backbone edges (top 3 strongest by certainCount)
+  const backboneEdgeKeys = useMemo(() => {
+    const sorted = [...meshTopology.validatedEdges].sort((a, b) => b.certainCount - a.certainCount);
+    return new Set(sorted.slice(0, 3).map(e => e.key));
+  }, [meshTopology.validatedEdges]);
   
   // Get all nodes connected to hubs (for solo hubs mode)
   const hubConnectedNodes = useMemo(() => {
@@ -1370,8 +1385,18 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       className="relative rounded-[1.125rem] overflow-hidden" 
       style={{ height: isFullscreen ? '100vh' : '500px' }}
     >
-      {/* Map container - simple border, no glass effects */}
+      {/* Map container with liquid glass effects */}
       <div className="h-full relative rounded-[1.125rem] overflow-hidden border border-white/10">
+        {/* Liquid glass overlay effects */}
+        <div className="absolute inset-0 pointer-events-none z-[1000]">
+          {/* Top edge highlight */}
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+          {/* Corner accents */}
+          <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-white/[0.03] to-transparent" />
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-white/[0.03] to-transparent" />
+          {/* Bottom edge fade */}
+          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/20 to-transparent" />
+        </div>
         <MapContainer
           center={defaultCenter}
           zoom={8}
@@ -1389,7 +1414,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         <FitBoundsOnce positions={allPositions} />
         <ZoomToNode targetHash={selectedNodeHash || null} nodeCoordinates={nodeCoordinates} onComplete={onNodeSelected} />
         
-        {/* Draw weak topology edges (underneath) - subtle 20% gray for emerging connections */}
+        {/* Draw weak topology edges (underneath) - subtle 10% gray for emerging connections */}
         {(showTopology || isExiting) && weakPolylines.map(({ from, to, edge }) => {
           // Use same trace animation system but with simpler rendering
           const traceProgress = edgeAnimProgress.get(edge.key) ?? 0;
@@ -1408,9 +1433,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               key={`weak-edge-${edge.key}`}
               positions={[from, animatedTo]}
               pathOptions={{
-                color: '#ffffff',  // White at 20% opacity = subtle gray
+                color: '#ffffff',  // White at 10% opacity = very subtle gray
                 weight: 1.5,
-                opacity: 0.2 * traceProgress,  // 20% opacity, fades with animation
+                opacity: 0.1 * traceProgress,  // 10% opacity (50% darker), fades with animation
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
@@ -1484,9 +1509,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     lineJoin: 'round',
                   }}
                 >
-                  <Tooltip
+                <Tooltip
                     permanent={false}
-                    direction="center"
+                    direction="auto"
                     className="topology-edge-tooltip"
                   >
                     <div className="text-xs">
@@ -1505,22 +1530,26 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             );
           }
           
-          // Standard edge: single gray line with trace animation
+          // Check if this is a backbone edge (top 3 strongest)
+          const isBackbone = backboneEdgeKeys.has(edge.key);
+          
+          // Standard edge: single line with trace animation
+          // Backbone edges get yellow color (same as local node)
           return (
             <Polyline
               key={`edge-${edge.key}`}
               positions={[from, animatedTo]}
               pathOptions={{
-                color: DESIGN.edgeColor,
-                weight: animatedWeight,
-                opacity,
+                color: isBackbone ? DESIGN.localColor : DESIGN.edgeColor,
+                weight: isBackbone ? animatedWeight * 1.2 : animatedWeight,
+                opacity: isBackbone ? opacity * 1.3 : opacity,
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
             >
               <Tooltip
                 permanent={false}
-                direction="center"
+                direction="auto"
                 className="topology-edge-tooltip"
               >
                 <div className="text-xs">
@@ -1528,7 +1557,10 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   <div className="text-text-secondary">
                     {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
                   </div>
-                  {edge.isHubConnection && (
+                  {isBackbone && (
+                    <div style={{ color: DESIGN.localColor }} className="font-semibold">Backbone</div>
+                  )}
+                  {edge.isHubConnection && !isBackbone && (
                     <div className="text-amber-400">Hub connection</div>
                   )}
                 </div>
