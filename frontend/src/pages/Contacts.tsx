@@ -211,7 +211,7 @@ export default function Contacts() {
         <div className="chart-header">
           <div className="chart-title">
             <Users className="chart-title-icon" />
-            Discovered Nodes
+            Discovered Contacts
           </div>
           
           {/* Search and sort controls */}

@@ -109,7 +109,7 @@ export interface TxDelayRecommendation {
 }
 
 /** Minimum packets for weak edge (rendered underneath validated topology) */
-export const MIN_WEAK_EDGE_PACKETS = 5;
+export const MIN_WEAK_EDGE_PACKETS = 2;
 
 /** Result of topology analysis */
 export interface MeshTopology {
