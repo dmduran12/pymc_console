@@ -135,7 +135,7 @@ src/
 │   ├── charts/            # AirtimeGauge, PacketTypesChart, TrafficStackedChart, NeighborPolarChart
 │   ├── controls/          # ControlPanel (mode/duty cycle)
 │   ├── layout/            # Sidebar, Header, BackgroundProvider
-│   ├── contacts/          # ContactsMap (Leaflet neighbor visualization with topology)
+│   ├── contacts/          # ContactsMap, PathHealthPanel (topology visualization)
 │   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization
 │   ├── shared/            # TimeRangeSelector, BackgroundSelector
 │   ├── stats/             # StatsCard
@@ -146,8 +146,9 @@ src/
 │   ├── format.ts          # Formatting utilities
 │   ├── packet-utils.ts    # Packet processing helpers
 │   ├── path-utils.ts      # Centralized path parsing and iteration utilities
+│   ├── path-registry.ts   # Path sequence tracking and canonical path detection
 │   ├── packet-cache.ts    # Deep packet loading (20K limit) with caching
-│   ├── mesh-topology.ts   # Mesh network analysis (affinity, topology graph, edge building)
+│   ├── mesh-topology.ts   # Mesh network analysis (7-phase topology system)
 │   ├── prefix-disambiguation.ts # Multi-factor prefix→node disambiguation system
 │   ├── topology-service.ts # Web Worker orchestration for topology computation
 │   ├── hooks/             # usePolling, useDebounce, useThemeColors
@@ -235,7 +236,86 @@ Edges are marked "certain" when:
 - FAR (<10km) = 0.4
 - VERY_FAR (<20km) = 0.2
 
-### ContactsMap Component (`src/components/contacts/ContactsMap.tsx`)
+### Advanced Topology Analysis (7 Phases)
+
+The `mesh-topology.ts` module implements a comprehensive 7-phase analysis system:
+
+**Phase 1: Directional Edge Tracking**
+Tracks traffic direction on each edge:
+- `forwardCount`, `reverseCount` - Observations in each direction
+- `symmetryRatio` - min/max ratio (1.0 = balanced)
+- `dominantDirection` - 'forward', 'reverse', or 'balanced'
+
+**Phase 2: Path Sequence Tracking** (`path-registry.ts`)
+Builds a registry of all observed paths:
+- `ObservedPath` - Unique path with hops, timestamps, observation count
+- `PathRegistry` - Collection indexed by endpoints
+- `canonicalPaths` - Most-used path per source-destination pair
+
+**Phase 3: Flood vs Direct Detection**
+Distinguishes routing types per edge:
+- `floodCount`, `directCount` - Observations by route type
+- `isDirectPathEdge` - True if >50% direct-routed (ground truth)
+
+**Phase 4: Edge Betweenness Centrality**
+Identifies backbone edges using graph theory:
+- `edgeBetweenness` - Map of edge key → normalized score (0-1)
+- `backboneEdges` - Top edges by betweenness (high traffic flow)
+- Replaces naive "top-3-by-count" heuristic
+
+**Phase 5: Mobile Repeater Detection**
+Identifies volatile/mobile nodes:
+- `pathVolatility` - How often node appears/disappears (0-1)
+- `activeWindowRatio` - Presence across time windows
+- `isMobile` - True if volatility > 0.3
+- UI: "Mobile" badge in node popup, orange styling
+
+**Phase 6: Enhanced TX Delay Recommendations**
+MeshCore-aligned transmission timing:
+- `avgPathPosition` - Where node typically appears (1 = first hop)
+- `pathPositionVariance` - Role consistency
+- `floodParticipationRate` - Congestion indicator (0-1)
+- `positionDelayMs` - Position-based delay adjustment
+  - Position 1-1.5: +50ms (first hop, highest collision)
+  - Position 1.5-2.5: +30ms
+  - Position 2.5-3.5: +15ms
+
+**Phase 7: Path Health Indicators**
+Health metrics for observed paths:
+- `healthScore` - Combined score (0-1): certainty (40%), recency (30%), trend (15%), alternates (15%)
+- `weakestLinkKey` - Edge key of lowest confidence link
+- `observationTrend` - Positive (increasing use) or negative (declining)
+- `alternatePathsCount` - Redundancy measure
+- `estimatedLatencyMs` - Based on hop count and route type
+- UI: Collapsible `PathHealthPanel` on Contacts page
+
+**Key Interfaces:**
+```typescript
+// Phase 1 & 3: TopologyEdge
+interface TopologyEdge {
+  forwardCount, reverseCount, symmetryRatio, dominantDirection,
+  floodCount, directCount, isDirectPathEdge
+}
+
+// Phase 5: NodeMobility
+interface NodeMobility {
+  pathVolatility, pathDiversity, isMobile, activeWindowRatio
+}
+
+// Phase 6: TxDelayRecommendation
+interface TxDelayRecommendation {
+  avgPathPosition, pathPositionVariance, floodParticipationRate,
+  pathDiversity, positionDelayMs
+}
+
+// Phase 7: PathHealth
+interface PathHealth {
+  healthScore, weakestLinkKey, avgEdgeCertainty,
+  observationTrend, alternatePathsCount, estimatedLatencyMs
+}
+```
+
+### ContactsMap Component
 
 Interactive Leaflet map with topology visualization, animations, and filtering.
 

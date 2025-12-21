@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home } from 'lucide-react';
+import { Maximize2, Minimize2, X, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -343,6 +343,7 @@ interface NodePopupContentProps {
   name: string;
   isHub: boolean;
   isZeroHop: boolean;
+  isMobile: boolean;
   centrality: number;
   affinity?: FullAffinity;
   meanSnr?: number;
@@ -358,7 +359,7 @@ function formatDistance(meters: number | null): string {
   return `${(meters / 1000).toFixed(1)}km`;
 }
 
-function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
+function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
   const [copied, setCopied] = useState(false);
   
   const copyHash = () => {
@@ -389,6 +390,11 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, centrality
             }}
           >
             {hopLabel}
+          </span>
+        )}
+        {isMobile && (
+          <span className="px-1 py-0.5 text-[7px] font-bold uppercase rounded bg-orange-500/30 text-orange-300" title="Paths through this node may be unstable">
+            Mobile
           </span>
         )}
         {onRemove && (
@@ -867,11 +873,16 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Build set of hub nodes and zero-hop nodes for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
   
-  // Identify backbone edges (top 3 strongest by certainCount)
+  // Identify backbone edges (by betweenness centrality, with fallback to top-3-by-count)
   const backboneEdgeKeys = useMemo(() => {
+    // Prefer betweenness-based backbone if available
+    if (meshTopology.backboneEdges && meshTopology.backboneEdges.length > 0) {
+      return new Set(meshTopology.backboneEdges);
+    }
+    // Fallback to top 3 by certainCount
     const sorted = [...meshTopology.validatedEdges].sort((a, b) => b.certainCount - a.certainCount);
     return new Set(sorted.slice(0, 3).map(e => e.key));
-  }, [meshTopology.validatedEdges]);
+  }, [meshTopology.backboneEdges, meshTopology.validatedEdges]);
   
   // Get all nodes connected to hubs (for solo hubs mode)
   const hubConnectedNodes = useMemo(() => {
@@ -1515,7 +1526,18 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     className="topology-edge-tooltip"
                   >
                     <div className="text-xs">
-                      <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                      {/* Show directional indicator if asymmetric */}
+                      {(edge.symmetryRatio ?? 1) < 0.7 && edge.dominantDirection !== 'balanced' ? (
+                        <div className="font-medium text-text-primary flex items-center gap-1">
+                          {edge.dominantDirection === 'forward' ? (
+                            <>{fromName} <ArrowRight className="w-3 h-3" /> {toName}</>
+                          ) : (
+                            <>{toName} <ArrowRight className="w-3 h-3" /> {fromName}</>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                      )}
                       <div className="text-text-secondary">
                         {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
                       </div>
@@ -1523,6 +1545,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                         <RefreshCw className="w-3 h-3" />
                         <span>Redundant path</span>
                       </div>
+                      {edge.isDirectPathEdge && (
+                        <div className="text-cyan-400 flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          <span>Direct path</span>
+                        </div>
+                      )}
                     </div>
                   </Tooltip>
                 </Polyline>
@@ -1553,14 +1581,31 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 className="topology-edge-tooltip"
               >
                 <div className="text-xs">
-                  <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                  {/* Show directional indicator if asymmetric */}
+                  {(edge.symmetryRatio ?? 1) < 0.7 && edge.dominantDirection !== 'balanced' ? (
+                    <div className="font-medium text-text-primary flex items-center gap-1">
+                      {edge.dominantDirection === 'forward' ? (
+                        <>{fromName} <ArrowRight className="w-3 h-3" /> {toName}</>
+                      ) : (
+                        <>{toName} <ArrowRight className="w-3 h-3" /> {fromName}</>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
+                  )}
                   <div className="text-text-secondary">
                     {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
                   </div>
                   {isBackbone && (
                     <div style={{ color: DESIGN.localColor }} className="font-semibold">Backbone</div>
                   )}
-                  {edge.isHubConnection && !isBackbone && (
+                  {edge.isDirectPathEdge && (
+                    <div className="text-cyan-400 flex items-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      <span>Direct path</span>
+                    </div>
+                  )}
+                  {edge.isHubConnection && !isBackbone && !edge.isDirectPathEdge && (
                     <div className="text-amber-400">Hub connection</div>
                   )}
                 </div>
@@ -1633,6 +1678,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Get TX delay recommendation for this node
           const txDelayRec = meshTopology.txDelayRecommendations.get(hash);
           
+          // Check if this is a mobile node
+          const isMobile = meshTopology.mobileNodes.includes(hash);
+          
           return (
             <Marker
               key={`${hash}-${opacityKey}`}
@@ -1650,6 +1698,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   name={name}
                   isHub={isHub}
                   isZeroHop={isZeroHop}
+                  isMobile={isMobile}
                   centrality={centrality}
                   affinity={affinity}
                   meanSnr={meanSnr}

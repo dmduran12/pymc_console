@@ -6,10 +6,11 @@
  */
 
 import { create } from 'zustand';
-import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation } from '@/lib/topology-service';
+import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation, type PathRegistry, type ObservedPath, type NodeMobility, type PathHealth } from '@/lib/topology-service';
+import { createEmptyPathRegistry } from '@/lib/path-registry';
 
 // Re-export types for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth };
 
 interface TopologyState {
   // Topology data
@@ -44,6 +45,16 @@ function createEmptyTopology(): MeshTopology {
     loops: [],
     loopEdgeKeys: new Set(),
     txDelayRecommendations: new Map(),
+    // Phase 2: Path registry
+    pathRegistry: createEmptyPathRegistry(),
+    // Phase 4: Edge betweenness
+    edgeBetweenness: new Map(),
+    backboneEdges: [],
+    // Phase 5: Mobile repeater detection
+    nodeMobility: new Map(),
+    mobileNodes: [],
+    // Phase 7: Path health indicators
+    pathHealth: [],
   };
 }
 
@@ -157,3 +168,61 @@ export const useHasLocalLoop = () => useTopologyStoreBase((s) =>
 
 /** TX delay recommendations for hub nodes */
 export const useTxDelayRecommendations = () => useTopologyStoreBase((s) => s.topology.txDelayRecommendations);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 2: Path Registry Selectors
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Full path registry */
+export const usePathRegistry = () => useTopologyStoreBase((s) => s.topology.pathRegistry);
+
+/** All observed paths */
+export const useObservedPaths = () => useTopologyStoreBase((s) => s.topology.pathRegistry.paths);
+
+/** Canonical (most-used) paths per endpoint pair */
+export const useCanonicalPaths = () => useTopologyStoreBase((s) => s.topology.pathRegistry.canonicalPaths);
+
+/** Number of unique paths */
+export const useUniquePathCount = () => useTopologyStoreBase((s) => s.topology.pathRegistry.uniquePathCount);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 4: Edge Betweenness Selectors
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Edge betweenness centrality scores */
+export const useEdgeBetweenness = () => useTopologyStoreBase((s) => s.topology.edgeBetweenness);
+
+/** Backbone edges (high betweenness) */
+export const useBackboneEdges = () => useTopologyStoreBase((s) => s.topology.backboneEdges);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 5: Mobile Repeater Detection Selectors
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Node mobility tracking map */
+export const useNodeMobility = () => useTopologyStoreBase((s) => s.topology.nodeMobility);
+
+/** List of mobile node hashes */
+export const useMobileNodes = () => useTopologyStoreBase((s) => s.topology.mobileNodes);
+
+/** Check if a specific node is mobile */
+export const useIsMobileNode = (hash: string) => useTopologyStoreBase((s) => 
+  s.topology.mobileNodes.includes(hash)
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 7: Path Health Selectors
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Path health indicators for top observed paths */
+export const usePathHealth = () => useTopologyStoreBase((s) => s.topology.pathHealth);
+
+/** Get top N healthy paths */
+export const useTopHealthyPaths = (n: number = 10) => useTopologyStoreBase((s) => 
+  s.topology.pathHealth.slice(0, n)
+);
+
+/** Get paths with declining health (negative trend) */
+export const useDecliningPaths = () => useTopologyStoreBase((s) => 
+  s.topology.pathHealth.filter(p => p.observationTrend < 0)
+);
