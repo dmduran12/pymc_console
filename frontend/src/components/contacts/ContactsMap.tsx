@@ -375,138 +375,147 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
     : null;
   
   return (
-    <div className="min-w-[200px]">
-      {/* === ROW 1: Name + Badges + Remove === */}
-      <div className="flex items-center gap-1.5 mb-1">
-        <span className="text-[14px] font-semibold text-text-primary truncate flex-1">{name}</span>
-        {isHub && (
-          <span className="px-1 py-0.5 text-[7px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
-        )}
-        {hopLabel && (
-          <span 
-            className="px-1 py-0.5 text-[7px] font-bold uppercase rounded"
-            style={{ 
-              backgroundColor: isZeroHop ? SIGNAL_COLORS.zeroHop : 'rgba(255,255,255,0.1)', 
-              color: isZeroHop ? '#fff' : 'rgba(255,255,255,0.6)' 
-            }}
-          >
-            {hopLabel}
-          </span>
-        )}
-        {isMobile && (
-          <span className="px-1 py-0.5 text-[7px] font-bold uppercase rounded bg-orange-500/30 text-orange-300" title="Paths through this node may be unstable">
-            Mobile
-          </span>
-        )}
-        {onRemove && (
-          <button
-            onClick={onRemove}
-            className="p-0.5 text-text-muted/40 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-            title="Remove node"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
+    <div className="min-w-[220px]">
+      {/* === HEADER: Name + Badges === */}
+      <div className="flex items-start gap-1.5 mb-1.5">
+        <span className="text-[15px] font-semibold text-text-primary leading-tight flex-1 min-w-0">{name}</span>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {isHub && (
+            <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
+          )}
+          {hopLabel && (
+            <span 
+              className="px-1.5 py-0.5 text-[8px] font-bold uppercase rounded"
+              style={{ 
+                backgroundColor: isZeroHop ? SIGNAL_COLORS.zeroHop : 'rgba(255,255,255,0.1)', 
+                color: isZeroHop ? '#fff' : 'rgba(255,255,255,0.6)' 
+              }}
+            >
+              {hopLabel}
+            </span>
+          )}
+          {isMobile && (
+            <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase rounded bg-orange-500/30 text-orange-300" title="Paths through this node may be unstable">
+              Mobile
+            </span>
+          )}
+        </div>
       </div>
       
-      {/* === ROW 2: Hash + Copy + Quick Stats === */}
-      <div className="flex items-center gap-1.5 text-[10px] text-text-muted mb-2">
-        <code className="font-mono bg-white/5 px-1 py-0.5 rounded">{hashPrefix}</code>
-        <button onClick={copyHash} className="p-0.5 hover:bg-white/10 rounded" title="Copy hash">
-          {copied ? <Check className="w-2.5 h-2.5 text-accent-success" /> : <Copy className="w-2.5 h-2.5" />}
+      {/* === IDENTITY: Hash + Copy + Metadata === */}
+      <div className="flex items-center gap-1.5 text-[10px] text-text-muted mb-1.5">
+        <code className="font-mono bg-white/5 px-1.5 py-0.5 rounded">{hashPrefix}</code>
+        <button onClick={copyHash} className="p-0.5 hover:bg-white/10 rounded transition-colors" title="Copy full hash">
+          {copied ? <Check className="w-3 h-3 text-accent-success" /> : <Copy className="w-3 h-3" />}
         </button>
-        <span className="text-text-muted/60">·</span>
-        <span>{formatRelativeTime(neighbor.last_seen)}</span>
+        <span className="text-text-muted/50">·</span>
+        <span className="whitespace-nowrap">{formatRelativeTime(neighbor.last_seen)}</span>
         {affinity?.distanceMeters && (
           <>
-            <span className="text-text-muted/60">·</span>
-            <span>{formatDistance(affinity.distanceMeters)}</span>
+            <span className="text-text-muted/50">·</span>
+            <span className="whitespace-nowrap font-medium">{formatDistance(affinity.distanceMeters)}</span>
           </>
         )}
       </div>
       
-      {/* === GPS COORDINATES === */}
-      <div className="text-[9px] text-text-muted/60 mb-2 font-mono">
+      {/* === LOCATION === */}
+      <div className="text-[9px] text-text-muted/50 mb-2.5 font-mono">
         {neighbor.latitude && neighbor.longitude && neighbor.latitude !== 0 && neighbor.longitude !== 0 ? (
           <span>{neighbor.latitude.toFixed(5)}, {neighbor.longitude.toFixed(5)}</span>
         ) : (
-          <span className="italic">No Location</span>
+          <span className="italic">Location Unknown</span>
         )}
       </div>
       
-      {/* === METRICS GRID === */}
-      <div className="grid grid-cols-4 gap-x-2 gap-y-1.5 text-center mb-2">
+      {/* === METRICS: Semantic Labels === */}
+      <div className="grid grid-cols-4 gap-x-2.5 gap-y-2 text-center mb-2.5">
         {/* Packets */}
         <div>
-          <p className="text-[8px] uppercase text-text-muted/60">Pkts</p>
-          <p className="text-[12px] font-medium tabular-nums">{affinity?.frequency || 0}</p>
+          <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">Packets</p>
+          <p className="text-[13px] font-semibold tabular-nums">{affinity?.frequency || 0}</p>
         </div>
         {/* Adverts */}
         <div>
-          <p className="text-[8px] uppercase text-text-muted/60">Advs</p>
-          <p className="text-[12px] font-medium tabular-nums">{neighbor.advert_count || 0}</p>
+          <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">Adverts</p>
+          <p className="text-[13px] font-semibold tabular-nums">{neighbor.advert_count || 0}</p>
         </div>
         {/* SNR (zero-hop) or Centrality (hub) or Forwards */}
         {isZeroHop && meanSnr !== undefined ? (
           <div>
-            <p className="text-[8px] uppercase text-text-muted/60">SNR</p>
-            <p className="text-[12px] font-medium tabular-nums">{meanSnr.toFixed(1)}</p>
+            <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">SNR</p>
+            <p className="text-[13px] font-semibold tabular-nums">{meanSnr.toFixed(1)}</p>
           </div>
         ) : isHub && centrality > 0 ? (
           <div>
-            <p className="text-[8px] uppercase text-text-muted/60">Central</p>
-            <p className="text-[12px] font-medium tabular-nums text-amber-400">{(centrality * 100).toFixed(0)}%</p>
+            <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">Central</p>
+            <p className="text-[13px] font-semibold tabular-nums text-amber-400">{(centrality * 100).toFixed(0)}%</p>
           </div>
         ) : (
           <div>
-            <p className="text-[8px] uppercase text-text-muted/60">Fwds</p>
-            <p className="text-[12px] font-medium tabular-nums">{affinity?.directForwardCount || 0}</p>
+            <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">Forwards</p>
+            <p className="text-[13px] font-semibold tabular-nums">{affinity?.directForwardCount || 0}</p>
           </div>
         )}
         {/* RSSI (zero-hop) or Neighbors (topology) */}
         {isZeroHop && neighbor.rssi !== undefined ? (
           <div>
-            <p className="text-[8px] uppercase text-text-muted/60">RSSI</p>
-            <p className="text-[12px] font-medium tabular-nums">{neighbor.rssi}</p>
+            <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">RSSI</p>
+            <p className="text-[13px] font-semibold tabular-nums">{neighbor.rssi}</p>
           </div>
         ) : txDelayRec && !txDelayRec.insufficientData ? (
           <div>
-            <p className="text-[8px] uppercase text-text-muted/60">Nbrs</p>
-            <p className="text-[12px] font-medium tabular-nums">{txDelayRec.directNeighborCount}</p>
+            <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">Neighbors</p>
+            <p className="text-[13px] font-semibold tabular-nums">{txDelayRec.directNeighborCount}</p>
           </div>
         ) : (
           <div>
-            <p className="text-[8px] uppercase text-text-muted/60">Fwds</p>
-            <p className="text-[12px] font-medium tabular-nums">{affinity?.directForwardCount || 0}</p>
+            <p className="text-[8px] uppercase tracking-wide text-text-muted/50 mb-0.5">Forwards</p>
+            <p className="text-[13px] font-semibold tabular-nums">{affinity?.directForwardCount || 0}</p>
           </div>
         )}
       </div>
       
-      {/* === TX DELAY (compact) === */}
+      {/* === TX DELAY === */}
       {txDelayRec && (
-        <div className="flex items-center justify-between bg-white/[0.03] rounded px-2 py-1.5 mb-2">
-          <span className="text-[9px] uppercase text-text-muted/70">TX Delay</span>
-          {txDelayRec.insufficientData ? (
-            <span className="text-[10px] text-text-muted/50 italic">Insufficient data</span>
-          ) : (
-            <div className="flex items-center gap-3">
-              <span className="text-[11px]">
-                <span className="text-text-muted/60">flood </span>
-                <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span>
-              </span>
-              <span className="text-[11px]">
-                <span className="text-text-muted/60">direct </span>
-                <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span>
-              </span>
-            </div>
-          )}
+        <div className="bg-white/[0.03] rounded px-2.5 py-1.5 mb-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] uppercase tracking-wide text-text-muted/60 font-semibold">TX Delay</span>
+            {txDelayRec.insufficientData ? (
+              <span className="text-[10px] text-text-muted/40 italic">Insufficient Data</span>
+            ) : (
+              <div className="flex items-center gap-3">
+                <span className="text-[11px]">
+                  <span className="text-text-muted/50">Flood </span>
+                  <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span>
+                </span>
+                <span className="text-[11px]">
+                  <span className="text-text-muted/50">Direct </span>
+                  <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span>
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       )}
       
       {/* === REPEATER BADGE === */}
       {neighbor.is_repeater && (
         <div className="flex items-center">
-          <span className="text-[8px] uppercase px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-400">Repeater</span>
+          <span className="text-[8px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-semibold">Repeater</span>
+        </div>
+      )}
+      
+      {/* === ACTIONS: Remove button (bottom right, clear separation from Leaflet's close X) === */}
+      {onRemove && (
+        <div className="mt-2 pt-2 border-t border-white/5 flex justify-end">
+          <button
+            onClick={onRemove}
+            className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-red-400/70 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors flex items-center gap-1"
+            title="Remove this node from the map"
+          >
+            <X className="w-3 h-3" />
+            Remove
+          </button>
         </div>
       )}
     </div>
