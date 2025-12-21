@@ -168,6 +168,7 @@ interface ContactsMapProps {
   onRemoveNode?: (hash: string) => void;
   selectedNodeHash?: string | null;  // Hash of node to zoom to and open popup
   onNodeSelected?: () => void;  // Callback when selection is handled
+  highlightedEdgeKey?: string | null; // Edge key to highlight (from PathHealth panel)
 }
 
 // Legacy signal colors (kept for popup display)
@@ -512,6 +513,26 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
   );
 }
 
+// Highlight helper: when an edge is selected, ensure topology is visible and pan/zoom to it
+function EdgeHighlighter({ highlightedEdgeKey, validatedPolylines, weakPolylines, onEnsureTopology }: { highlightedEdgeKey?: string | null; validatedPolylines: Array<{ from: [number, number]; to: [number, number]; edge: TopologyEdge; }>; weakPolylines: Array<{ from: [number, number]; to: [number, number]; edge: TopologyEdge; }>; onEnsureTopology: () => void; }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!highlightedEdgeKey) return;
+    // Ensure topology is visible
+    onEnsureTopology();
+    // Find the edge in either set
+    const line = validatedPolylines.find(l => l.edge.key === highlightedEdgeKey) || weakPolylines.find(l => l.edge.key === highlightedEdgeKey);
+    if (!line) return;
+    const mid: [number, number] = [
+      (line.from[0] + line.to[0]) / 2,
+      (line.from[1] + line.to[1]) / 2,
+    ];
+    // Smooth pan and a reasonable zoom level
+    map.setView(mid, Math.max(map.getZoom(), 11), { animate: true });
+  }, [highlightedEdgeKey, validatedPolylines, weakPolylines, map, onEnsureTopology]);
+  return null;
+}
+
 // Component to fit bounds only on initial load (not when user navigates)
 function FitBoundsOnce({ positions }: { positions: [number, number][] }) {
   const map = useMap();
@@ -578,7 +599,7 @@ function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: {
   return null;
 }
 
-export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected }: ContactsMapProps) {
+export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected, highlightedEdgeKey }: ContactsMapProps) {
   // Track hover state per marker (setHoveredMarker used for events, hoveredMarker reserved for future use)
   const [, setHoveredMarker] = useState<string | null>(null);
   
@@ -1423,6 +1444,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         />
         
         <FitBoundsOnce positions={allPositions} />
+        <EdgeHighlighter highlightedEdgeKey={highlightedEdgeKey} validatedPolylines={validatedPolylines} weakPolylines={weakPolylines} onEnsureTopology={() => setShowTopology(true)} />
         <ZoomToNode targetHash={selectedNodeHash || null} nodeCoordinates={nodeCoordinates} onComplete={onNodeSelected} />
         
         {/* Draw weak topology edges (underneath) - subtle 10% gray for emerging connections */}
@@ -1563,14 +1585,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           
           // Standard edge: single line with trace animation
           // Backbone edges get yellow color (same as local node)
+          const isHighlighted = highlightedEdgeKey && edge.key === highlightedEdgeKey;
           return (
             <Polyline
               key={`edge-${edge.key}`}
               positions={[from, animatedTo]}
               pathOptions={{
-                color: isBackbone ? DESIGN.localColor : DESIGN.edgeColor,
-                weight: isBackbone ? animatedWeight * 1.2 : animatedWeight,
-                opacity: isBackbone ? opacity * 1.3 : opacity,
+                color: isHighlighted ? '#FFD700' : (isBackbone ? DESIGN.localColor : DESIGN.edgeColor),
+                weight: isHighlighted ? Math.max(animatedWeight * 1.6, 4.5) : (isBackbone ? animatedWeight * 1.2 : animatedWeight),
+                opacity: isHighlighted ? 0.95 : (isBackbone ? opacity * 1.3 : opacity),
                 lineCap: 'round',
                 lineJoin: 'round',
               }}

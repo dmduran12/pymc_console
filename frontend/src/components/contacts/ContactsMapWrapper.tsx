@@ -14,6 +14,7 @@ interface ContactsMapWrapperProps {
   onRemoveNode?: (hash: string) => void;
   selectedNodeHash?: string | null;
   onNodeSelected?: () => void;
+  highlightedEdgeKey?: string | null;
 }
 
 // Error boundary to catch Leaflet loading errors
@@ -52,7 +53,7 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
 // Lazy import - Leaflet requires window object
 const ContactsMap = lazy(() => import('./ContactsMap'));
 
-export default function ContactsMapWrapper({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected }: ContactsMapWrapperProps) {
+export default function ContactsMapWrapper({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected, highlightedEdgeKey }: ContactsMapWrapperProps) {
   return (
     <MapErrorBoundary>
       <Suspense fallback={
@@ -67,6 +68,7 @@ export default function ContactsMapWrapper({ neighbors, localNode, localHash, on
           onRemoveNode={onRemoveNode}
           selectedNodeHash={selectedNodeHash}
           onNodeSelected={onNodeSelected}
+          highlightedEdgeKey={highlightedEdgeKey}
         />
       </Suspense>
     </MapErrorBoundary>
