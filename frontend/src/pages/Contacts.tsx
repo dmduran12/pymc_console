@@ -4,6 +4,7 @@ import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
 import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
+import { PathHealthPanel } from '@/components/contacts/PathHealthPanel';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
@@ -122,7 +123,7 @@ export default function Contacts() {
         case 'lastHeard':
           comparison = (contactA.last_seen || 0) - (contactB.last_seen || 0);
           break;
-        case 'distance':
+        case 'distance': {
           const distA = contactDistances.get(hashA) ?? null;
           const distB = contactDistances.get(hashB) ?? null;
           // Null/undefined distances go to the end
@@ -131,11 +132,13 @@ export default function Contacts() {
           else if (distB === null) comparison = -1;
           else comparison = distA - distB;
           break;
-        case 'centrality':
+        }
+        case 'centrality': {
           const centA = centrality.get(hashA) || 0;
           const centB = centrality.get(hashB) || 0;
           comparison = centA - centB;
           break;
+        }
       }
       
       return sortDirection === 'desc' ? -comparison : comparison;
@@ -205,6 +208,9 @@ export default function Contacts() {
           onNodeSelected={handleNodeSelected}
         />
       </div>
+      
+      {/* Path Health Panel */}
+      <PathHealthPanel maxPaths={10} />
 
       {/* Contacts List */}
       <div className="chart-container">

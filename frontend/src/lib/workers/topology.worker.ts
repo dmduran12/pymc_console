@@ -6,7 +6,8 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop, type TxDelayRecommendation } from '@/lib/mesh-topology';
+import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop, type TxDelayRecommendation, type NodeMobility, type PathHealth } from '@/lib/mesh-topology';
+import { serializePathRegistry, type SerializedPathRegistry } from '@/lib/path-registry';
 
 // Message types
 export interface TopologyWorkerRequest {
@@ -41,6 +42,16 @@ export interface SerializedTopology {
   loopEdgeKeyEntries: string[]; // Set serialized as array
   // TX delay recommendations for hub nodes
   txDelayRecommendationEntries: [string, TxDelayRecommendation][];
+  // Phase 2: Path registry
+  pathRegistry: SerializedPathRegistry;
+  // Phase 4: Edge betweenness
+  edgeBetweennessEntries: [string, number][];
+  backboneEdges: string[];
+  // Phase 5: Mobile repeater detection
+  nodeMobilityEntries: [string, NodeMobility][];
+  mobileNodes: string[];
+  // Phase 7: Path health indicators
+  pathHealth: PathHealth[];
 }
 
 export interface TopologyWorkerResponse {
@@ -100,6 +111,16 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
       loops: topology.loops,
       loopEdgeKeyEntries: Array.from(topology.loopEdgeKeys),
       txDelayRecommendationEntries: Array.from(topology.txDelayRecommendations.entries()),
+      // Phase 2: Path registry
+      pathRegistry: serializePathRegistry(topology.pathRegistry),
+      // Phase 4: Edge betweenness
+      edgeBetweennessEntries: Array.from(topology.edgeBetweenness.entries()),
+      backboneEdges: topology.backboneEdges,
+      // Phase 5: Mobile repeater detection
+      nodeMobilityEntries: Array.from(topology.nodeMobility.entries()),
+      mobileNodes: topology.mobileNodes,
+      // Phase 7: Path health indicators
+      pathHealth: topology.pathHealth,
     };
     
     const computeTimeMs = performance.now() - startTime;

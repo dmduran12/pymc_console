@@ -8,7 +8,8 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation } from '@/lib/mesh-topology';
+import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, NodeMobility, PathHealth } from '@/lib/mesh-topology';
+import { deserializePathRegistry, createEmptyPathRegistry, type PathRegistry, type ObservedPath } from '@/lib/path-registry';
 import type { 
   TopologyWorkerRequest, 
   TopologyWorkerMessage, 
@@ -16,7 +17,7 @@ import type {
 } from '@/lib/workers/topology.worker';
 
 // Re-export for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth };
 
 /** Listener for topology changes */
 export type TopologyListener = (topology: MeshTopology, computeTimeMs: number) => void;
@@ -40,6 +41,18 @@ function deserializeTopology(serialized: SerializedTopology): MeshTopology {
     loops: serialized.loops ?? [],
     loopEdgeKeys: new Set(serialized.loopEdgeKeyEntries ?? []),
     txDelayRecommendations: new Map(serialized.txDelayRecommendationEntries ?? []),
+    // Phase 2: Path registry
+    pathRegistry: serialized.pathRegistry 
+      ? deserializePathRegistry(serialized.pathRegistry) 
+      : createEmptyPathRegistry(),
+    // Phase 4: Edge betweenness
+    edgeBetweenness: new Map(serialized.edgeBetweennessEntries ?? []),
+    backboneEdges: serialized.backboneEdges ?? [],
+    // Phase 5: Mobile repeater detection
+    nodeMobility: new Map(serialized.nodeMobilityEntries ?? []),
+    mobileNodes: serialized.mobileNodes ?? [],
+    // Phase 7: Path health indicators
+    pathHealth: serialized.pathHealth ?? [],
   };
 }
 
@@ -62,6 +75,16 @@ function createEmptyTopology(): MeshTopology {
     loops: [],
     loopEdgeKeys: new Set(),
     txDelayRecommendations: new Map(),
+    // Phase 2: Path registry
+    pathRegistry: createEmptyPathRegistry(),
+    // Phase 4: Edge betweenness
+    edgeBetweenness: new Map(),
+    backboneEdges: [],
+    // Phase 5: Mobile repeater detection
+    nodeMobility: new Map(),
+    mobileNodes: [],
+    // Phase 7: Path health indicators
+    pathHealth: [],
   };
 }
 

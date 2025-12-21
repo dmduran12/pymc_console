@@ -289,7 +289,7 @@ export function buildPrefixLookup(
     }
     
     let distanceToLocal: number | undefined;
-    let isZeroHop = neighbor.zero_hop === true; // Direct radio contact flag
+    const isZeroHop = neighbor.zero_hop === true; // Direct radio contact flag
     
     if (hasLocalCoords && neighbor.latitude && neighbor.longitude &&
         (neighbor.latitude !== 0 || neighbor.longitude !== 0)) {

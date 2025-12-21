@@ -16,13 +16,17 @@ import {
   resolvePrefix, 
   getDisambiguationStats,
 } from './prefix-disambiguation';
-import { 
+import {
   parsePacketPath, 
   getHashPrefix, 
   prefixMatches,
   getPositionFromIndex,
   getHopDistanceFromLocal,
 } from './path-utils';
+import {
+  buildPathRegistry,
+  type PathRegistry,
+} from './path-registry';
 
 /** Represents a directed edge between two nodes */
 export interface TopologyEdge {
@@ -49,6 +53,24 @@ export interface TopologyEdge {
   certainCount: number;
   /** Whether this edge is part of at least one detected loop (redundant path) */
   isLoopEdge?: boolean;
+  
+  // === DIRECTIONAL TRACKING (Phase 1) ===
+  /** Observations in fromHash→toHash direction */
+  forwardCount: number;
+  /** Observations in toHash→fromHash direction */
+  reverseCount: number;
+  /** Symmetry ratio: min(forward,reverse) / max(forward,reverse), 1.0 = perfectly symmetric */
+  symmetryRatio: number;
+  /** Which direction has more traffic */
+  dominantDirection: 'forward' | 'reverse' | 'balanced';
+  
+  // === FLOOD vs DIRECT TRACKING (Phase 3) ===
+  /** Number of observations from flood-routed packets */
+  floodCount: number;
+  /** Number of observations from direct-routed packets */
+  directCount: number;
+  /** True if >50% of observations are from direct-routed packets (ground truth path) */
+  isDirectPathEdge: boolean;
 }
 
 /**
@@ -90,6 +112,11 @@ export const MIN_PACKETS_FOR_TX_DELAY = 100;
 /**
  * Recommended TX delay settings for a node based on traffic analysis.
  * Used to suggest optimal tx_delay_factor and direct.tx_delay_factor.
+ * 
+ * Phase 6 enhancements incorporate MeshCore routing semantics:
+ * - Path position affects transmission timing (earlier nodes transmit first)
+ * - Flood participation rate indicates congestion potential
+ * - Path diversity shows how many routes use this node
  */
 export interface TxDelayRecommendation {
   /** Recommended tx_delay_factor (0.5-1.5, higher = more conservative) */
@@ -106,10 +133,76 @@ export interface TxDelayRecommendation {
   confidence: number;
   /** True if insufficient data (<100 packets) to make recommendation */
   insufficientData?: boolean;
+  
+  // === PHASE 6: MeshCore-aligned path metrics ===
+  /** Average path position (1 = first hop after source, higher = closer to destination) */
+  avgPathPosition: number;
+  /** Variance in path position (low = consistent role, high = varied usage) */
+  pathPositionVariance: number;
+  /** Percentage of flood packets this node forwarded (0-1) */
+  floodParticipationRate: number;
+  /** Number of distinct paths using this node */
+  pathDiversity: number;
+  /** Recommended additional delay based on path position (ms) */
+  positionDelayMs: number;
 }
 
 /** Minimum packets for weak edge (rendered underneath validated topology) */
 export const MIN_WEAK_EDGE_PACKETS = 2;
+
+/**
+ * Node mobility tracking for Phase 5.
+ * Identifies nodes that may be mobile (frequently appear/disappear from paths).
+ */
+export interface NodeMobility {
+  /** Node hash */
+  hash: string;
+  /** How often this node appears/disappears from paths (0-1, higher = more volatile) */
+  pathVolatility: number;
+  /** How many distinct paths this node appears in */
+  pathDiversity: number;
+  /** Average time this node stays in paths (hours) */
+  avgPathLifespanHours: number;
+  /** True if volatility > 0.3 (likely a mobile node) */
+  isMobile: boolean;
+  /** Last time this node was seen in a path (unix ms) */
+  lastSeen: number;
+  /** Number of time windows where node was active vs total windows */
+  activeWindowRatio: number;
+}
+
+/**
+ * Path health indicator for Phase 7.
+ * Provides health score and metrics for frequently observed paths.
+ */
+export interface PathHealth {
+  /** Unique key for this path (joined hops with >) */
+  pathKey: string;
+  /** The path as array of 2-char hex prefixes */
+  hops: string[];
+  /** Overall health score (0-1, higher = healthier path) */
+  healthScore: number;
+  /** Key of the weakest edge in this path */
+  weakestLinkKey: string | null;
+  /** Confidence of the weakest edge */
+  weakestLinkConfidence: number;
+  /** Average edge certainty across the path */
+  avgEdgeCertainty: number;
+  /** Observation trend: positive = increasing, negative = declining */
+  observationTrend: number;
+  /** Number of alternate paths to the same destination */
+  alternatePathsCount: number;
+  /** Estimated latency in ms (based on hop count and path type) */
+  estimatedLatencyMs: number;
+  /** Total observations of this path */
+  observationCount: number;
+  /** Route type (flood vs direct) */
+  routeType: 'flood' | 'direct' | 'mixed';
+  /** Last time this path was observed (unix timestamp) */
+  lastSeen: number;
+  /** Whether this path involves a hub node */
+  involvesHub: boolean;
+}
 
 /** Result of topology analysis */
 export interface MeshTopology {
@@ -145,6 +238,26 @@ export interface MeshTopology {
   loopEdgeKeys: Set<string>;
   /** TX delay recommendations for all nodes with sufficient data (hash -> recommendation) */
   txDelayRecommendations: Map<string, TxDelayRecommendation>;
+  
+  // === PHASE 2: Path Sequence Tracking ===
+  /** Registry of all observed paths for route analysis */
+  pathRegistry: PathRegistry;
+  
+  // === PHASE 4: Edge Betweenness Centrality ===
+  /** Edge betweenness scores (edge key -> normalized score 0-1) */
+  edgeBetweenness: Map<string, number>;
+  /** Backbone edges identified by high betweenness (top edges carrying most traffic) */
+  backboneEdges: string[];
+  
+  // === PHASE 5: Mobile Repeater Detection ===
+  /** Node mobility tracking (hash -> NodeMobility) */
+  nodeMobility: Map<string, NodeMobility>;
+  /** Nodes identified as potentially mobile */
+  mobileNodes: string[];
+  
+  // === PHASE 7: Path Health Indicators ===
+  /** Health metrics for top observed paths */
+  pathHealth: PathHealth[];
 }
 
 interface EdgeAccumulator {
@@ -161,6 +274,18 @@ interface EdgeAccumulator {
   certainCount: number;
   /** Number of uncertain observations (at least one ambiguous endpoint) */
   uncertainCount: number;
+  
+  // === DIRECTIONAL TRACKING (Phase 1) ===
+  /** Observations where traffic flowed fromHash→toHash */
+  forwardCount: number;
+  /** Observations where traffic flowed toHash→fromHash */
+  reverseCount: number;
+  
+  // === FLOOD vs DIRECT TRACKING (Phase 3) ===
+  /** Observations from flood-routed packets (route_type 0) */
+  floodCount: number;
+  /** Observations from direct-routed packets (route_type 1) */
+  directCount: number;
 }
 
 // Re-export from path-utils for backward compatibility
@@ -683,17 +808,26 @@ export function findNetworkLoops(
  * - Number of direct neighbors (topology edges connected to this node)
  * - Edge validation strength (how well-validated the node's connections are)
  * 
+ * Phase 6 enhancements:
+ * - Path position tracking (first hop = higher delay needed)
+ * - Flood participation rate (congestion indicator)
+ * - Path diversity (routing importance)
+ * 
  * Nodes with <100 packets get an "insufficient data" result.
  * 
  * @param edges - All topology edges
  * @param nodePathCounts - Map of node hash -> number of paths it appeared in
  * @param packets - All packets for timing analysis
+ * @param pathRegistry - Registry of observed paths for Phase 6 metrics
+ * @param neighbors - Neighbor map for prefix matching (reserved for future use)
  * @returns Map of node hash -> TxDelayRecommendation
  */
 function calculateNodeTxDelays(
   edges: TopologyEdge[],
   nodePathCounts: Map<string, number>,
-  packets: Packet[]
+  packets: Packet[],
+  pathRegistry: PathRegistry,
+  _neighbors: Record<string, NeighborInfo>
 ): Map<string, TxDelayRecommendation> {
   const recommendations = new Map<string, TxDelayRecommendation>();
   
@@ -788,9 +922,58 @@ function calculateNodeTxDelays(
         collisionRisk: 0,
         confidence: 0,
         insufficientData: true,
+        // Phase 6 defaults
+        avgPathPosition: 0,
+        pathPositionVariance: 0,
+        floodParticipationRate: 0,
+        pathDiversity: 0,
+        positionDelayMs: 0,
       });
       continue;
     }
+    
+    // === PHASE 6: Calculate path position metrics ===
+    // Find this node's prefix for path matching
+    const nodePrefix = nodeHash.startsWith('0x')
+      ? nodeHash.slice(2, 4).toUpperCase()
+      : nodeHash.slice(0, 2).toUpperCase();
+    
+    // Track path positions where this node appears
+    const positions: number[] = [];
+    let floodPathCount = 0;
+    let totalPathsWithNode = 0;
+    
+    for (const path of pathRegistry.paths) {
+      // Check if this node appears in the path
+      const posInPath = path.hops.findIndex(hop => hop.toUpperCase() === nodePrefix);
+      if (posInPath >= 0) {
+        // Position is 1-indexed from source (position 0 in hops = first relay)
+        // Higher position = closer to destination
+        positions.push(posInPath + 1);
+        totalPathsWithNode++;
+        if (path.routeType === 'flood') {
+          floodPathCount++;
+        }
+      }
+    }
+    
+    // Calculate position stats
+    const avgPathPosition = positions.length > 0
+      ? positions.reduce((a, b) => a + b, 0) / positions.length
+      : 0;
+    
+    // Variance calculation
+    let pathPositionVariance = 0;
+    if (positions.length > 1) {
+      const sumSquaredDiff = positions.reduce((sum, pos) => sum + Math.pow(pos - avgPathPosition, 2), 0);
+      pathPositionVariance = sumSquaredDiff / positions.length;
+    }
+    
+    const floodParticipationRate = totalPathsWithNode > 0
+      ? floodPathCount / totalPathsWithNode
+      : 0;
+    
+    const pathDiversity = totalPathsWithNode;
     
     // Traffic intensity: this node's edge packets / minute
     const trafficIntensity = timeSpanMinutes > 0 
@@ -842,6 +1025,30 @@ function calculateNodeTxDelays(
     const sampleConfidence = Math.min(packets.length / 500, 1);
     const confidence = Math.round((validationConfidence * 0.6 + sampleConfidence * 0.4) * 100) / 100;
     
+    // Phase 6: Position-based delay adjustment
+    // Nodes early in paths (position 1-2) need HIGHER delays (more collision potential)
+    // Nodes later in paths can use lower delays
+    let positionDelayMs = 0;
+    if (avgPathPosition > 0) {
+      if (avgPathPosition <= 1.5) {
+        // First hop position - highest delay
+        positionDelayMs = 50;
+      } else if (avgPathPosition <= 2.5) {
+        // Second hop
+        positionDelayMs = 30;
+      } else if (avgPathPosition <= 3.5) {
+        // Third hop
+        positionDelayMs = 15;
+      }
+      // Further hops get no additional delay
+    }
+    
+    // Adjust txDelayFactor based on flood participation
+    // High flood participation = needs conservative delays
+    if (floodParticipationRate > 0.7) {
+      txDelayFactor = Math.min(1.5, txDelayFactor + 0.1);
+    }
+    
     recommendations.set(nodeHash, {
       txDelayFactor,
       directTxDelayFactor,
@@ -850,10 +1057,388 @@ function calculateNodeTxDelays(
       collisionRisk: Math.round(collisionRisk * 100) / 100,
       confidence,
       insufficientData: false,
+      // Phase 6 metrics
+      avgPathPosition: Math.round(avgPathPosition * 10) / 10,
+      pathPositionVariance: Math.round(pathPositionVariance * 100) / 100,
+      floodParticipationRate: Math.round(floodParticipationRate * 100) / 100,
+      pathDiversity,
+      positionDelayMs,
     });
   }
   
   return recommendations;
+}
+
+/**
+ * Calculate edge betweenness centrality from observed paths.
+ * 
+ * Edge betweenness measures how often an edge appears in observed paths,
+ * normalized to 0-1. Higher betweenness = more traffic flows through this edge.
+ * 
+ * This is a more accurate backbone detection than simply using top-N by count,
+ * because it considers the actual routing patterns through the network.
+ * 
+ * @param pathRegistry - Registry of observed paths
+ * @param edges - Topology edges to calculate betweenness for
+ * @returns Map of edge key -> betweenness score (0-1)
+ */
+function calculateEdgeBetweenness(
+  pathRegistry: PathRegistry,
+  edges: TopologyEdge[]
+): Map<string, number> {
+  const betweenness = new Map<string, number>();
+  
+  // Initialize all edges to 0
+  for (const edge of edges) {
+    betweenness.set(edge.key, 0);
+  }
+  
+  if (pathRegistry.paths.length === 0) {
+    return betweenness;
+  }
+  
+  // For each observed path, increment betweenness of each edge
+  // Weight by observation count (frequently seen paths contribute more)
+  for (const path of pathRegistry.paths) {
+    // Iterate consecutive pairs in the path
+    for (let i = 0; i < path.hops.length - 1; i++) {
+      const fromPrefix = path.hops[i];
+      const toPrefix = path.hops[i + 1];
+      
+      // Find matching edges by comparing prefixes
+      // Use simple prefix matching since paths store 2-char prefixes
+      for (const edge of edges) {
+        const edgeFromPrefix = getHashPrefix(edge.fromHash);
+        const edgeToPrefix = getHashPrefix(edge.toHash);
+        
+        // Check if this edge matches the path hop (either direction)
+        const matches = (
+          (edgeFromPrefix === fromPrefix && edgeToPrefix === toPrefix) ||
+          (edgeFromPrefix === toPrefix && edgeToPrefix === fromPrefix)
+        );
+        
+        if (matches) {
+          const current = betweenness.get(edge.key) || 0;
+          betweenness.set(edge.key, current + path.observationCount);
+          break; // Only count once per hop
+        }
+      }
+    }
+  }
+  
+  // Normalize to 0-1
+  const maxBetweenness = Math.max(...betweenness.values(), 1);
+  for (const [key, value] of betweenness) {
+    betweenness.set(key, value / maxBetweenness);
+  }
+  
+  return betweenness;
+}
+
+/**
+ * Identify backbone edges based on betweenness centrality.
+ * 
+ * Backbone edges are the most critical links in the network,
+ * carrying the highest proportion of traffic.
+ * 
+ * @param edgeBetweenness - Edge betweenness scores
+ * @param topN - Number of top edges to return (default 3)
+ * @param minBetweenness - Minimum betweenness to qualify (default 0.3)
+ * @returns Array of edge keys for backbone edges
+ */
+function identifyBackboneEdges(
+  edgeBetweenness: Map<string, number>,
+  topN: number = 3,
+  minBetweenness: number = 0.3
+): string[] {
+  // Sort edges by betweenness descending
+  const sorted = [...edgeBetweenness.entries()]
+    .filter(([, betweenness]) => betweenness >= minBetweenness)
+    .sort((a, b) => b[1] - a[1]);
+  
+  // Return top N
+  return sorted.slice(0, topN).map(([key]) => key);
+}
+
+/**
+ * Calculate node mobility metrics based on path appearance patterns.
+ * 
+ * Mobile nodes tend to:
+ * - Appear and disappear from paths frequently
+ * - Have short-lived path memberships
+ * - Show high volatility in their routing participation
+ * 
+ * @param pathRegistry - Registry of observed paths
+ * @param neighbors - Known neighbors for hash lookup
+ * @returns Map of node hash -> NodeMobility
+ */
+function calculateNodeMobility(
+  pathRegistry: PathRegistry,
+  neighbors: Record<string, NeighborInfo>
+): { nodeMobility: Map<string, NodeMobility>; mobileNodes: string[] } {
+  const nodeMobility = new Map<string, NodeMobility>();
+  const mobileNodes: string[] = [];
+  
+  if (pathRegistry.paths.length === 0) {
+    return { nodeMobility, mobileNodes };
+  }
+  
+  // Group paths by time windows (1 hour windows)
+  const WINDOW_SIZE_MS = 60 * 60 * 1000; // 1 hour
+  const timestamps = pathRegistry.paths.map(p => p.lastSeen).sort((a, b) => a - b);
+  const minTime = timestamps[0];
+  const maxTime = timestamps[timestamps.length - 1];
+  const numWindows = Math.ceil((maxTime - minTime) / WINDOW_SIZE_MS) || 1;
+  
+  // Track per-node statistics
+  const nodeStats = new Map<string, {
+    paths: Set<string>;
+    firstSeen: number;
+    lastSeen: number;
+    windowPresence: Set<number>; // Which time windows the node appeared in
+  }>();
+  
+  // Process all paths to gather per-node stats
+  for (const path of pathRegistry.paths) {
+    const windowIndex = Math.floor((path.lastSeen - minTime) / WINDOW_SIZE_MS);
+    
+    // Track each hop in the path
+    for (const prefix of path.hops) {
+      // Find matching neighbor by prefix
+      let nodeHash = prefix; // Default to prefix if no match
+      for (const [hash] of Object.entries(neighbors)) {
+        const neighborPrefix = hash.startsWith('0x') 
+          ? hash.slice(2, 4).toUpperCase()
+          : hash.slice(0, 2).toUpperCase();
+        if (neighborPrefix === prefix.toUpperCase()) {
+          nodeHash = hash;
+          break;
+        }
+      }
+      
+      let stats = nodeStats.get(nodeHash);
+      if (!stats) {
+        stats = {
+          paths: new Set(),
+          firstSeen: path.firstSeen,
+          lastSeen: path.lastSeen,
+          windowPresence: new Set(),
+        };
+        nodeStats.set(nodeHash, stats);
+      }
+      
+      stats.paths.add(path.id);
+      stats.firstSeen = Math.min(stats.firstSeen, path.firstSeen);
+      stats.lastSeen = Math.max(stats.lastSeen, path.lastSeen);
+      stats.windowPresence.add(windowIndex);
+    }
+  }
+  
+  // Calculate mobility metrics for each node
+  for (const [hash, stats] of nodeStats) {
+    const pathDiversity = stats.paths.size;
+    const lifespanMs = stats.lastSeen - stats.firstSeen;
+    const avgPathLifespanHours = lifespanMs > 0 ? lifespanMs / (1000 * 60 * 60) : 0;
+    const activeWindowRatio = numWindows > 0 ? stats.windowPresence.size / numWindows : 1;
+    
+    // Volatility: lower active window ratio = more volatile (appears/disappears)
+    // Also consider path diversity: more diverse paths = less volatile (consistently relaying)
+    // Formula: high volatility if (low activeWindowRatio AND low pathDiversity)
+    const windowVolatility = 1 - activeWindowRatio;
+    const diversityFactor = Math.min(pathDiversity / 10, 1); // Cap at 10 paths
+    const pathVolatility = windowVolatility * (1 - diversityFactor * 0.5);
+    
+    const isMobile = pathVolatility > 0.3;
+    
+    const mobility: NodeMobility = {
+      hash,
+      pathVolatility,
+      pathDiversity,
+      avgPathLifespanHours,
+      isMobile,
+      lastSeen: stats.lastSeen,
+      activeWindowRatio,
+    };
+    
+    nodeMobility.set(hash, mobility);
+    
+    if (isMobile) {
+      mobileNodes.push(hash);
+    }
+  }
+  
+  // Sort mobile nodes by volatility (most volatile first)
+  mobileNodes.sort((a, b) => {
+    const aVol = nodeMobility.get(a)?.pathVolatility ?? 0;
+    const bVol = nodeMobility.get(b)?.pathVolatility ?? 0;
+    return bVol - aVol;
+  });
+  
+  return { nodeMobility, mobileNodes };
+}
+
+/**
+ * Calculate health metrics for the top observed paths.
+ * 
+ * Path health is determined by:
+ * - Edge certainty (how well-validated each link is)
+ * - Observation recency (recently seen paths are healthier)
+ * - Observation trend (increasing vs declining usage)
+ * - Alternate paths (redundancy improves reliability)
+ * 
+ * @param pathRegistry - Registry of observed paths
+ * @param edges - Topology edges for certainty lookup
+ * @param hubNodes - Hub nodes for hub involvement detection
+ * @param topN - Number of top paths to analyze (default 20)
+ * @returns Array of PathHealth sorted by health score descending
+ */
+function calculatePathHealth(
+  pathRegistry: PathRegistry,
+  edges: TopologyEdge[],
+  hubNodes: string[],
+  topN: number = 20
+): PathHealth[] {
+  const pathHealth: PathHealth[] = [];
+  
+  if (pathRegistry.paths.length === 0) {
+    return pathHealth;
+  }
+  
+  // Build edge lookup by prefix pairs
+  const edgeByPrefix = new Map<string, TopologyEdge>();
+  for (const edge of edges) {
+    const fromPrefix = getHashPrefix(edge.fromHash);
+    const toPrefix = getHashPrefix(edge.toHash);
+    // Store both directions
+    edgeByPrefix.set(`${fromPrefix}>${toPrefix}`, edge);
+    edgeByPrefix.set(`${toPrefix}>${fromPrefix}`, edge);
+  }
+  
+  // Build hub prefix set for quick lookup
+  const hubPrefixes = new Set<string>();
+  for (const hubHash of hubNodes) {
+    hubPrefixes.add(getHashPrefix(hubHash));
+  }
+  
+  // Group paths by destination (last hop) for alternate path counting
+  const pathsByDest = new Map<string, string[]>();
+  for (const path of pathRegistry.paths) {
+    if (path.hops.length === 0) continue;
+    const dest = path.hops[path.hops.length - 1];
+    const existing = pathsByDest.get(dest) || [];
+    existing.push(path.id);
+    pathsByDest.set(dest, existing);
+  }
+  
+  // Sort paths by observation count (descending) to get top paths
+  const sortedPaths = [...pathRegistry.paths].sort(
+    (a, b) => b.observationCount - a.observationCount
+  );
+  
+  const now = Date.now();
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  
+  // Calculate health for top paths
+  for (const path of sortedPaths.slice(0, topN)) {
+    if (path.hops.length < 2) continue; // Need at least one edge
+    
+    // Find edge certainties along this path
+    let totalCertainty = 0;
+    let weakestCertainty = Infinity;
+    let weakestLinkKey: string | null = null;
+    let edgeCount = 0;
+    let involvesHub = false;
+    
+    for (let i = 0; i < path.hops.length - 1; i++) {
+      const fromPrefix = path.hops[i];
+      const toPrefix = path.hops[i + 1];
+      const edgeLookupKey = `${fromPrefix}>${toPrefix}`;
+      const edge = edgeByPrefix.get(edgeLookupKey);
+      
+      if (edge) {
+        // Certainty as ratio of certain observations to total
+        const edgeCertainty = edge.packetCount > 0 
+          ? edge.certainCount / edge.packetCount 
+          : 0;
+        totalCertainty += edgeCertainty;
+        edgeCount++;
+        
+        if (edgeCertainty < weakestCertainty) {
+          weakestCertainty = edgeCertainty;
+          weakestLinkKey = edge.key;
+        }
+      } else {
+        // Unknown edge = low certainty
+        totalCertainty += 0.1;
+        edgeCount++;
+        if (0.1 < weakestCertainty) {
+          weakestCertainty = 0.1;
+          weakestLinkKey = makeEdgeKey(fromPrefix, toPrefix);
+        }
+      }
+      
+      // Check for hub involvement
+      if (hubPrefixes.has(fromPrefix) || hubPrefixes.has(toPrefix)) {
+        involvesHub = true;
+      }
+    }
+    
+    const avgEdgeCertainty = edgeCount > 0 ? totalCertainty / edgeCount : 0;
+    const weakestLinkConfidence = weakestCertainty === Infinity ? 0 : weakestCertainty;
+    
+    // Observation trend: compare first half vs second half of observation timestamps
+    // Positive = increasing, negative = declining
+    const ageHours = (now - path.lastSeen) / ONE_HOUR_MS;
+    const recencyScore = Math.exp(-ageHours / 24); // Decay over 24 hours
+    
+    // Simple trend: if recently seen and has many observations, trend is positive
+    const observationTrend = path.observationCount > 10 && ageHours < 12
+      ? 0.5 + (1 - ageHours / 12) * 0.5  // Positive trend
+      : ageHours > 48 
+        ? -0.5 // Declining
+        : 0;   // Neutral
+    
+    // Alternate paths to same destination
+    const dest = path.hops[path.hops.length - 1];
+    const alternates = pathsByDest.get(dest) || [];
+    const alternatePathsCount = Math.max(0, alternates.length - 1); // Exclude self
+    
+    // Estimated latency: ~30ms per hop for flood, ~20ms for direct
+    const baseLatencyPerHop = path.routeType === 'direct' ? 20 : 30;
+    const estimatedLatencyMs = path.hops.length * baseLatencyPerHop;
+    
+    // Health score calculation
+    // Factors: edge certainty (40%), recency (30%), trend (15%), alternates (15%)
+    const certaintyFactor = avgEdgeCertainty * 0.4;
+    const recencyFactor = recencyScore * 0.3;
+    const trendFactor = ((observationTrend + 1) / 2) * 0.15; // Normalize -1..1 to 0..1
+    const alternateFactor = Math.min(alternatePathsCount / 3, 1) * 0.15; // Cap at 3 alternates
+    
+    const healthScore = Math.round(
+      (certaintyFactor + recencyFactor + trendFactor + alternateFactor) * 100
+    ) / 100;
+    
+    pathHealth.push({
+      pathKey: path.id,
+      hops: [...path.hops],
+      healthScore,
+      weakestLinkKey,
+      weakestLinkConfidence: Math.round(weakestLinkConfidence * 100) / 100,
+      avgEdgeCertainty: Math.round(avgEdgeCertainty * 100) / 100,
+      observationTrend: Math.round(observationTrend * 100) / 100,
+      alternatePathsCount,
+      estimatedLatencyMs,
+      observationCount: path.observationCount,
+      routeType: path.routeType === 'unknown' ? 'mixed' : path.routeType,
+      lastSeen: path.lastSeen,
+      involvesHub,
+    });
+  }
+  
+  // Sort by health score descending
+  pathHealth.sort((a, b) => b.healthScore - a.healthScore);
+  
+  return pathHealth;
 }
 
 /**
@@ -915,15 +1500,30 @@ export function buildMeshTopology(
   const nodeBridgeCounts = new Map<string, number>(); // How many times node is in middle of path
   
   // Helper to add/update edge accumulator
+  // actualFrom/actualTo represent the real direction of traffic flow (for directional tracking)
+  // routeType: 0=flood, 1=direct, 2=transport, undefined=unknown
   const addEdgeObservation = (
-    fromHash: string,
-    toHash: string,
+    actualFrom: string,
+    actualTo: string,
     hopConfidence: number,
     isCertain: boolean,
-    hopDistanceFromLocal: number
+    hopDistanceFromLocal: number,
+    routeType?: number
   ) => {
-    const key = makeEdgeKey(fromHash, toHash);
+    // Edge key is always sorted for consistent lookup (bidirectional edge)
+    const key = makeEdgeKey(actualFrom, actualTo);
     const existing = accumulators.get(key);
+    
+    // Determine canonical direction (fromHash is always the "smaller" hash alphabetically)
+    // This ensures we can track forward vs reverse consistently
+    const [canonicalFrom, canonicalTo] = actualFrom < actualTo 
+      ? [actualFrom, actualTo] 
+      : [actualTo, actualFrom];
+    const isForward = actualFrom === canonicalFrom; // Traffic matches canonical direction
+    
+    // Determine if this is flood or direct routed
+    const isFlood = routeType === 0 || routeType === undefined; // Default to flood if unknown
+    const isDirect = routeType === 1;
     
     if (existing) {
       existing.count++;
@@ -937,14 +1537,26 @@ export function buildMeshTopology(
       } else {
         existing.uncertainCount++;
       }
+      // Track direction
+      if (isForward) {
+        existing.forwardCount++;
+      } else {
+        existing.reverseCount++;
+      }
+      // Track route type
+      if (isFlood) {
+        existing.floodCount++;
+      } else if (isDirect) {
+        existing.directCount++;
+      }
     } else {
       const hopCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
       if (hopDistanceFromLocal < hopCounts.length) {
         hopCounts[hopDistanceFromLocal]++;
       }
       accumulators.set(key, {
-        fromHash,
-        toHash,
+        fromHash: canonicalFrom,
+        toHash: canonicalTo,
         key,
         count: 1,
         confidenceSum: hopConfidence,
@@ -952,6 +1564,10 @@ export function buildMeshTopology(
         hopDistanceCounts: hopCounts,
         certainCount: isCertain ? 1 : 0,
         uncertainCount: isCertain ? 0 : 1,
+        forwardCount: isForward ? 1 : 0,
+        reverseCount: isForward ? 0 : 1,
+        floodCount: isFlood ? 1 : 0,
+        directCount: isDirect ? 1 : 0,
       });
     }
   };
@@ -993,7 +1609,9 @@ export function buildMeshTopology(
         // This edge is at the FAR end of the path from local's perspective
         const hopDistance = effectiveLength + 1; // Beyond the effective path
         
-        addEdgeObservation(srcHash, firstHopResult.hash, confidence, isCertain, hopDistance);
+        // Get route type: prefer 'route' (SQLite API), fallback to 'route_type'
+        const routeType = packet.route ?? packet.route_type;
+        addEdgeObservation(srcHash, firstHopResult.hash, confidence, isCertain, hopDistance, routeType);
         
         // Track for centrality
         nodesInPath.add(srcHash);
@@ -1026,7 +1644,9 @@ export function buildMeshTopology(
         const isCertain = true;
         const confidence = lastHopResult.confidence;
         
-        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0);
+        // Get route type: prefer 'route' (SQLite API), fallback to 'route_type'
+        const routeType = packet.route ?? packet.route_type;
+        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0, routeType);
         
         // Track for centrality
         nodesInPath.add(lastHopResult.hash);
@@ -1110,12 +1730,15 @@ export function buildMeshTopology(
       const hopDistanceFromLocal = getHopDistanceFromLocal(toPosition);
       
       // Add edge observation using helper
+      // Get route type: prefer 'route' (SQLite API), fallback to 'route_type'
+      const routeType = packet.route ?? packet.route_type;
       addEdgeObservation(
         fromResult.hash,
         toResult.hash,
         hopConfidence,
         isCertainObservation,
-        hopDistanceFromLocal
+        hopDistanceFromLocal,
+        routeType
       );
     }
     
@@ -1182,6 +1805,24 @@ export function buildMeshTopology(
     // An edge meets the validation threshold if it has 5+ certain observations
     const meetsThreshold = acc.certainCount >= MIN_EDGE_VALIDATIONS;
     
+    // Calculate directional metrics
+    // Symmetry ratio: 0 = completely one-directional, 1 = perfectly symmetric
+    const totalDirectional = acc.forwardCount + acc.reverseCount;
+    const symmetryRatio = totalDirectional > 0 
+      ? Math.min(acc.forwardCount, acc.reverseCount) / Math.max(acc.forwardCount, acc.reverseCount)
+      : 0;
+    
+    // Dominant direction: which way most packets flow
+    // 'forward' = fromHash→toHash, 'reverse' = toHash→fromHash, 'balanced' = symmetric
+    let dominantDirection: 'forward' | 'reverse' | 'balanced' = 'balanced';
+    if (symmetryRatio < 0.7 && totalDirectional > 0) {
+      dominantDirection = acc.forwardCount > acc.reverseCount ? 'forward' : 'reverse';
+    }
+    
+    // Is this primarily a direct-routed edge? (ground truth from MeshCore)
+    const totalRouteCounts = acc.floodCount + acc.directCount;
+    const isDirectPathEdge = totalRouteCounts > 0 && acc.directCount > acc.floodCount;
+    
     const edge: TopologyEdge = {
       fromHash: acc.fromHash,
       toHash: acc.toHash,
@@ -1193,6 +1834,15 @@ export function buildMeshTopology(
       isHubConnection,
       isCertain: meetsThreshold, // Now means "meets validation threshold"
       certainCount: acc.certainCount,
+      // Phase 1: Directional tracking
+      forwardCount: acc.forwardCount,
+      reverseCount: acc.reverseCount,
+      symmetryRatio,
+      dominantDirection,
+      // Phase 3: Flood vs Direct detection
+      floodCount: acc.floodCount,
+      directCount: acc.directCount,
+      isDirectPathEdge,
     };
     
     edges.push(edge);
@@ -1257,12 +1907,25 @@ export function buildMeshTopology(
     })));
   }
   
+  // === PHASE 2: PATH SEQUENCE TRACKING ===
+  // Build registry of observed paths for route analysis
+  // NOTE: Must be built BEFORE TX delay recommendations (Phase 6 depends on it)
+  const pathRegistry = buildPathRegistry(sortedPackets, localHash);
+  
+  // Log path registry stats in development
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[mesh-topology] Path registry: ${pathRegistry.uniquePathCount} unique paths, ${pathRegistry.totalObservations} observations`);
+  }
+  
   // === TX DELAY RECOMMENDATIONS FOR ALL NODES ===
   // Calculate recommended tx_delay and direct.tx_delay for all nodes with sufficient data
+  // Phase 6: Now includes path position metrics from pathRegistry
   const txDelayRecommendations = calculateNodeTxDelays(
     edges,
     nodePathCounts,
-    sortedPackets
+    sortedPackets,
+    pathRegistry,
+    neighbors
   );
   
   // Log tx delay recommendations in development
@@ -1271,7 +1934,54 @@ export function buildMeshTopology(
     console.log(`[mesh-topology] TX delay recommendations: ${withData} nodes with data, ${txDelayRecommendations.size - withData} insufficient`);
   }
   
-  return { 
+  // === PHASE 4: EDGE BETWEENNESS CENTRALITY ===
+  // Calculate betweenness from observed paths (more accurate than count-based backbone)
+  const edgeBetweenness = calculateEdgeBetweenness(pathRegistry, edges);
+  const backboneEdges = identifyBackboneEdges(edgeBetweenness, 3, 0.3);
+  
+  // Log backbone edges in development
+  if (process.env.NODE_ENV === 'development' && backboneEdges.length > 0) {
+    console.log(`[mesh-topology] Backbone edges (by betweenness):`, backboneEdges.map(key => {
+      const edge = edgeMap.get(key);
+      return {
+        key,
+        betweenness: edgeBetweenness.get(key)?.toFixed(2),
+        certainCount: edge?.certainCount,
+      };
+    }));
+  }
+  
+  // === PHASE 5: MOBILE REPEATER DETECTION ===
+  // Identify nodes that appear/disappear frequently from paths
+  const { nodeMobility, mobileNodes } = calculateNodeMobility(pathRegistry, neighbors);
+  
+  // Log mobile nodes in development
+  if (process.env.NODE_ENV === 'development' && mobileNodes.length > 0) {
+    console.log(`[mesh-topology] Mobile nodes:`, mobileNodes.map(hash => {
+      const mob = nodeMobility.get(hash);
+      return {
+        hash: hash.slice(0, 8),
+        volatility: mob?.pathVolatility.toFixed(2),
+        activeRatio: mob?.activeWindowRatio.toFixed(2),
+      };
+    }));
+  }
+  
+  // === PHASE 7: PATH HEALTH INDICATORS ===
+  // Calculate health metrics for top observed paths
+  const pathHealth = calculatePathHealth(pathRegistry, edges, hubNodes, 20);
+  
+  // Log path health in development
+  if (process.env.NODE_ENV === 'development' && pathHealth.length > 0) {
+    console.log(`[mesh-topology] Path health:`, pathHealth.slice(0, 5).map(ph => ({
+      path: ph.hops.join('>'),
+      health: ph.healthScore,
+      weakest: ph.weakestLinkConfidence.toFixed(2),
+      observations: ph.observationCount,
+    })));
+  }
+  
+  return {
     edges, 
     validatedEdges: cappedEdges,
     weakEdges: cappedWeakEdges,
@@ -1288,6 +1998,16 @@ export function buildMeshTopology(
     loops,
     loopEdgeKeys,
     txDelayRecommendations,
+    // Phase 2: Path registry
+    pathRegistry,
+    // Phase 4: Edge betweenness
+    edgeBetweenness,
+    backboneEdges,
+    // Phase 5: Mobile repeater detection
+    nodeMobility,
+    mobileNodes,
+    // Phase 7: Path health indicators
+    pathHealth,
   };
 }
 
