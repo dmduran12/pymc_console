@@ -60,6 +60,8 @@ export default function Contacts() {
   
   // Selected node for zoom-to-map
   const [selectedNodeHash, setSelectedNodeHash] = useState<string | null>(null);
+  // Highlighted topology edge (from PathHealth panel)
+  const [highlightedEdgeKey, setHighlightedEdgeKey] = useState<string | null>(null);
   
   const contacts = stats?.neighbors ?? {};
   
@@ -206,11 +208,16 @@ export default function Contacts() {
           onRemoveNode={hideContact}
           selectedNodeHash={selectedNodeHash}
           onNodeSelected={handleNodeSelected}
+          highlightedEdgeKey={highlightedEdgeKey}
         />
       </div>
       
       {/* Path Health Panel */}
-      <PathHealthPanel maxPaths={10} />
+      <PathHealthPanel 
+        maxPaths={10}
+        highlightedEdge={highlightedEdgeKey}
+        onHighlightEdge={setHighlightedEdgeKey}
+      />
 
       {/* Contacts List */}
       <div className="chart-container">
