@@ -1000,7 +1000,7 @@ export function ContactsMap3D({
         getLineColor: [hoveredNode?.hash],
       }
     }),
-  ], [nodeData, edgeData, weakEdgeData, loopEdgeData, showTopology, edgeOpacity, hoveredEdgeKey, highlightedEdgeKey]);
+  ], [nodeData, edgeData, weakEdgeData, loopEdgeData, showTopology, edgeOpacity, hoveredEdgeKey, highlightedEdgeKey, hoveredNode]);
   
   // Handle map load
   const handleMapLoad = useCallback((_event: MapLibreEvent) => {
