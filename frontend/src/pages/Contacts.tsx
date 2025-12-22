@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
 import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
-import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search } from 'lucide-react';
+import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { PathHealthPanel } from '@/components/contacts/PathHealthPanel';
@@ -383,10 +383,10 @@ export default function Contacts() {
                         e.stopPropagation();
                         setPendingRemove({ hash, name: displayName });
                       }}
-                      className="ml-2 p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      title="Remove node"
+                      className="ml-2 p-1.5 rounded-lg text-text-muted/50 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Remove contact"
                     >
-                      <X className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                   
