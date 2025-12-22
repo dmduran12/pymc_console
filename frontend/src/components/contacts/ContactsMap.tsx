@@ -1437,6 +1437,35 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isFullscreen]);
+  
+  // Lock body scroll when in CSS-based fullscreen (prevents iOS background scroll)
+  useEffect(() => {
+    if (!isFullscreen) return;
+    
+    // Check if this is CSS-based fullscreen (not native)
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element;
+      msFullscreenElement?: Element;
+    };
+    const isNativeFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
+    
+    if (!isNativeFullscreen) {
+      // CSS-based fullscreen - lock body scroll
+      const scrollY = window.scrollY;
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      
+      return () => {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isFullscreen]);
 
   // No locations available
   if (allPositions.length === 0) {

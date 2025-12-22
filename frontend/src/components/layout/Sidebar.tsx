@@ -290,8 +290,9 @@ export function Sidebar() {
       {/* ═══════════════════════════════════════════════════════════════════
           MOBILE/TABLET: Fixed header bar with hamburger
           Visible below lg (< 1024px)
+          z-[10001] ensures it's above fullscreen map (z-9999)
           ═══════════════════════════════════════════════════════════════════ */}
-      <header className="lg:hidden fixed top-0 inset-x-0 z-50 h-14 bg-bg-body/70 backdrop-blur-xl border-b border-white/10">
+      <header className="lg:hidden fixed top-0 inset-x-0 z-[10001] h-14 bg-bg-body/70 backdrop-blur-xl border-b border-white/10">
         <div className="flex items-center justify-between h-full px-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-accent-primary/20 flex items-center justify-center overflow-hidden">
@@ -318,12 +319,13 @@ export function Sidebar() {
 
       {/* ═══════════════════════════════════════════════════════════════════
           MOBILE/TABLET: Slide-out drawer
+          z-[10002] ensures drawer and backdrop are above fullscreen map (z-9999)
           ═══════════════════════════════════════════════════════════════════ */}
       
       {/* Backdrop */}
       <div
         className={clsx(
-          'lg:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-300',
+          'lg:hidden fixed inset-0 z-[10002] bg-black/60 backdrop-blur-sm transition-opacity duration-300',
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         )}
         onClick={() => setIsOpen(false)}
@@ -333,7 +335,7 @@ export function Sidebar() {
       {/* Drawer */}
       <aside
         className={clsx(
-          'lg:hidden fixed top-0 left-0 z-50 w-72 max-w-[85vw] h-full',
+          'lg:hidden fixed top-0 left-0 z-[10003] w-72 max-w-[85vw] h-full',
           'bg-bg-surface/80 backdrop-blur-2xl border-r border-white/10',
           'flex flex-col',
           'transform transition-transform duration-300 ease-out',
