@@ -1620,18 +1620,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       className={`relative overflow-hidden ${isFullscreen ? '' : 'glass-card'}`}
       style={fullscreenStyles}
     >
-      {/* Map container with liquid glass effects */}
+      {/* Map container */}
       <div className={`h-full relative overflow-hidden ${isFullscreen ? '' : 'rounded-[1.125rem]'}`}>
-        {/* Liquid glass overlay effects */}
-        <div className="absolute inset-0 pointer-events-none z-[1000]">
-          {/* Top edge highlight */}
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-          {/* Corner accents */}
-          <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-white/[0.03] to-transparent" />
-          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-white/[0.03] to-transparent" />
-          {/* Bottom edge fade */}
-          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/20 to-transparent" />
-        </div>
         <MapContainer
           center={defaultCenter}
           zoom={8}
@@ -2322,6 +2312,19 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           )}
         </div>
       </div>
+      
+      {/* Liquid glass overlay effects - rendered AFTER map for proper stacking */}
+      {!isFullscreen && (
+        <div className="absolute inset-0 pointer-events-none rounded-[1.125rem] overflow-hidden">
+          {/* Top edge highlight */}
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+          {/* Corner accents */}
+          <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-white/[0.03] to-transparent" />
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-white/[0.03] to-transparent" />
+          {/* Bottom edge fade */}
+          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/20 to-transparent" />
+        </div>
+      )}
     </div>
   );
 }
