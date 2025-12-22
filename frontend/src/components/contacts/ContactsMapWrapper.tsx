@@ -61,11 +61,12 @@ const ContactsMap3D = lazy(() => import('./ContactsMap3D').then(m => ({ default:
 type MapMode = '2d' | '3d';
 
 export default function ContactsMapWrapper({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected, highlightedEdgeKey }: ContactsMapWrapperProps) {
-  // Persist map mode preference
+  // Persist map mode preference (default to 3D)
   const [mapMode, setMapMode] = useState<MapMode>(() => {
-    if (typeof window === 'undefined') return '2d';
+    if (typeof window === 'undefined') return '3d';
     const saved = localStorage.getItem(MAP_MODE_KEY);
-    return saved === '3d' ? '3d' : '2d';
+    // Default to 3D if no preference saved
+    return saved === '2d' ? '2d' : '3d';
   });
   
   // Save preference when mode changes

@@ -36,10 +36,10 @@ function getProximityScore(distanceMeters: number): number {
   return 0.1;
 }
 
-// Lazy load Leaflet map component
-const PathMap = lazy(() => import('./PathMap'));
+// Lazy load 3D map component (MapLibre GL + deck.gl)
+const PathMap3D = lazy(() => import('./PathMap3D'));
 
-interface LocalNode {
+export interface LocalNode {
   latitude: number;
   longitude: number;
   name: string;
@@ -499,7 +499,7 @@ export function PathMapVisualization({
               </div>
             }
           >
-            <PathMap
+            <PathMap3D
               resolvedPath={resolvedPath}
               localNode={localNode}
               hubNodes={hubNodes}
