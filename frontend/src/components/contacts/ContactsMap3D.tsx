@@ -83,13 +83,17 @@ const createMapStyle = (): StyleSpecification => ({
       tileSize: 256,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     },
-    // Terrain DEM - MapLibre demo tiles (free, no key required)
+    // Terrain DEM - Global Terrarium tiles on AWS (free, no key required)
     terrain: {
       type: 'raster-dem',
-      tiles: ['https://demotiles.maplibre.org/terrain-tiles/{z}/{x}/{y}.webp'],
+      tiles: [
+        'https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png',
+        'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+      ],
       tileSize: 256,
-      maxzoom: 14,
-      encoding: 'terrarium', // MapLibre demo tiles use Terrarium encoding
+      maxzoom: 15,
+      encoding: 'terrarium',
+      attribution: 'Terrain data © Mapzen (CC-BY 4.0) — SRTM/other sources via AWS',
     },
   },
   layers: [
@@ -177,6 +181,8 @@ interface EdgeData {
   targetColor: [number, number, number, number];
   width: number;
   edge: TopologyEdge;
+  isLoop?: boolean;
+  isWeak?: boolean;
 }
 
 interface ContactsMap3DProps {
@@ -664,16 +670,19 @@ export function ContactsMap3D({
   }, [neighbors, localNode, localHash, meshTopology.hubNodes, meshTopology.mobileNodes, meshTopology.fullAffinity, meshTopology.centrality, packets, terrainEnabled, elevationCache, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
   
   // ─────────────────────────────────────────────────────────────────────────────
-  // Prepare edge data for deck.gl
+  // Prepare edge data for deck.gl (validated + weak edges)
   // ─────────────────────────────────────────────────────────────────────────────
-  const edgeData = useMemo((): EdgeData[] => {
-    if (!showTopology) return [];
+  const { edgeData, weakEdgeData, loopEdgeData } = useMemo(() => {
+    if (!showTopology) return { edgeData: [], weakEdgeData: [], loopEdgeData: [] };
     
     const edges: EdgeData[] = [];
+    const weakEdges: EdgeData[] = [];
+    const loopEdges: EdgeData[] = [];
     const backboneSet = new Set(meshTopology.backboneEdges);
+    const validatedKeys = new Set(meshTopology.validatedEdges.map(e => e.key));
     
+    // Process validated edges
     for (const edge of meshTopology.validatedEdges) {
-      // Find node positions
       const fromNode = nodeData.find(n => n.hash === edge.fromHash);
       const toNode = nodeData.find(n => n.hash === edge.toHash);
       
@@ -683,22 +692,22 @@ export function ContactsMap3D({
         || backboneSet.has(`${edge.toHash}-${edge.fromHash}`);
       const isHighlighted = highlightedEdgeKey === `${edge.fromHash}-${edge.toHash}`
         || highlightedEdgeKey === `${edge.toHash}-${edge.fromHash}`;
+      const isLoop = meshTopology.loopEdgeKeys.has(edge.key);
       
       const color = getEdgeColor(edge.avgConfidence, isBackbone, edge.isDirectPathEdge ?? false);
       const width = getEdgeWidth(edge.certainCount, meshTopology.maxCertainCount);
       
-      // Check if this edge is hovered
       const edgeKey = `${edge.fromHash}-${edge.toHash}`;
       const isHovered = hoveredEdgeKey === edgeKey || hoveredEdgeKey === `${edge.toHash}-${edge.fromHash}`;
       const isAnyHovered = hoveredEdgeKey !== null;
       
-      // Apply hover effects: brighten hovered, dim others
       const hoverOpacityMult = isAnyHovered ? (isHovered ? 1.25 : 0.4) : 1;
       const hoverWidthMult = isHovered ? 1.3 : 1;
       
-      // Blend color with opacity multiplier
       const finalColor: [number, number, number, number] = isHighlighted 
-        ? [255, 215, 0, 255]  // Gold for highlighted from PathHealth
+        ? [255, 215, 0, 255]
+        : isLoop
+        ? [...hexToRgba(DESIGN.edges.loop, Math.round(DESIGN.edgeOpacity * 255 * 1.1 * hoverOpacityMult))] as [number, number, number, number]
         : [
             color[0],
             color[1],
@@ -706,7 +715,7 @@ export function ContactsMap3D({
             Math.round(color[3] * hoverOpacityMult),
           ];
       
-      edges.push({
+      const edgeEntry: EdgeData = {
         key: edgeKey,
         sourcePosition: fromNode.position,
         targetPosition: toNode.position,
@@ -714,11 +723,46 @@ export function ContactsMap3D({
         targetColor: finalColor,
         width: isHighlighted ? width * 1.5 : width * hoverWidthMult,
         edge,
+        isLoop,
+      };
+      
+      if (isLoop) {
+        loopEdges.push(edgeEntry);
+      } else {
+        edges.push(edgeEntry);
+      }
+    }
+    
+    // Process weak edges (5+ packets but below validation threshold)
+    for (const edge of meshTopology.weakEdges) {
+      if (validatedKeys.has(edge.key)) continue;
+      
+      const fromNode = nodeData.find(n => n.hash === edge.fromHash);
+      const toNode = nodeData.find(n => n.hash === edge.toHash);
+      
+      if (!fromNode || !toNode) continue;
+      
+      const edgeKey = `${edge.fromHash}-${edge.toHash}`;
+      const isHovered = hoveredEdgeKey === edgeKey || hoveredEdgeKey === `${edge.toHash}-${edge.fromHash}`;
+      const isAnyHovered = hoveredEdgeKey !== null;
+      const hoverOpacityMult = isAnyHovered ? (isHovered ? 1.25 : 0.3) : 1;
+      
+      const weakColor = hexToRgba(DESIGN.edges.weak, Math.round(130 * hoverOpacityMult));
+      
+      weakEdges.push({
+        key: edgeKey,
+        sourcePosition: fromNode.position,
+        targetPosition: toNode.position,
+        sourceColor: weakColor,
+        targetColor: weakColor,
+        width: isHovered ? 2 : 1.5,
+        edge,
+        isWeak: true,
       });
     }
     
-    return edges;
-  }, [showTopology, meshTopology.validatedEdges, meshTopology.backboneEdges, meshTopology.maxCertainCount, nodeData, highlightedEdgeKey, hoveredEdgeKey]);
+    return { edgeData: edges, weakEdgeData: weakEdges, loopEdgeData: loopEdges };
+  }, [showTopology, meshTopology.validatedEdges, meshTopology.weakEdges, meshTopology.backboneEdges, meshTopology.loopEdgeKeys, meshTopology.maxCertainCount, nodeData, highlightedEdgeKey, hoveredEdgeKey]);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Edge fade animation effect
@@ -776,7 +820,61 @@ export function ContactsMap3D({
   // Create deck.gl layers
   // ─────────────────────────────────────────────────────────────────────────────
   const layers = useMemo(() => [
-    // Topology edges (arcs in 3D)
+    // Weak edges (background), drawn first
+    new ArcLayer<EdgeData>({
+      id: 'weak-edges',
+      data: weakEdgeData,
+      getSourcePosition: d => d.sourcePosition,
+      getTargetPosition: d => d.targetPosition,
+      getSourceColor: d => d.sourceColor,
+      getTargetColor: d => d.targetColor,
+      getWidth: d => d.width,
+      getHeight: 0.15,
+      greatCircle: false,
+      widthUnits: 'pixels',
+      widthMinPixels: 1,
+      widthMaxPixels: 4,
+      pickable: true,
+      visible: showTopology || edgeOpacity > 0,
+      opacity: Math.min(edgeOpacity * 0.8, 0.8),
+      onHover: (info: PickingInfo<EdgeData>) => {
+        setHoveredEdgeKey(info.object?.key ?? null);
+      },
+      updateTriggers: {
+        getSourceColor: [hoveredEdgeKey],
+        getTargetColor: [hoveredEdgeKey],
+        getWidth: [hoveredEdgeKey],
+      },
+    }),
+
+    // Loop edges (redundant paths) in loop color
+    new ArcLayer<EdgeData>({
+      id: 'loop-edges',
+      data: loopEdgeData,
+      getSourcePosition: d => d.sourcePosition,
+      getTargetPosition: d => d.targetPosition,
+      getSourceColor: d => d.sourceColor,
+      getTargetColor: d => d.targetColor,
+      getWidth: d => Math.max(1.5, d.width * 0.8),
+      getHeight: 0.35,
+      greatCircle: false,
+      widthUnits: 'pixels',
+      widthMinPixels: 1,
+      widthMaxPixels: 14,
+      pickable: true,
+      visible: showTopology || edgeOpacity > 0,
+      opacity: Math.min(edgeOpacity * 1.0, 1.0),
+      onHover: (info: PickingInfo<EdgeData>) => {
+        setHoveredEdgeKey(info.object?.key ?? null);
+      },
+      updateTriggers: {
+        getSourceColor: [hoveredEdgeKey, highlightedEdgeKey],
+        getTargetColor: [hoveredEdgeKey, highlightedEdgeKey],
+        getWidth: [hoveredEdgeKey, highlightedEdgeKey],
+      },
+    }),
+
+    // Validated topology edges (arcs in 3D)
     new ArcLayer<EdgeData>({
       id: 'topology-edges',
       data: edgeData,
@@ -846,12 +944,35 @@ export function ContactsMap3D({
         }
       },
     }),
-  ], [nodeData, edgeData, showTopology, edgeOpacity, hoveredEdgeKey, highlightedEdgeKey]);
+  ], [nodeData, edgeData, weakEdgeData, loopEdgeData, showTopology, edgeOpacity, hoveredEdgeKey, highlightedEdgeKey]);
   
   // Handle map load
   const handleMapLoad = useCallback((_event: MapLibreEvent) => {
     setIsMapLoaded(true);
   }, []);
+
+  // If the terrain source throws repeated 404s or similar, disable terrain gracefully
+  useEffect(() => {
+    if (!isMapLoaded) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+
+    const onError = (e: any) => {
+      const sourceId = e?.sourceId ?? e?.error?.sourceId;
+      const status = e?.error?.status;
+      if (terrainEnabled && sourceId === 'terrain' && (status === 404 || status === 403)) {
+        try {
+          map.setTerrain(null);
+        } catch {}
+        setTerrainEnabled(false);
+      }
+    };
+
+    map.on('error', onError);
+    return () => {
+      map.off('error', onError);
+    };
+  }, [isMapLoaded, terrainEnabled]);
   
   // Toggle terrain mode (3D perspective with elevation vs flat)
   const toggleTerrain = useCallback(() => {

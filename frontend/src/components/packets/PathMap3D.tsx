@@ -78,6 +78,9 @@ export default function PathMap3D({
   const [animationProgress, setAnimationProgress] = useState(0);
   const [nodeElevations, setNodeElevations] = useState<Map<string, number>>(new Map());
   
+  // Tooltip state for hovered node
+  const [tooltipInfo, setTooltipInfo] = useState<{ x: number; y: number; node: typeof pathNodes[0] } | null>(null);
+  
   // Extract valid candidates with coordinates
   const pathNodes = useMemo(() => {
     const nodes: Array<{
@@ -249,8 +252,10 @@ export default function PathMap3D({
         onHover: (info) => {
           if (info.object) {
             onHoverHop(info.object.hopIndex);
+            setTooltipInfo({ x: info.x, y: info.y, node: info.object });
           } else {
             onHoverHop(null);
+            setTooltipInfo(null);
           }
         },
         updateTriggers: {
@@ -273,27 +278,41 @@ export default function PathMap3D({
       style: {
         version: 8,
         sources: {
-          'raster-tiles': {
+          // Base map - CARTO Dark Matter (free, no key required)
+          carto: {
             type: 'raster',
             tiles: [
-              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+              'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
             ],
             tileSize: 256,
-            attribution: '&copy; Esri',
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
           },
+          // Terrain DEM - Global Terrarium tiles on AWS (free, no key required)
           'terrain-source': {
             type: 'raster-dem',
-            url: 'https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=get_your_own_key',
+            tiles: [
+              'https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png',
+              'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+            ],
             tileSize: 256,
+            maxzoom: 15,
+            encoding: 'terrarium',
           },
         },
         layers: [
           {
-            id: 'raster-tiles-layer',
+            id: 'background',
+            type: 'background',
+            paint: { 'background-color': '#08090B' },
+          },
+          {
+            id: 'carto-layer',
             type: 'raster',
-            source: 'raster-tiles',
+            source: 'carto',
             minzoom: 0,
-            maxzoom: 19,
+            maxzoom: 22,
           },
         ],
         terrain: {
@@ -407,11 +426,62 @@ export default function PathMap3D({
     }
   }, [bounds]);
   
+  // Get hash prefix for display
+  const getHashPrefix = (hash: string): string => {
+    const clean = hash.startsWith('0x') ? hash.slice(2) : hash;
+    return clean.slice(0, 2).toUpperCase();
+  };
+
   return (
     <div 
       ref={containerRef} 
       className="relative h-[200px] w-full"
-      style={{ cursor: 'grab' }}
-    />
+      style={{ cursor: tooltipInfo ? 'pointer' : 'grab' }}
+    >
+      {/* Tooltip overlay */}
+      {tooltipInfo && (
+        <div
+          className="absolute pointer-events-none z-50"
+          style={{
+            left: tooltipInfo.x + 10,
+            top: tooltipInfo.y - 30,
+            transform: 'translateY(-100%)',
+          }}
+        >
+          <div
+            className="px-2 py-1.5 rounded-lg text-xs shadow-lg"
+            style={{
+              background: 'rgba(20, 20, 22, 0.95)',
+              border: '1px solid rgba(140, 160, 200, 0.25)',
+              maxWidth: '180px',
+            }}
+          >
+            <div className="font-semibold text-text-primary truncate">
+              {tooltipInfo.node.hop.name}
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <code className="font-mono text-[10px] text-text-muted/70 bg-white/5 px-1 py-px rounded">
+                {getHashPrefix(tooltipInfo.node.hop.hash)}
+              </code>
+              {tooltipInfo.node.isSource && (
+                <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-green-500/25 text-green-400">Source</span>
+              )}
+              {tooltipInfo.node.isLocal && (
+                <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Local</span>
+              )}
+              {tooltipInfo.node.isHub && (
+                <span className="px-1 py-px text-[8px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
+              )}
+            </div>
+            <div className="text-[10px] text-text-muted/60 mt-0.5">
+              Hop {tooltipInfo.node.hopIndex + 1} of {pathNodes.length}
+              {tooltipInfo.node.hop.probability < 1 && (
+                <span className="ml-1">({Math.round(tooltipInfo.node.hop.probability * 100)}% conf)</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
