@@ -21,20 +21,36 @@ export default function Statistics() {
   const [noiseFloorHistory, setNoiseFloorHistory] = useState<NoiseFloorHistoryItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRange, setSelectedRange] = useState(1); // Default to 3h
+  const [selectedRange, setSelectedRange] = useState(3); // Default to 24h
 
   // Debounce time range changes to prevent rapid API calls when clicking quickly
   const debouncedRange = useDebounce(selectedRange, 150);
   const timeRange = STATISTICS_TIME_RANGES[debouncedRange].hours;
   const timeRangeMinutes = timeRange * 60;
+  
+  // Bucket counts optimized for ~720 data points per time range
+  // 1h — 5 second buckets (720 buckets)
+  // 3h — 15 second buckets (720 buckets)
+  // 12h — 1 min buckets (720 buckets)
+  // 24h — 2 min buckets (720 buckets)
+  // 3d — 5 min buckets (864 buckets)
+  // 7d — 12 min buckets (840 buckets)
+  const bucketCount = useMemo(() => {
+    switch (timeRange) {
+      case 1: return 720;   // 1h / 720 = 5 sec buckets
+      case 3: return 720;   // 3h / 720 = 15 sec buckets
+      case 12: return 720;  // 12h / 720 = 1 min buckets
+      case 24: return 720;  // 24h / 720 = 2 min buckets
+      case 72: return 864;  // 3d / 864 = 5 min buckets
+      case 168: return 840; // 7d / 840 = 12 min buckets
+      default: return 720;
+    }
+  }, [timeRange]);
 
   useEffect(() => {
     async function fetchData() {
       setError(null);
       try {
-        // Calculate bucket count based on time range (aim for ~60 buckets)
-        const bucketCount = Math.min(120, Math.max(30, Math.floor(timeRangeMinutes / 2)));
-        
         const [bucketedRes, packetTypeRes, noiseFloorRes] = await Promise.all([
           api.getBucketedStats(timeRangeMinutes, bucketCount),
           api.getPacketTypeGraphData(timeRange),
@@ -58,7 +74,7 @@ export default function Statistics() {
     }
 
     fetchData();
-  }, [timeRange, timeRangeMinutes]);
+  }, [timeRange, timeRangeMinutes, bucketCount]);
 
   // Poll utilization only, with intervals by range:
   // default 5m; 3d → 10m; 7d → 30m
@@ -76,13 +92,12 @@ export default function Statistics() {
   // Poll bucketed stats (received/forwarded/dropped/transmitted)
   const pollBucketed = useCallback(async () => {
     try {
-      const bucketCount = Math.min(120, Math.max(30, Math.floor(timeRangeMinutes / 2)));
       const res = await api.getBucketedStats(timeRangeMinutes, bucketCount);
       if (res.success && res.data) setBucketedStats(res.data);
     } catch {
       // ignore polling errors
     }
-  }, [timeRangeMinutes]);
+  }, [timeRangeMinutes, bucketCount]);
 
   // Poll packet type distribution
   const pollPacketTypes = useCallback(async () => {
@@ -201,19 +216,19 @@ export default function Statistics() {
         <>
           {/* Row: Traffic Flow (2/3) + Link Quality (1/3) */}
           <div className="grid-12">
-            {/* Traffic Flow - Stacked Area Chart */}
+            {/* Traffic Flow - Airtime Utilization Chart */}
             <div className="col-span-full lg:col-span-8 glass-card card-padding">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
-                  <h2 className="type-subheading text-text-primary">Traffic Flow</h2>
+                  <h2 className="type-subheading text-text-primary">Airtime Utilization</h2>
                 </div>
                 <div className="flex items-center gap-3 sm:gap-4 sm:ml-auto">
                   <span className="type-data-xs text-text-muted">
-                    Max <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.max.toFixed(1)}%</span>
+                    RX Peak <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.max.toFixed(2)}%</span>
                   </span>
                   <span className="type-data-xs text-text-muted">
-                    Mean <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.mean.toFixed(1)}%</span>
+                    RX Avg <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.mean.toFixed(2)}%</span>
                   </span>
                   <span className="pill-tag">{currentRange.label}</span>
                 </div>
