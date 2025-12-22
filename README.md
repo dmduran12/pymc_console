@@ -267,7 +267,9 @@ See [WARP.md](WARP.md) for architecture details and [RELEASE.md](RELEASE.md) for
 ```bash
 cd frontend
 npm install
-npm run dev  # Starts dev server at http://localhost:5173
+npm run dev        # Starts dev server at http://localhost:5173
+npm run typecheck  # Run TypeScript type checking
+npm run build      # Production build
 ```
 
 To connect to a remote Pi during development, create `frontend/.env.local`:

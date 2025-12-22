@@ -27,29 +27,27 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
       
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm ci --prefer-offline --legacy-peer-deps
       
-      - name: Build static files
-        run: npm run build:static
-      
-      - name: Add version file to build
+      - name: Typecheck and build
         run: |
-          # Extract version from package.json and write to version file
+          npm run typecheck &
+          TYPECHECK_PID=$!
+          npm run build:static
+          wait $TYPECHECK_PID
+      
+      - name: Add version file and create archives
+        run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "$VERSION" > dist/VERSION
-          echo "Created VERSION file: $VERSION"
-      
-      - name: Create versioned archive
-        run: |
           cd dist
           tar -czf ../pymc-ui-${{ github.ref_name }}.tar.gz .
           zip -r ../pymc-ui-${{ github.ref_name }}.zip .
-          # Also create 'latest' versions for easy download
           tar -czf ../pymc-ui-latest.tar.gz .
           zip -r ../pymc-ui-latest.zip .
       
