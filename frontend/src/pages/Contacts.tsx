@@ -228,74 +228,74 @@ export default function Contacts() {
           </div>
           
           {/* Search and sort controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Search bar */}
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted" />
+            <div className="relative order-2 sm:order-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search..."
-                className="w-24 sm:w-32 pl-6 pr-2 py-1 text-[10px] bg-white/5 border border-white/10 rounded-md text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary/50"
+                className="w-28 sm:w-32 pl-7 pr-7 py-1.5 text-xs bg-white/5 border border-white/10 rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary/50"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary p-0.5"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
             
             {/* Sort buttons */}
-            <div className="flex items-center gap-1">
-            <button
-              onClick={() => handleSort('lastHeard')}
-              className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
-                sortField === 'lastHeard' 
-                  ? 'bg-accent-primary/20 text-accent-primary' 
-                  : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-              }`}
-              title="Sort by last heard"
-            >
-              <Clock className="w-3 h-3" />
-              <span className="hidden sm:inline">Recent</span>
-              {sortField === 'lastHeard' && (
-                <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
-              )}
-            </button>
-            <button
-              onClick={() => handleSort('distance')}
-              className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
-                sortField === 'distance' 
-                  ? 'bg-accent-primary/20 text-accent-primary' 
-                  : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-              }`}
-              title="Sort by distance"
-            >
-              <Ruler className="w-3 h-3" />
-              <span className="hidden sm:inline">Distance</span>
-              {sortField === 'distance' && (
-                <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
-              )}
-            </button>
-            <button
-              onClick={() => handleSort('centrality')}
-              className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md transition-colors ${
-                sortField === 'centrality' 
-                  ? 'bg-accent-primary/20 text-accent-primary' 
-                  : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
-              }`}
-              title="Sort by network centrality"
-            >
-              <Activity className="w-3 h-3" />
-              <span className="hidden sm:inline">Centrality</span>
-              {sortField === 'centrality' && (
-                <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
-              )}
-            </button>
+            <div className="flex items-center gap-1 order-1 sm:order-2">
+              <button
+                onClick={() => handleSort('lastHeard')}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors min-h-[32px] ${
+                  sortField === 'lastHeard' 
+                    ? 'bg-accent-primary/20 text-accent-primary' 
+                    : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+                }`}
+                title="Sort by last heard"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Recent</span>
+                {sortField === 'lastHeard' && (
+                  <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+              <button
+                onClick={() => handleSort('distance')}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors min-h-[32px] ${
+                  sortField === 'distance' 
+                    ? 'bg-accent-primary/20 text-accent-primary' 
+                    : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+                }`}
+                title="Sort by distance"
+              >
+                <Ruler className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Distance</span>
+                {sortField === 'distance' && (
+                  <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+              <button
+                onClick={() => handleSort('centrality')}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors min-h-[32px] ${
+                  sortField === 'centrality' 
+                    ? 'bg-accent-primary/20 text-accent-primary' 
+                    : 'text-text-muted hover:text-text-secondary hover:bg-white/5'
+                }`}
+                title="Sort by network centrality"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Centrality</span>
+                {sortField === 'centrality' && (
+                  <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+                )}
+              </button>
             </div>
           </div>
         </div>

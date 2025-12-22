@@ -164,17 +164,17 @@ export default function Dashboard() {
       {/* Hero Received Card - Full Width */}
       <div className="glass-card card-padding">
         {isFlashing && <div className="flash-overlay" />}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 mb-4">
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <TrendingUp className="w-5 h-5 text-accent-success" />
+            <div className="flex items-center gap-2 mb-1 sm:mb-2">
+              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-accent-success" />
               <span className="type-label text-text-muted">RECEIVED</span>
               <span className="pill-tag">{currentRange.label}</span>
             </div>
-            <div className="type-hero" style={{ color: METRIC_COLORS.received }}>
+            <div className="text-3xl sm:text-4xl md:type-hero font-semibold" style={{ color: METRIC_COLORS.received }}>
               {bucketTotals.received.toLocaleString()}
             </div>
-            <div className="type-body-sm text-text-muted mt-1">
+            <div className="type-body-sm text-text-muted mt-0.5 sm:mt-1">
               {bucketTotals.rxPerHour}/hr rate
             </div>
           </div>
@@ -239,7 +239,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid - Secondary Row (4 cards) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <StatsCard
           title="FORWARDED"
           value={bucketTotals.forwarded}

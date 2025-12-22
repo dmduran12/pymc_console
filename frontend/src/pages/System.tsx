@@ -474,27 +474,27 @@ export default function System() {
         <div className="grid-12">
           {/* System Resources - Full width time-series chart */}
           <div className="col-span-full glass-card card-padding">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-accent-tertiary/20 flex items-center justify-center">
-                  <Activity className="w-5 h-5 text-accent-tertiary" />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-accent-tertiary/20 flex items-center justify-center flex-shrink-0">
+                  <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-accent-tertiary" />
                 </div>
                 <div>
-                  <h2 className="text-base font-medium text-text-primary">System Resources</h2>
-                  <p className="text-xs text-text-muted">20 minute rolling window</p>
+                  <h2 className="text-sm sm:text-base font-medium text-text-primary">System Resources</h2>
+                  <p className="text-[10px] sm:text-xs text-text-muted">20 minute rolling window</p>
                 </div>
               </div>
               {/* Current values */}
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <span className="text-xs text-text-muted uppercase">CPU</span>
-                  <div className="text-lg font-semibold tabular-nums" style={{ color: CPU_COLOR }}>
+              <div className="flex items-center gap-4 sm:gap-6">
+                <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-0">
+                  <span className="text-[10px] sm:text-xs text-text-muted uppercase">CPU</span>
+                  <div className="text-base sm:text-lg font-semibold tabular-nums" style={{ color: CPU_COLOR }}>
                     {stats.cpu.usage_percent.toFixed(0)}%
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-xs text-text-muted uppercase">MEM</span>
-                  <div className="text-lg font-semibold tabular-nums" style={{ color: MEMORY_COLOR }}>
+                <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-0">
+                  <span className="text-[10px] sm:text-xs text-text-muted uppercase">MEM</span>
+                  <div className="text-base sm:text-lg font-semibold tabular-nums" style={{ color: MEMORY_COLOR }}>
                     {stats.memory.usage_percent.toFixed(0)}%
                   </div>
                 </div>

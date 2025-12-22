@@ -27,12 +27,66 @@ const DESIGN = {
   nodeColor: '#4338CA',        // Deep indigo/royal blue
   // Local node - warm golden yellow (home icon)
   localColor: '#FBBF24',       // Amber-400
-  // Edge colors - solid colors for crisp rendering (no alpha to avoid overlap artifacts)
-  edgeColor: '#3B3F4A',        // Dark gray - solid, no transparency
-  loopEdgeColor: '#3730A3',    // Indigo-800 darkened (70% black mix)
   // Hub indicator - 25% brighter, saturated royal blue-purple
   hubColor: '#6366F1',         // Indigo-500 (brighter, still saturated)
+  // Mobile node indicator - warm orange (stands out from purple/blue)
+  mobileColor: '#F97316',      // Orange-500 - indicates volatile/mobile node
+  
+  // ─── EDGE COLOR HIERARCHY ───────────────────────────────────────────────────
+  // Designed for dark maps - subtle but distinguishable
+  edges: {
+    // Backbone edges - slightly brighter to draw attention
+    backbone: '#6B7280',       // Gray-500 - prominent but not glaring
+    // Standard validated edges - neutral mid-gray
+    standard: '#4B5563',       // Gray-600 - recedes slightly
+    // Weak/emerging edges - darker, subtle
+    weak: '#374151',           // Gray-700 - background layer
+    // Direct path edges (ground-truth routing) - teal tint
+    direct: '#5EEAD4',         // Teal-300 - distinguishes verified routes
+    // Loop edges (redundant paths) - subtle purple
+    loop: '#6366F1',           // Indigo-500 - indicates redundancy
+  },
+  
+  // Base opacity for edges (increased from 0.7 for better visibility)
+  edgeOpacity: 0.82,
 };
+
+/**
+ * Get edge color based on confidence level.
+ * Creates a subtle brightness gradient: low confidence = darker, high confidence = lighter.
+ * Maintains the low-contrast aesthetic while providing visual differentiation.
+ * 
+ * @param confidence - Edge avgConfidence (0-1)
+ * @param isBackbone - Whether this edge is a backbone (high-traffic) edge
+ * @param isDirectPath - Whether this edge is a verified direct path
+ */
+function getEdgeColor(
+  confidence: number,
+  isBackbone: boolean = false,
+  isDirectPath: boolean = false
+): string {
+  // Direct path edges get teal tint (verified routes)
+  if (isDirectPath) {
+    // Brightness varies with confidence even for direct paths
+    if (confidence >= 0.9) return '#6EE7B7'; // Emerald-300 - high confidence direct
+    if (confidence >= 0.75) return '#5EEAD4'; // Teal-300 - standard direct
+    return '#2DD4BF'; // Teal-400 - lower confidence direct
+  }
+  
+  // Backbone edges get lighter gray (prominent)
+  if (isBackbone) {
+    if (confidence >= 0.9) return '#9CA3AF'; // Gray-400 - very high confidence backbone
+    if (confidence >= 0.75) return '#6B7280'; // Gray-500 - high confidence backbone
+    return '#4B5563'; // Gray-600 - standard backbone
+  }
+  
+  // Standard edges: confidence-based brightness gradient
+  // Higher confidence = lighter (more visible)
+  if (confidence >= 0.95) return '#6B7280'; // Gray-500 - very high confidence
+  if (confidence >= 0.85) return '#4B5563'; // Gray-600 - high confidence  
+  if (confidence >= 0.70) return '#374151'; // Gray-700 - medium confidence
+  return '#1F2937'; // Gray-800 - low confidence (subtle)
+}
 
 /**
  * Create a ring (torus) icon for standard nodes.
@@ -838,6 +892,10 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Track animation progress per edge (0 = not started, 1 = complete)
   const [edgeAnimProgress, setEdgeAnimProgress] = useState<Map<string, number>>(new Map());
   
+  // Hover state for edge highlighting
+  // When hovering an edge: brighten it, dim all others
+  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
+  
   // Track previous weights for thickness animation
   const prevWeightsRef = useRef<Map<string, number>>(new Map());
   const [weightAnimProgress, setWeightAnimProgress] = useState(1); // 0-1 for weight interpolation
@@ -1551,9 +1609,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               key={`weak-edge-${edge.key}`}
               positions={[from, animatedTo]}
               pathOptions={{
-                color: '#ffffff',  // White at 10% opacity = very subtle gray
+                color: DESIGN.edges.weak,
                 weight: 1.5,
-                opacity: 0.1 * traceProgress,  // 10% opacity (50% darker), fades with animation
+                opacity: 0.5 * traceProgress,  // Subtle but visible
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
@@ -1598,33 +1656,56 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             from[1] + (to[1] - from[1]) * traceProgress,
           ];
           
-          // Opacity scales with trace progress (fades as edges retract)
-          const opacity = Math.min(traceProgress * 1.5, 1) * 0.7;
+          // Opacity scales with trace progress - use new base opacity
+          const baseOpacity = Math.min(traceProgress * 1.5, 1) * DESIGN.edgeOpacity;
           
-          // Loop edges: render as parallel double-lines in accent color
+          // Check edge properties for color selection
+          const isBackbone = backboneEdgeKeys.has(edge.key);
+          const confidence = edge.avgConfidence ?? 0.7;
+          
+          // Hover effect: dim non-hovered edges when any edge is hovered
+          const isHovered = hoveredEdgeKey === edge.key;
+          const isAnyHovered = hoveredEdgeKey !== null;
+          const hoverOpacityMult = isAnyHovered ? (isHovered ? 1.25 : 0.4) : 1;
+          
+          // Loop edges: render as parallel double-lines in loop color
           if (isLoopEdge) {
             const { line1, line2 } = getParallelOffsets(from, animatedTo, animatedWeight * 1.5);
+            const loopColor = DESIGN.edges.loop;
+            // Brighten hovered loop edge
+            const loopOpacity = baseOpacity * 1.1 * hoverOpacityMult;
+            const loopWeight = isHovered 
+              ? Math.max(2.5, animatedWeight * 0.8) 
+              : Math.max(1.5, animatedWeight * 0.6);
             return (
               <span key={`loop-edge-${edge.key}`}>
                 {/* Double line for loop edge - indicates redundant path */}
                 <Polyline
                   positions={line1}
                   pathOptions={{
-                    color: DESIGN.loopEdgeColor,
-                    weight: Math.max(1.5, animatedWeight * 0.6),
-                    opacity: opacity * 1.3,
+                    color: loopColor,
+                    weight: loopWeight,
+                    opacity: loopOpacity,
                     lineCap: 'round',
                     lineJoin: 'round',
+                  }}
+                  eventHandlers={{
+                    mouseover: () => setHoveredEdgeKey(edge.key),
+                    mouseout: () => setHoveredEdgeKey(null),
                   }}
                 />
                 <Polyline
                   positions={line2}
                   pathOptions={{
-                    color: DESIGN.loopEdgeColor,
-                    weight: Math.max(1.5, animatedWeight * 0.6),
-                    opacity: opacity * 1.3,
+                    color: loopColor,
+                    weight: loopWeight,
+                    opacity: loopOpacity,
                     lineCap: 'round',
                     lineJoin: 'round',
+                  }}
+                  eventHandlers={{
+                    mouseover: () => setHoveredEdgeKey(edge.key),
+                    mouseout: () => setHoveredEdgeKey(null),
                   }}
                 >
                 <Tooltip
@@ -1648,12 +1729,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                       <div className="text-text-secondary">
                         {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
                       </div>
-                      <div style={{ color: DESIGN.loopEdgeColor }} className="flex items-center gap-1 mt-0.5">
+                      <div style={{ color: loopColor }} className="flex items-center gap-1 mt-0.5">
                         <RefreshCw className="w-3 h-3" />
                         <span>Redundant path</span>
                       </div>
                       {edge.isDirectPathEdge && (
-                        <div className="text-cyan-400 flex items-center gap-1">
+                        <div className="text-teal-400 flex items-center gap-1">
                           <Zap className="w-3 h-3" />
                           <span>Direct path</span>
                         </div>
@@ -1665,22 +1746,43 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             );
           }
           
-          // Check if this is a backbone edge (top 3 strongest)
-          const isBackbone = backboneEdgeKeys.has(edge.key);
+          // Get confidence-based color for this edge
+          // Direct path edges get teal tint, backbone edges get lighter gray
+          const edgeColor = getEdgeColor(confidence, isBackbone, edge.isDirectPathEdge);
           
           // Standard edge: single line with trace animation
-          // Backbone edges get yellow color (same as local node)
           const isHighlighted = highlightedEdgeKey && edge.key === highlightedEdgeKey;
+          
+          // Weight adjustments: backbone edges slightly thicker, hovered edges bolder
+          let finalWeight = isHighlighted 
+            ? Math.max(animatedWeight * 1.6, 4.5) 
+            : (isBackbone ? animatedWeight * 1.3 : animatedWeight);
+          // Boost weight slightly when hovered (if not already highlighted)
+          if (isHovered && !isHighlighted) {
+            finalWeight = Math.max(finalWeight * 1.2, 3);
+          }
+          
+          // Opacity: highlighted edges full opacity, backbone slightly higher
+          // Apply hover dimming/brightening
+          let finalOpacity = isHighlighted 
+            ? 0.95 
+            : (isBackbone ? baseOpacity * 1.15 : baseOpacity);
+          finalOpacity *= hoverOpacityMult;
+          
           return (
             <Polyline
               key={`edge-${edge.key}`}
               positions={[from, animatedTo]}
               pathOptions={{
-                color: isHighlighted ? '#FFD700' : (isBackbone ? DESIGN.localColor : DESIGN.edgeColor),
-                weight: isHighlighted ? Math.max(animatedWeight * 1.6, 4.5) : (isBackbone ? animatedWeight * 1.2 : animatedWeight),
-                opacity: isHighlighted ? 0.95 : (isBackbone ? opacity * 1.3 : opacity),
+                color: isHighlighted ? '#FFD700' : edgeColor,
+                weight: finalWeight,
+                opacity: finalOpacity,
                 lineCap: 'round',
                 lineJoin: 'round',
+              }}
+              eventHandlers={{
+                mouseover: () => setHoveredEdgeKey(edge.key),
+                mouseout: () => setHoveredEdgeKey(null),
               }}
             >
               <Tooltip
@@ -1702,13 +1804,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
                   )}
                   <div className="text-text-secondary">
-                    {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
+                    {edge.certainCount} validations ({Math.round(linkQuality * 100)}%) • {Math.round(confidence * 100)}% conf
                   </div>
                   {isBackbone && (
-                    <div style={{ color: DESIGN.localColor }} className="font-semibold">Backbone</div>
+                    <div className="text-gray-300 font-semibold">Backbone</div>
                   )}
                   {edge.isDirectPathEdge && (
-                    <div className="text-cyan-400 flex items-center gap-1">
+                    <div className="text-teal-400 flex items-center gap-1">
                       <Zap className="w-3 h-3" />
                       <span>Direct path</span>
                     </div>
@@ -1771,23 +1873,26 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Compact hash prefix (2 chars)
           const hashPrefix = hash.startsWith('0x') ? hash.slice(2, 4).toUpperCase() : hash.slice(0, 2).toUpperCase();
           
+          // Check if this is a mobile node
+          const isMobile = meshTopology.mobileNodes.includes(hash);
+          
           // Icon selection with opacity:
           // - Hubs: filled dot (indicates importance)
-          // - All other nodes: ring/torus (elegant, minimal)
+          // - Mobile nodes: orange ring (indicates volatile/moving)
+          // - All other nodes: ring/torus in standard color (elegant, minimal)
           // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
           const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
           const icon = isHub 
             ? createFilledIcon(DESIGN.hubColor, quantizedOpacity) 
-            : createRingIcon(DESIGN.nodeColor, quantizedOpacity);
+            : isMobile
+              ? createRingIcon(DESIGN.mobileColor, quantizedOpacity)
+              : createRingIcon(DESIGN.nodeColor, quantizedOpacity);
           
           // Use quantized opacity in key to force icon update when opacity bucket changes
           const opacityKey = Math.round(quantizedOpacity * 20);
           
           // Get TX delay recommendation for this node
           const txDelayRec = meshTopology.txDelayRecommendations.get(hash);
-          
-          // Check if this is a mobile node
-          const isMobile = meshTopology.mobileNodes.includes(hash);
           
           return (
             <Marker
@@ -2012,6 +2117,20 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               />
               <span className="text-text-muted">Local</span>
             </div>
+            {/* Mobile node indicator - orange ring */}
+            {meshTopology.mobileNodes.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div 
+                  className="w-3 h-3 rounded-full flex-shrink-0" 
+                  style={{ 
+                    background: 'transparent',
+                    border: `3px solid ${DESIGN.mobileColor}`,
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span className="text-text-muted">Mobile</span>
+              </div>
+            )}
           </div>
           
           {/* Topology stats - compact summary */}
@@ -2047,11 +2166,24 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     style={{ 
                       width: '14px',
                       height: '3px',
-                      backgroundColor: DESIGN.edgeColor,
+                      backgroundColor: DESIGN.edges.standard,
                       borderRadius: '1px',
                     }}
                   />
                   <span className="text-text-muted">Link</span>
+                </div>
+                {/* Direct path indicator */}
+                <div className="flex items-center gap-1.5">
+                  <div 
+                    className="flex-shrink-0" 
+                    style={{ 
+                      width: '14px',
+                      height: '3px',
+                      backgroundColor: DESIGN.edges.direct,
+                      borderRadius: '1px',
+                    }}
+                  />
+                  <span className="text-text-muted">Direct</span>
                 </div>
                 {/* Loop/redundant path indicator */}
                 {meshTopology.loops.length > 0 && (
@@ -2062,12 +2194,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     >
                       <div style={{ 
                         height: '2px', 
-                        backgroundColor: DESIGN.loopEdgeColor,
+                        backgroundColor: DESIGN.edges.loop,
                         borderRadius: '1px',
                       }} />
                       <div style={{ 
                         height: '2px', 
-                        backgroundColor: DESIGN.loopEdgeColor,
+                        backgroundColor: DESIGN.edges.loop,
                         borderRadius: '1px',
                       }} />
                     </div>
@@ -2080,9 +2212,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               {meshTopology.loops.length > 0 && (
                 <div className="mt-1.5 pt-1.5 border-t border-white/10">
                   <div className="flex items-center gap-1.5">
-                    <RefreshCw className="w-3 h-3 flex-shrink-0" style={{ color: DESIGN.loopEdgeColor }} />
+                    <RefreshCw className="w-3 h-3 flex-shrink-0" style={{ color: DESIGN.edges.loop }} />
                     <div className="flex flex-col">
-                      <span style={{ color: DESIGN.loopEdgeColor }} className="font-medium">
+                      <span style={{ color: DESIGN.edges.loop }} className="font-medium">
                         {meshTopology.loops.length} {meshTopology.loops.length === 1 ? 'Loop' : 'Loops'}
                       </span>
                       <span className="text-text-muted text-[10px] leading-tight">
