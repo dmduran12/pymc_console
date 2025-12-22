@@ -72,13 +72,24 @@ const createMapStyle = (): StyleSpecification => ({
   version: 8,
   name: 'pyMC Console - Dark',
   sources: {
-    // Base map - CARTO Dark Matter (free, no key required)
+    // Base map - CARTO Dark Matter (no labels) for a cleaner, modern look
     carto: {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+        'https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    // Optional label overlay - crisp labels on top
+    cartoLabels: {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png'
       ],
       tileSize: 256,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -110,6 +121,14 @@ const createMapStyle = (): StyleSpecification => ({
       source: 'carto',
       minzoom: 0,
       maxzoom: 22,
+    },
+    {
+      id: 'carto-labels',
+      type: 'raster',
+      source: 'cartoLabels',
+      minzoom: 0,
+      maxzoom: 22,
+      paint: { 'raster-opacity': 0.75 },
     },
   ],
   // 3D terrain configuration (enabled by default)
@@ -223,6 +242,15 @@ function getNodeColor(
   if (isHub) return hexToRgba(DESIGN.hubColor);
   if (isMobile) return hexToRgba(DESIGN.mobileColor);
   return hexToRgba(DESIGN.nodeColor);
+}
+
+function brighten(color: [number, number, number, number], factor: number): [number, number, number, number] {
+  const [r,g,b,a] = color;
+  const f = Math.max(1, factor);
+  const nr = Math.min(255, Math.round(r + (255 - r) * (f - 1)));
+  const ng = Math.min(255, Math.round(g + (255 - g) * (f - 1)));
+  const nb = Math.min(255, Math.round(b + (255 - b) * (f - 1)));
+  return [nr, ng, nb, a];
 }
 
 /** Get edge color based on confidence and type */
@@ -599,7 +627,9 @@ export function ContactsMap3D({
       const isZeroHop = directNodeSet.has(hash);
       
       // Get elevation from cache (0 if not available or terrain disabled)
-      const elevation = terrainEnabled ? (elevationCache.get(hash) ?? 0) : 0;
+      // In deck.gl we render markers billboarded in pixels and disable depth test.
+      // Keep Z at a small offset to avoid z-fighting when depthTest is toggled by drivers.
+      const elevation = terrainEnabled ? Math.max(0, (elevationCache.get(hash) ?? 0)) + 20 : 20;
       
       // Get affinity data from topology (fullAffinity has the full NeighborAffinity data)
       const affinity = meshTopology.fullAffinity?.get(hash);
@@ -625,7 +655,8 @@ export function ContactsMap3D({
         isZeroHop,
         isRepeater: neighbor.is_repeater || false,
         color: getNodeColor(false, isHub, isMobile, isRoomServer),
-        radius: isHub ? 600 : 400,
+        // Pixel radius will be used; set approximate sizes to mimic Leaflet markers
+        radius: isHub ? 8 : 7,
         neighbor,
         centrality: centralityMap.get(hash) || 0,
         affinity: affinityData,
@@ -636,7 +667,7 @@ export function ContactsMap3D({
     // Add local node
     if (localNode && localNode.latitude && localNode.longitude) {
       const localKey = localHash || 'local';
-      const elevation = terrainEnabled ? (elevationCache.get(localKey) ?? 0) : 0;
+      const elevation = terrainEnabled ? Math.max(0, (elevationCache.get(localKey) ?? 0)) + 20 : 20;
       
       allNodes.push({
         hash: localKey,
@@ -650,7 +681,7 @@ export function ContactsMap3D({
         isZeroHop: false,
         isRepeater: false,
         color: getNodeColor(true, false, false, false),
-        radius: 500,
+        radius: 8,
         centrality: 0,
       });
     }
@@ -919,28 +950,39 @@ export function ContactsMap3D({
     new ScatterplotLayer<NodeData>({
       id: 'nodes',
       data: nodeData,
-      getPosition: d => d.position,
+      getPosition: d => [d.position[0], d.position[1], d.position[2]],
+      billboard: true,
+      // Disable depth test so markers always render on top of terrain
+      parameters: { depthTest: false, depthMask: false } as Record<string, boolean>,
       getFillColor: d => {
         // Filled for local, hub, room servers; transparent for standard nodes (ring)
-        if (d.isLocal || d.isHub || d.isRoomServer) return d.color;
+        if (d.isLocal || d.isHub || d.isRoomServer) {
+          // Brighten slightly on hover for feedback
+          if (hoveredNode && hoveredNode.hash === d.hash) return brighten(d.color, 1.2);
+          return d.color;
+        }
         return [0, 0, 0, 0];
       },
       getRadius: d => d.radius,
-      radiusUnits: 'meters',
+      radiusUnits: 'pixels',
       radiusMinPixels: 6,
       radiusMaxPixels: 20,
       pickable: true,
       stroked: true,
       getLineColor: d => {
         // Ring color for standard nodes, subtle white stroke for filled types
-        if (d.isLocal) return [255, 255, 255, 110];
-        if (d.isHub) return [255, 255, 255, 80];
-        if (d.isRoomServer) return [255, 255, 255, 90];
+        if (d.isLocal) return hoveredNode && hoveredNode.hash === d.hash ? [255, 255, 255, 160] : [255, 255, 255, 110];
+        if (d.isHub) return hoveredNode && hoveredNode.hash === d.hash ? [255, 255, 255, 120] : [255, 255, 255, 80];
+        if (d.isRoomServer) return hoveredNode && hoveredNode.hash === d.hash ? [255, 255, 255, 130] : [255, 255, 255, 90];
         // Standard node ring color
         const c = hexToRgba(DESIGN.nodeColor, 220);
+        if (hoveredNode && hoveredNode.hash === d.hash) {
+          const bc = brighten(c, 1.25);
+          return [bc[0], bc[1], bc[2], bc[3]];
+        }
         return [c[0], c[1], c[2], c[3]];
       },
-      lineWidthMinPixels: 2,
+      lineWidthMinPixels: 3,
       onHover: (info: PickingInfo<NodeData>) => {
         setHoveredNode(info.object ?? null);
       },
@@ -949,15 +991,24 @@ export function ContactsMap3D({
           setSelectedNode(info.object);
         }
       },
+      updateTriggers: {
+        getFillColor: [hoveredNode?.hash],
+        getLineColor: [hoveredNode?.hash],
+      }
     }),
   ], [nodeData, edgeData, weakEdgeData, loopEdgeData, showTopology, edgeOpacity, hoveredEdgeKey, highlightedEdgeKey]);
   
   // Handle map load
   const handleMapLoad = useCallback((_event: MapLibreEvent) => {
     setIsMapLoaded(true);
+    // Ensure terrain is applied on load (some styles delay terrain configuration)
+    const map = mapRef.current?.getMap();
+    try {
+      map?.setTerrain({ source: 'terrain', exaggeration: 1.5 });
+    } catch {}
   }, []);
 
-  // If the terrain source throws repeated 404s or similar, disable terrain gracefully
+  // Keep listener for debugging, but do not auto-disable terrain
   useEffect(() => {
     if (!isMapLoaded) return;
     const map = mapRef.current?.getMap();
@@ -966,11 +1017,9 @@ export function ContactsMap3D({
     const onError = (e: any) => {
       const sourceId = e?.sourceId ?? e?.error?.sourceId;
       const status = e?.error?.status;
-      if (terrainEnabled && sourceId === 'terrain' && (status === 404 || status === 403)) {
-        try {
-          map.setTerrain(null);
-        } catch {}
-        setTerrainEnabled(false);
+      if (sourceId === 'terrain' && (status === 404 || status === 403)) {
+        // Surface error to console but keep terrain enabled
+        console.warn('[ContactsMap3D] Terrain tile error:', status, e?.error?.message);
       }
     };
 
@@ -978,7 +1027,7 @@ export function ContactsMap3D({
     return () => {
       map.off('error', onError);
     };
-  }, [isMapLoaded, terrainEnabled]);
+  }, [isMapLoaded]);
   
   // Toggle terrain mode (3D perspective with elevation vs flat)
   const toggleTerrain = useCallback(() => {
@@ -1005,17 +1054,42 @@ export function ContactsMap3D({
     });
   }, []);
   
-  // Center on local node when it changes
+  // Initial fit-to-bounds similar to Leaflet's FitBoundsOnce
+  const didFitRef = useRef(false);
   useEffect(() => {
-    if (localNode && isMapLoaded) {
-      setViewState(v => ({
-        ...v,
-        longitude: localNode.longitude,
-        latitude: localNode.latitude,
-      }));
+    if (!isMapLoaded || didFitRef.current) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+
+    // Collect positions
+    const positions: [number, number][] = [];
+    for (const n of nodeData) {
+      positions.push([n.position[0], n.position[1]]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- localNode changes tracked via longitude/latitude
-  }, [localNode?.longitude, localNode?.latitude, isMapLoaded]);
+    if (positions.length === 0) return;
+
+    // Compute bounds
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of positions) {
+      if (!isFinite(lng) || !isFinite(lat)) continue;
+      minLng = Math.min(minLng, lng);
+      minLat = Math.min(minLat, lat);
+      maxLng = Math.max(maxLng, lng);
+      maxLat = Math.max(maxLat, lat);
+    }
+
+    const pad = (() => {
+      const w = mapContainerRef.current?.clientWidth ?? window.innerWidth;
+      if (w < 640) return 24; // sm
+      if (w < 1024) return 40; // md
+      return 64; // lg+
+    })();
+
+    try {
+      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: pad, maxZoom: 16, duration: 0 });
+      didFitRef.current = true;
+    } catch {}
+  }, [isMapLoaded, nodeData]);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Fullscreen Support
@@ -1146,6 +1220,7 @@ export function ContactsMap3D({
       <MapLibreMap
         ref={mapRef}
         {...viewState}
+        dragRotate={terrainEnabled}
         onMove={evt => setViewState({
           longitude: evt.viewState.longitude,
           latitude: evt.viewState.latitude,
@@ -1156,7 +1231,7 @@ export function ContactsMap3D({
         onLoad={handleMapLoad}
         mapStyle={mapStyle}
         maxPitch={85} // MapLibre v2+ supports up to 85°
-        attributionControl={false} // We'll add custom attribution
+        attributionControl={{compact: true}}
         style={{ width: '100%', height: '100%' }}
         cursor={hoveredNode ? 'pointer' : 'grab'}
       >
