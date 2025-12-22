@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2 } from 'lucide-react';
+import { Maximize2, Minimize2, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2, MessageCircle } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -31,6 +31,8 @@ const DESIGN = {
   hubColor: '#6366F1',         // Indigo-500 (brighter, still saturated)
   // Mobile node indicator - warm orange (stands out from purple/blue)
   mobileColor: '#F97316',      // Orange-500 - indicates volatile/mobile node
+  // Room server indicator - amber/gold (chat/server functionality)
+  roomServerColor: '#F59E0B',  // Amber-500 - indicates room server node
   
   // ─── EDGE COLOR HIERARCHY ───────────────────────────────────────────────────
   // Designed for dark maps - subtle but distinguishable
@@ -172,6 +174,44 @@ function createLocalIcon(isHovered: boolean = false): L.DivIcon {
       display: flex;
       align-items: center;
       justify-content: center;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
+      transition: filter 0s ease-in, filter 150ms ease-out;
+    ">${iconMarkup}</div>`,
+    iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
+    iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
+    popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
+  });
+}
+
+/**
+ * Create room server icon - amber chat bubble icon.
+ * Uses lucide-react MessageCircle icon rendered as static SVG.
+ * @param opacity - Opacity 0-1 (for fade animations)
+ * @param isHovered - Whether the node is currently hovered (adds brightness)
+ */
+function createRoomServerIcon(opacity: number = 1, isHovered: boolean = false): L.DivIcon {
+  // Render the MessageCircle icon to static SVG markup
+  const iconMarkup = renderToStaticMarkup(
+    <MessageCircle 
+      size={MARKER_SIZE + 2} 
+      color={DESIGN.roomServerColor} 
+      strokeWidth={2.5}
+      fill="none"
+    />
+  );
+  
+  // Hover: instant on, ease-out off (150ms)
+  const brightness = isHovered ? 1.25 : 1;
+  
+  return L.divIcon({
+    className: 'map-room-server-marker',
+    html: `<div style="
+      width: ${MARKER_SIZE + 2}px;
+      height: ${MARKER_SIZE + 2}px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: ${opacity};
       filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
       transition: filter 0s ease-in, filter 150ms ease-out;
     ">${iconMarkup}</div>`,
@@ -414,6 +454,7 @@ interface NodePopupContentProps {
   isHub: boolean;
   isZeroHop: boolean;
   isMobile: boolean;
+  isRoomServer: boolean;
   centrality: number;
   affinity?: FullAffinity;
   meanSnr?: number;
@@ -429,7 +470,7 @@ function formatDistance(meters: number | null): string {
   return `${(meters / 1000).toFixed(1)}km`;
 }
 
-function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
+function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, isRoomServer, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
   const [copied, setCopied] = useState(false);
   
   const copyHash = () => {
@@ -500,6 +541,9 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
         )}
         {neighbor.is_repeater && (
           <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-cyan-500/20 text-cyan-400">Rptr</span>
+        )}
+        {isRoomServer && (
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Room</span>
         )}
       </div>
       
@@ -1891,18 +1935,27 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Check if this is a mobile node
           const isMobile = meshTopology.mobileNodes.includes(hash);
           
+          // Check if this is a room server (by contact_type field)
+          const isRoomServer = neighbor.contact_type?.toLowerCase() === 'room_server' 
+            || neighbor.contact_type?.toLowerCase() === 'room' 
+            || neighbor.contact_type?.toLowerCase() === 'server';
+          
           // Icon selection with opacity and hover state:
+          // Priority: Room Server > Hub > Mobile > Standard
+          // - Room servers: amber chat bubble icon (service node)
           // - Hubs: filled dot (indicates importance)
           // - Mobile nodes: orange ring (indicates volatile/moving)
           // - All other nodes: ring/torus in standard color (elegant, minimal)
           // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
           const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
           const isNodeHovered = hoveredMarker === hash;
-          const icon = isHub 
-            ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered) 
-            : isMobile
-              ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered)
-              : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered);
+          const icon = isRoomServer
+            ? createRoomServerIcon(quantizedOpacity, isNodeHovered)
+            : isHub 
+              ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered) 
+              : isMobile
+                ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered)
+                : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered);
           
           // Use quantized opacity and hover state in key to force icon update
           const opacityKey = Math.round(quantizedOpacity * 20);
@@ -1929,6 +1982,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   isHub={isHub}
                   isZeroHop={isZeroHop}
                   isMobile={isMobile}
+                  isRoomServer={isRoomServer}
                   centrality={centrality}
                   affinity={affinity}
                   meanSnr={meanSnr}
@@ -2135,6 +2189,21 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               />
               <span className="text-text-muted">Local</span>
             </div>
+            {/* Room server indicator - amber chat bubble */}
+            {neighborsWithLocation.some(([, n]) => 
+              n.contact_type?.toLowerCase() === 'room_server' || 
+              n.contact_type?.toLowerCase() === 'room' || 
+              n.contact_type?.toLowerCase() === 'server'
+            ) && (
+              <div className="flex items-center gap-1.5">
+                <MessageCircle 
+                  className="w-3 h-3 flex-shrink-0" 
+                  style={{ color: DESIGN.roomServerColor }}
+                  strokeWidth={2.5}
+                />
+                <span className="text-text-muted">Room</span>
+              </div>
+            )}
             {/* Mobile node indicator - orange ring */}
             {meshTopology.mobileNodes.length > 0 && (
               <div className="flex items-center gap-1.5">

@@ -267,3 +267,232 @@ export const ROUTE_TYPES: Record<number, string> = {
   4: 'T_FLOOD',   // Transport flood
   5: 'T_DIRECT',  // Transport direct
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Identity Management Types (feat/identity branch)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface RoomServerSettings {
+  node_name?: string;
+  latitude?: number;
+  longitude?: number;
+  disable_fwd?: boolean;
+  admin_password?: string;
+  guest_password?: string;
+}
+
+export interface Identity {
+  name: string;
+  type: 'repeater' | 'room_server';
+  hash: string | null;
+  address?: string;
+  identity_key?: string;
+  identity_key_length?: number;
+  settings?: RoomServerSettings;
+  registered?: boolean;
+  runtime?: {
+    hash: string;
+    address: string;
+    type: string;
+    registered: boolean;
+  };
+}
+
+export interface IdentityCreateRequest {
+  name: string;
+  identity_key?: string;  // Optional - auto-generated if not provided
+  type: 'room_server';
+  settings?: RoomServerSettings;
+}
+
+export interface IdentityUpdateRequest {
+  name: string;           // Required - used to find identity
+  new_name?: string;      // Optional - rename identity
+  identity_key?: string;  // Optional - update key
+  settings?: RoomServerSettings;
+}
+
+export interface IdentitiesResponse {
+  registered: Array<{
+    hash: string;
+    name: string;
+    type: string;
+    address: string;
+  }>;
+  configured: Identity[];
+  total_registered: number;
+  total_configured: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACL (Access Control List) Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ACLInfo {
+  name: string;
+  type: 'repeater' | 'room_server';
+  hash: string;
+  max_clients: number;
+  authenticated_clients: number;
+  has_admin_password: boolean;
+  has_guest_password: boolean;
+  allow_read_only: boolean;
+}
+
+export interface ACLInfoResponse {
+  acls: ACLInfo[];
+  total_identities: number;
+  total_authenticated_clients: number;
+}
+
+export interface ACLClient {
+  public_key: string;       // Truncated: "abc123...def456"
+  public_key_full: string;  // Full hex string
+  address: string;
+  permissions: 'admin' | 'guest';
+  last_activity: number;
+  last_login_success: number;
+  last_timestamp: number;
+  identity_name: string;
+  identity_type: string;
+  identity_hash: string;
+}
+
+export interface ACLClientsResponse {
+  clients: ACLClient[];
+  count: number;
+  filter: {
+    identity_hash: string | null;
+    identity_name: string | null;
+  } | null;
+}
+
+export interface ACLStats {
+  total_identities: number;
+  total_clients: number;
+  admin_clients: number;
+  guest_clients: number;
+  by_identity_type: {
+    repeater: { count: number; clients: number };
+    room_server: { count: number; clients: number };
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Room Server Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface RoomMessage {
+  id: number;
+  author_pubkey: string;
+  author_prefix: string;   // First 8 chars of pubkey
+  author_name?: string;    // Looked up from adverts table
+  post_timestamp: number;
+  sender_timestamp: number;
+  message_text: string;
+  txt_type: number;
+  created_at: number;
+}
+
+export interface RoomMessagesResponse {
+  room_name: string;
+  room_hash: string;
+  messages: RoomMessage[];
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface RoomPostMessageRequest {
+  room_name?: string;   // Either room_name or room_hash required
+  room_hash?: string;
+  message: string;
+  author_pubkey: string;  // hex string, or "server"/"system" for system messages
+  txt_type?: number;      // Default 0
+}
+
+export interface RoomPostMessageResponse {
+  message_id: number | null;
+  room_name: string;
+  room_hash: string;
+  queued_for_distribution: boolean;
+  is_server_message: boolean;
+  author_filter_note: string;
+}
+
+export interface RoomStats {
+  room_name: string;
+  room_hash: string;
+  message_count: number;
+  client_count: number;
+  synced_clients: number;
+  last_message_timestamp?: number;
+  oldest_message_timestamp?: number;
+}
+
+export interface RoomStatsResponse {
+  rooms: RoomStats[];
+  total_rooms: number;
+  total_messages: number;
+  total_clients: number;
+}
+
+export interface RoomClient {
+  public_key: string;
+  public_key_full: string;
+  last_sync_timestamp: number;
+  messages_synced: number;
+}
+
+export interface RoomClientsResponse {
+  room_name: string;
+  room_hash: string;
+  clients: RoomClient[];
+  count: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transport Key Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface TransportKey {
+  id: number;
+  name: string;
+  transport_key?: string;  // May be null/empty
+  flood_policy: 'allow' | 'deny';
+  parent_id?: number;
+  last_used: number;       // Unix timestamp
+  created_at?: number;
+}
+
+export interface TransportKeyCreateRequest {
+  name: string;
+  flood_policy: 'allow' | 'deny';
+  transport_key?: string;  // Optional
+  parent_id?: number;
+  last_used?: string;      // ISO timestamp string
+}
+
+export interface TransportKeyUpdateRequest {
+  name?: string;
+  flood_policy?: 'allow' | 'deny';
+  transport_key?: string;
+  parent_id?: number;
+  last_used?: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Neighbor/Advert Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface AdvertsByContactTypeResponse {
+  adverts: NeighborInfo[];
+  count: number;
+  contact_type: string;
+  filters: {
+    contact_type: string;
+    limit: number | null;
+    hours: number | null;
+  };
+}
