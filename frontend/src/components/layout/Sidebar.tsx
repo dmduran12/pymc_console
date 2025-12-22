@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
-  Binary,
+  LayoutList,
   MapPinPlus,
   Settings, 
   FileText,
@@ -29,7 +29,7 @@ import { POLLING_INTERVALS } from '@/lib/constants';
 const navigation = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
   { name: 'Contacts', to: '/contacts', icon: MapPinPlus },
-  { name: 'Packets', to: '/packets', icon: Binary },
+  { name: 'Packets', to: '/packets', icon: LayoutList },
   { name: 'Statistics', to: '/statistics', icon: BarChart3 },
   { name: 'System', to: '/system', icon: Gauge },
   { name: 'Logs', to: '/logs', icon: FileText },
