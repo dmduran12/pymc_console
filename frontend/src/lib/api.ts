@@ -239,9 +239,38 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   return fetchPromise;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Data Normalization Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Normalize contact_type values from API to MeshCore terminology.
+ * "Chat Node" (pymc_core) → "Companion" (MeshCore terminology)
+ */
+function normalizeContactType(contactType: string | undefined): string | undefined {
+  if (!contactType) return contactType;
+  // Normalize "Chat Node" → "Companion" to match MeshCore terminology
+  if (contactType.toLowerCase() === 'chat node') return 'Companion';
+  return contactType;
+}
+
+/**
+ * Normalize Stats response - transforms API values to frontend conventions.
+ */
+function normalizeStats(stats: Stats): Stats {
+  // Normalize contact_type for all neighbors
+  if (stats.neighbors) {
+    for (const neighbor of Object.values(stats.neighbors)) {
+      neighbor.contact_type = normalizeContactType(neighbor.contact_type);
+    }
+  }
+  return stats;
+}
+
 // Stats endpoints
 export async function getStats(): Promise<Stats> {
-  return fetchApi<Stats>('/api/stats');
+  const stats = await fetchApi<Stats>('/api/stats');
+  return normalizeStats(stats);
 }
 
 // Logs endpoint

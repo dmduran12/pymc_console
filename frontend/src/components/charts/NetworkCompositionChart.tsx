@@ -15,7 +15,7 @@ interface CompositionItem {
 // Color palette for contact types - matches design system
 const TYPE_COLORS: Record<string, string> = {
   repeater: 'var(--accent-primary)',      // Lavender
-  client: 'var(--accent-tertiary)',       // Cyan/mint
+  companion: 'var(--accent-tertiary)',    // Cyan/mint
   room_server: 'var(--accent-secondary)', // Yellow
   unknown: 'var(--signal-fair)',          // Muted yellow
 };
@@ -25,18 +25,19 @@ const TYPE_COLORS: Record<string, string> = {
  */
 function categorizeContact(contact: NeighborInfo): string {
   // Prefer explicit contact_type if available
+  // Note: "Chat Node" is normalized to "Companion" in api.ts
   if (contact.contact_type) {
     const ct = contact.contact_type.toLowerCase();
     if (ct === 'repeater' || ct === 'rep') return 'repeater';
-    if (ct === 'room_server' || ct === 'room' || ct === 'server') return 'room_server';
-    if (ct === 'client' || ct === 'cli') return 'client';
+    if (ct === 'room server' || ct === 'room_server' || ct === 'room' || ct === 'server') return 'room_server';
+    if (ct === 'companion' || ct === 'client' || ct === 'cli') return 'companion';
   }
   
   // Fallback: use is_repeater flag
   if (contact.is_repeater) return 'repeater';
   
-  // Default to client for nodes without explicit type
-  return 'client';
+  // Default to companion for nodes without explicit type
+  return 'companion';
 }
 
 /**
@@ -47,7 +48,7 @@ function NetworkCompositionChartComponent({ neighbors }: NetworkCompositionChart
   const composition = useMemo(() => {
     const counts: Record<string, number> = {
       repeater: 0,
-      client: 0,
+      companion: 0,
       room_server: 0,
     };
     
@@ -62,7 +63,7 @@ function NetworkCompositionChartComponent({ neighbors }: NetworkCompositionChart
     // Build sorted composition items (largest first)
     const items: CompositionItem[] = [
       { label: 'Repeaters', count: counts.repeater, percent: 0, color: TYPE_COLORS.repeater },
-      { label: 'Clients', count: counts.client, percent: 0, color: TYPE_COLORS.client },
+      { label: 'Companions', count: counts.companion, percent: 0, color: TYPE_COLORS.companion },
       { label: 'Room Servers', count: counts.room_server, percent: 0, color: TYPE_COLORS.room_server },
     ]
       .map(item => ({
