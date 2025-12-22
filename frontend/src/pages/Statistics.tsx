@@ -202,10 +202,12 @@ export default function Statistics() {
           <div className="grid-12">
             {/* Traffic Flow - Stacked Area Chart */}
             <div className="col-span-full lg:col-span-8 glass-card card-padding">
-              <div className="flex items-center gap-2 mb-6">
-                <TrendingUp className="w-5 h-5 text-accent-primary" />
-                <h2 className="type-subheading text-text-primary">Traffic Flow</h2>
-                <div className="ml-auto flex items-center gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-4 sm:mb-6">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
+                  <h2 className="type-subheading text-text-primary">Traffic Flow</h2>
+                </div>
+                <div className="flex items-center gap-3 sm:gap-4 sm:ml-auto">
                   <span className="type-data-xs text-text-muted">
                     Max <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.max.toFixed(1)}%</span>
                   </span>

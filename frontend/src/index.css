@@ -166,6 +166,9 @@
 }
 
 @theme inline {
+  /* Custom breakpoint for extra-small screens */
+  --breakpoint-xs: 475px;
+  
   /* Surface colors */
   --color-bg-body: var(--bg-body);
   --color-bg-surface: var(--bg-surface);

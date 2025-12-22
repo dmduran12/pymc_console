@@ -201,29 +201,29 @@ export default function Settings() {
             <button
               onClick={() => setMode('forward')}
               className={clsx(
-                'w-full p-4 rounded-lg border text-left transition-all duration-200',
+                'w-full p-3 sm:p-4 rounded-lg border text-left transition-all duration-200 min-h-[64px]',
                 currentMode === 'forward'
                   ? 'bg-accent-success/20 border-accent-success/50 text-accent-success'
                   : 'bg-bg-subtle border-border-subtle text-text-secondary hover:bg-bg-elevated'
               )}
             >
-              <div className="font-medium">Forward Mode</div>
-              <div className="text-sm opacity-70 mt-1">
-                Receive packets and retransmit them to extend network coverage
+              <div className="font-medium text-sm sm:text-base">Forward Mode</div>
+              <div className="text-xs sm:text-sm opacity-70 mt-0.5 sm:mt-1">
+                Receive and retransmit to extend coverage
               </div>
             </button>
             <button
               onClick={() => setMode('monitor')}
               className={clsx(
-                'w-full p-4 rounded-lg border text-left transition-all duration-200',
+                'w-full p-3 sm:p-4 rounded-lg border text-left transition-all duration-200 min-h-[64px]',
                 currentMode === 'monitor'
                   ? 'bg-accent-secondary/20 border-accent-secondary/50 text-accent-secondary'
                   : 'bg-bg-subtle border-border-subtle text-text-secondary hover:bg-bg-elevated'
               )}
             >
-              <div className="font-medium">Monitor Mode</div>
-              <div className="text-sm opacity-70 mt-1">
-                Receive and log packets without retransmitting
+              <div className="font-medium text-sm sm:text-base">Monitor Mode</div>
+              <div className="text-xs sm:text-sm opacity-70 mt-0.5 sm:mt-1">
+                Log packets without retransmitting
               </div>
             </button>
           </div>
@@ -242,28 +242,28 @@ export default function Settings() {
             <button
               onClick={() => setDutyCycle(true)}
               className={clsx(
-                'w-full p-4 rounded-lg border text-left transition-all duration-200',
+                'w-full p-3 sm:p-4 rounded-lg border text-left transition-all duration-200 min-h-[64px]',
                 dutyCycleEnabled
                   ? 'bg-accent-success/20 border-accent-success/50 text-accent-success'
                   : 'bg-bg-subtle border-border-subtle text-text-secondary hover:bg-bg-elevated'
               )}
             >
-              <div className="font-medium">Enabled</div>
-              <div className="text-sm opacity-70 mt-1">
-                Enforce airtime limits to comply with regional regulations
+              <div className="font-medium text-sm sm:text-base">Enabled</div>
+              <div className="text-xs sm:text-sm opacity-70 mt-0.5 sm:mt-1">
+                Enforce airtime limits for regulatory compliance
               </div>
             </button>
             <button
               onClick={() => setDutyCycle(false)}
               className={clsx(
-                'w-full p-4 rounded-lg border text-left transition-all duration-200',
+                'w-full p-3 sm:p-4 rounded-lg border text-left transition-all duration-200 min-h-[64px]',
                 !dutyCycleEnabled
                   ? 'bg-accent-secondary/20 border-accent-secondary/50 text-accent-secondary'
                   : 'bg-bg-subtle border-border-subtle text-text-secondary hover:bg-bg-elevated'
               )}
             >
-              <div className="font-medium">Disabled</div>
-              <div className="text-sm opacity-70 mt-1">
+              <div className="font-medium text-sm sm:text-base">Disabled</div>
+              <div className="text-xs sm:text-sm opacity-70 mt-0.5 sm:mt-1">
                 No airtime limiting (use with caution)
               </div>
             </button>
