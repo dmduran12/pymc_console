@@ -1337,29 +1337,106 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     lastEdgeSetRef.current = currentWeightSignature;
   }, [showTopology, isExiting, filteredCertainPolylines, weakPolylines, meshTopology.maxCertainCount, easeInOutCubic, ANIMATION_DURATION]);
 
-  // Toggle fullscreen
-  const toggleFullscreen = () => {
+  // Toggle fullscreen - cross-platform support
+  // iOS doesn't support Fullscreen API, so we use CSS-based fullscreen
+  const toggleFullscreen = useCallback(() => {
     if (!mapContainerRef.current) return;
     
+    const elem = mapContainerRef.current as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void>;
+      msRequestFullscreen?: () => void;
+    };
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void>;
+      msExitFullscreen?: () => void;
+      webkitFullscreenElement?: Element;
+      msFullscreenElement?: Element;
+    };
+    
+    // Check if native fullscreen is supported
+    const nativeFullscreenSupported = !!(elem.requestFullscreen || elem.webkitRequestFullscreen || elem.msRequestFullscreen);
+    
     if (!isFullscreen) {
-      if (mapContainerRef.current.requestFullscreen) {
-        mapContainerRef.current.requestFullscreen();
+      if (nativeFullscreenSupported) {
+        // Try native fullscreen APIs in order of preference
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen().catch(() => {
+            // Fallback to CSS fullscreen if native fails
+            setIsFullscreen(true);
+          });
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) {
+          elem.msRequestFullscreen();
+        }
+      } else {
+        // iOS/unsupported: use CSS-based fullscreen
+        setIsFullscreen(true);
       }
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
+      // Exit fullscreen
+      const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement;
+      
+      if (fullscreenElement) {
+        // Native fullscreen active - exit it
+        if (doc.exitFullscreen) {
+          doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        } else if (doc.msExitFullscreen) {
+          doc.msExitFullscreen();
+        }
+      } else {
+        // CSS-based fullscreen - just toggle state
+        setIsFullscreen(false);
       }
     }
-  };
+  }, [isFullscreen]);
 
-  // Listen for fullscreen changes
+  // Listen for fullscreen changes (native API)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element;
+        msFullscreenElement?: Element;
+      };
+      const isNativeFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
+      setIsFullscreen(isNativeFullscreen);
     };
+    
+    // Listen for all vendor-prefixed events
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
   }, []);
+  
+  // Handle escape key for CSS-based fullscreen (native handles its own)
+  useEffect(() => {
+    if (!isFullscreen) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // Check if we're in CSS-based fullscreen (not native)
+        const doc = document as Document & {
+          webkitFullscreenElement?: Element;
+          msFullscreenElement?: Element;
+        };
+        const isNativeFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
+        if (!isNativeFullscreen) {
+          setIsFullscreen(false);
+        }
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
 
   // No locations available
   if (allPositions.length === 0) {
@@ -1375,14 +1452,29 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     );
   }
   
+  // CSS-based fullscreen styles (for iOS and fallback)
+  const fullscreenStyles: React.CSSProperties = isFullscreen ? {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100vw',
+    height: '100dvh', // dvh = dynamic viewport height (accounts for iOS Safari address bar)
+    zIndex: 9999,
+    borderRadius: 0,
+  } : {
+    height: '500px',
+  };
+  
   return (
     <div 
       ref={mapContainerRef}
-      className="relative rounded-[1.125rem] overflow-hidden" 
-      style={{ height: isFullscreen ? '100vh' : '500px' }}
+      className={`relative overflow-hidden ${isFullscreen ? '' : 'rounded-[1.125rem]'}`}
+      style={fullscreenStyles}
     >
       {/* Map container with liquid glass effects */}
-      <div className="h-full relative rounded-[1.125rem] overflow-hidden border border-white/10">
+      <div className={`h-full relative overflow-hidden border border-white/10 ${isFullscreen ? '' : 'rounded-[1.125rem]'}`}>
         {/* Liquid glass overlay effects */}
         <div className="absolute inset-0 pointer-events-none z-[1000]">
           {/* Top edge highlight */}
