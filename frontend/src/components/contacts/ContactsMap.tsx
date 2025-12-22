@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import '@/lib/leaflet-smooth-wheel-zoom'; // Google Maps-style smooth zoom
 import { Maximize2, Minimize2, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2, MessagesSquare } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NeighborInfo, Packet } from '@/types/api';
@@ -1634,9 +1635,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         <MapContainer
           center={defaultCenter}
           zoom={8}
-          zoomSnap={0}
-          zoomDelta={0.5}
-          wheelPxPerZoomLevel={120}
+          scrollWheelZoom={false}
+          smoothWheelZoom={true}
+          smoothSensitivity={1.5}
           style={{ height: '100%', width: '100%', background: '#0d1520' }}
           attributionControl={true}
           className="map-blue-water"
