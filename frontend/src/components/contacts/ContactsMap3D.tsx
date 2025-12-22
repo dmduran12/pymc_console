@@ -675,14 +675,20 @@ export function ContactsMap3D({
   const { edgeData, weakEdgeData, loopEdgeData } = useMemo(() => {
     if (!showTopology) return { edgeData: [], weakEdgeData: [], loopEdgeData: [] };
     
+    // Defensive: ensure topology arrays exist
+    const validatedEdges = meshTopology.validatedEdges ?? [];
+    const weakEdgesSource = meshTopology.weakEdges ?? [];
+    const backboneEdgesSource = meshTopology.backboneEdges ?? [];
+    const loopEdgeKeysSource = meshTopology.loopEdgeKeys ?? new Set<string>();
+    
     const edges: EdgeData[] = [];
     const weakEdges: EdgeData[] = [];
     const loopEdges: EdgeData[] = [];
-    const backboneSet = new Set(meshTopology.backboneEdges);
-    const validatedKeys = new Set(meshTopology.validatedEdges.map(e => e.key));
+    const backboneSet = new Set(backboneEdgesSource);
+    const validatedKeys = new Set(validatedEdges.map(e => e.key));
     
     // Process validated edges
-    for (const edge of meshTopology.validatedEdges) {
+    for (const edge of validatedEdges) {
       const fromNode = nodeData.find(n => n.hash === edge.fromHash);
       const toNode = nodeData.find(n => n.hash === edge.toHash);
       
@@ -692,7 +698,7 @@ export function ContactsMap3D({
         || backboneSet.has(`${edge.toHash}-${edge.fromHash}`);
       const isHighlighted = highlightedEdgeKey === `${edge.fromHash}-${edge.toHash}`
         || highlightedEdgeKey === `${edge.toHash}-${edge.fromHash}`;
-      const isLoop = meshTopology.loopEdgeKeys.has(edge.key);
+      const isLoop = loopEdgeKeysSource.has(edge.key);
       
       const color = getEdgeColor(edge.avgConfidence, isBackbone, edge.isDirectPathEdge ?? false);
       const width = getEdgeWidth(edge.certainCount, meshTopology.maxCertainCount);
@@ -734,7 +740,7 @@ export function ContactsMap3D({
     }
     
     // Process weak edges (5+ packets but below validation threshold)
-    for (const edge of meshTopology.weakEdges) {
+    for (const edge of weakEdgesSource) {
       if (validatedKeys.has(edge.key)) continue;
       
       const fromNode = nodeData.find(n => n.hash === edge.fromHash);
