@@ -991,8 +991,9 @@ export function ContactsMap3D({
         setHoveredNode(info.object ?? null);
       },
       onClick: (info: PickingInfo<NodeData>) => {
-        if (info.object) {
-          setSelectedNode(info.object);
+        if (info.object && info.object.hash && info.object.position) {
+          // Clone the object to avoid stale reference issues
+          setSelectedNode({ ...info.object });
         }
       },
       updateTriggers: {
@@ -1506,10 +1507,10 @@ export function ContactsMap3D({
       </div>
       
       {/* Click popup - MapLibre native popup with rich content */}
-      {selectedNode && (
+      {selectedNode && selectedNode.position && (
         <Popup
-          longitude={selectedNode.position[0]}
-          latitude={selectedNode.position[1]}
+          longitude={selectedNode.position[0] ?? 0}
+          latitude={selectedNode.position[1] ?? 0}
           anchor="bottom"
           onClose={() => setSelectedNode(null)}
           closeOnClick={false}
