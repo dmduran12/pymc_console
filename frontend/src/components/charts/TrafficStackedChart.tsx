@@ -99,7 +99,7 @@ function UtilTooltip({ active, payload, label }: { active?: boolean; payload?: A
 function TrafficStackedChartComponent({
   received,
   forwarded,
-  dropped,
+  transmitted,
   bucketDurationSeconds = 60,
   spreadingFactor = DEFAULT_SF,
   bandwidthKhz = DEFAULT_BW_KHZ,
@@ -151,9 +151,11 @@ function TrafficStackedChartComponent({
       const rxAirtimeMs = rxPackets * airtimePerPacketMs;
       const rxUtil = (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
       
-      // TX utilization: forwarded + dropped (all transmitted packets)
-      // Note: forwarded = packets we forwarded, which requires TX
-      const txPackets = (forwarded[i]?.count ?? 0) + (dropped[i]?.count ?? 0);
+      // TX utilization: transmitted (local) + forwarded (relayed)
+      // transmitted = packets we originated locally
+      // forwarded = packets we received and re-transmitted (relayed)
+      // dropped = packets we received but did NOT transmit (not counted in TX)
+      const txPackets = (transmitted?.[i]?.count ?? 0) + (forwarded[i]?.count ?? 0);
       const txAirtimeMs = txPackets * airtimePerPacketMs;
       const txUtil = (txAirtimeMs / maxAirtimePerBucketMs) * 100;
       
@@ -163,7 +165,7 @@ function TrafficStackedChartComponent({
         txUtil,
       };
     });
-  }, [received, forwarded, dropped, airtimePerPacketMs, maxAirtimePerBucketMs, bucketDurationSeconds]);
+  }, [received, forwarded, transmitted, airtimePerPacketMs, maxAirtimePerBucketMs, bucketDurationSeconds]);
 
   if (chartData.length === 0) {
     return (

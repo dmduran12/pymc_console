@@ -238,6 +238,7 @@ export default function Statistics() {
                   received={bucketedStats.received}
                   forwarded={bucketedStats.forwarded}
                   dropped={bucketedStats.dropped}
+                  transmitted={bucketedStats.transmitted}
                   bucketDurationSeconds={bucketedStats.bucket_duration_seconds}
                   spreadingFactor={spreadingFactor}
                   bandwidthKhz={bandwidthKhz}
