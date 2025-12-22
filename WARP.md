@@ -22,6 +22,7 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 ## Tech Stack
 
 - **Frontend**: Vite 6, React 18, React Router 6, TypeScript, Tailwind CSS 4
+- **Build**: SWC (via `@vitejs/plugin-react-swc`) for fast React transforms
 - **State Management**: Zustand
 - **Charts**: Recharts
 - **Maps**: Leaflet 1.9 / react-leaflet 4.2 (React 18 compatible)
@@ -53,6 +54,7 @@ pymc_console/
 cd frontend
 npm install           # Install dependencies
 npm run dev           # Start Vite dev server at http://localhost:5173
+npm run typecheck     # TypeScript type checking (no emit)
 npm run build         # Production build → frontend/out/
 npm run build:static  # Build + package for release → frontend/dist/
 npm run preview       # Preview production build locally

@@ -1,13 +1,52 @@
 /**
- * Mesh Topology Analysis
- * 
- * Analyzes packet paths to build a network graph with confidence-weighted edges.
- * Uses the centralized prefix disambiguation system for consistent prefix resolution.
- * 
- * Key features:
- * - Prefix disambiguation: resolves 2-char prefix collisions using position, co-occurrence, and geography
- * - Edge certainty: uses disambiguation confidence to determine edge validity
- * - Betweenness centrality: identifies hub nodes (high-traffic forwarders)
+ * ╔═══════════════════════════════════════════════════════════════════════════════╗
+ * ║                         MESH TOPOLOGY ANALYSIS                                ║
+ * ╠═══════════════════════════════════════════════════════════════════════════════╣
+ * ║ Analyzes packet paths to build a network graph with confidence-weighted       ║
+ * ║ edges. Uses the centralized prefix disambiguation system for consistent       ║
+ * ║ prefix resolution.                                                            ║
+ * ║                                                                               ║
+ * ║ ARCHITECTURE:                                                                 ║
+ * ║ ┌─────────────────────────────────────────────────────────────────────────┐   ║
+ * ║ │ Phase 1: Directional Traffic Tracking (forwardCount/reverseCount)      │   ║
+ * ║ │ Phase 2: Path Sequence Registry (path-registry.ts)                     │   ║
+ * ║ │ Phase 3: Flood vs Direct Route Detection                               │   ║
+ * ║ │ Phase 4: Edge Betweenness Centrality (with symmetry normalization)     │   ║
+ * ║ │ Phase 5: Mobile Repeater Detection                                     │   ║
+ * ║ │ Phase 6: TX Delay Recommendations                                      │   ║
+ * ║ │ Phase 7: Path Health Indicators                                        │   ║
+ * ║ └─────────────────────────────────────────────────────────────────────────┘   ║
+ * ║                                                                               ║
+ * ║ KEY DEPENDENCIES:                                                             ║
+ * ║   - prefix-disambiguation.ts: Resolves 2-char prefix collisions              ║
+ * ║   - path-utils.ts: Centralized path parsing utilities                        ║
+ * ║   - path-registry.ts: Observed path sequence tracking                        ║
+ * ║                                                                               ║
+ * ║ FILE ORGANIZATION (~2250 lines):                                              ║
+ * ║   Lines 1-290:     Interfaces & Constants                                    ║
+ * ║   Lines 291-506:   Neighbor Affinity System                                  ║
+ * ║   Lines 507-627:   Prefix Matching (VESTIGIAL - see note)                    ║
+ * ║   Lines 628-800:   Loop Detection (H₁ Homology)                              ║
+ * ║   Lines 801-1070:  TX Delay Recommendations (Phase 6)                        ║
+ * ║   Lines 1071-1203: Edge Betweenness Centrality (Phase 4)                     ║
+ * ║   Lines 1204-1320: Mobile Repeater Detection (Phase 5)                       ║
+ * ║   Lines 1321-1484: Path Health Indicators (Phase 7)                          ║
+ * ║   Lines 1485-2054: Main buildMeshTopology() function                         ║
+ * ║   Lines 2055-2254: Edge Styling Utilities                                    ║
+ * ║                                                                               ║
+ * ║ VESTIGIAL/REDUNDANT CODE (candidates for removal):                           ║
+ * ║   - matchPrefix(): Largely superseded by prefix-disambiguation.ts            ║
+ * ║   - getEdgeColor(): Deprecated, replaced by getEdgeColorByHopDistance()      ║
+ * ║   - getUncertainEdgeColor(): Uncertain edges no longer rendered              ║
+ * ║   - MeshTopology.uncertainEdges: Always empty, kept for API compat           ║
+ * ║   - MeshTopology.certainEdges: Alias for validatedEdges                      ║
+ * ║   - calculateDistance/getProximityScore: Duplicated in disambiguation.ts     ║
+ * ║                                                                               ║
+ * ║ TODO: Future improvements                                                    ║
+ * ║   - Extract edge styling to separate module (edge-styling.ts)                ║
+ * ║   - Move neighbor affinity to its own module                                 ║
+ * ║   - Consider Web Worker for buildMeshTopology (already done in service)      ║
+ * ╚═══════════════════════════════════════════════════════════════════════════════╝
  */
 
 import { Packet, NeighborInfo } from '@/types/api';
@@ -27,6 +66,25 @@ import {
   buildPathRegistry,
   type PathRegistry,
 } from './path-registry';
+import {
+  calculateDistance,
+  getProximityScore,
+} from './geo-utils';
+
+// Re-export edge styling functions for backward compatibility
+// These are now defined in edge-styling.ts but consumers may import from mesh-topology
+export {
+  getEdgeWeight,
+  getEdgeColor,
+  getEdgeColorByHopDistance,
+  getEdgeWeightByHopDistance,
+  getCertainEdgeWeight,
+  getUncertainEdgeColor,
+  getLinkQualityColor,
+  getLinkQualityWeight,
+  LINK_QUALITY_THRESHOLDS,
+  EDGE_WEIGHT_THRESHOLDS,
+} from './edge-styling';
 
 /** Represents a directed edge between two nodes */
 export interface TopologyEdge {
@@ -212,9 +270,15 @@ export interface MeshTopology {
   validatedEdges: TopologyEdge[];
   /** Weak edges: 5+ packets but below validation threshold (rendered underneath) */
   weakEdges: TopologyEdge[];
-  /** Legacy: certain edges (alias for validatedEdges) */
+  /** 
+   * @deprecated Use validatedEdges instead. This is an alias kept for API compatibility.
+   * TODO: Remove in next major version after updating all consumers.
+   */
   certainEdges: TopologyEdge[];
-  /** Legacy: uncertain edges (empty - we no longer render these) */
+  /** 
+   * @deprecated Uncertain edges are no longer rendered. Always returns empty array.
+   * TODO: Remove in next major version after updating all consumers.
+   */
   uncertainEdges: TopologyEdge[];
   /** Map from edge key to edge for quick lookup */
   edgeMap: Map<string, TopologyEdge>;
@@ -291,42 +355,8 @@ interface EdgeAccumulator {
 // Re-export from path-utils for backward compatibility
 export { getHashPrefix, prefixMatches } from './path-utils';
 
-/**
- * Calculate distance between two coordinates in meters using Haversine formula.
- */
-function calculateDistance(
-  lat1: number, lon1: number,
-  lat2: number, lon2: number
-): number {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-/**
- * Calculate proximity score (0-1) based on distance.
- * Closer neighbors get higher scores.
- * - < 100m: 1.0 (very close, likely direct neighbor)
- * - < 500m: 0.8
- * - < 1km: 0.6
- * - < 5km: 0.4
- * - < 10km: 0.2
- * - > 10km: 0.1
- */
-function getProximityScore(distanceMeters: number): number {
-  if (distanceMeters < 100) return 1.0;
-  if (distanceMeters < 500) return 0.8;
-  if (distanceMeters < 1000) return 0.6;
-  if (distanceMeters < 5000) return 0.4;
-  if (distanceMeters < 10000) return 0.2;
-  return 0.1;
-}
+// Geographic functions are now imported from geo-utils.ts
+// See: calculateDistance, getProximityScore, hasValidCoordinates
 
 /** Combined affinity score for a neighbor */
 export interface NeighborAffinity {
@@ -506,9 +536,30 @@ export function buildNeighborAffinity(
 }
 
 
+// ╔═══════════════════════════════════════════════════════════════════════════════╗
+// ║ VESTIGIAL: matchPrefix()                                                      ║
+// ╠═══════════════════════════════════════════════════════════════════════════════╣
+// ║ This function is LARGELY SUPERSEDED by prefix-disambiguation.ts which         ║
+// ║ provides multi-factor scoring (position, co-occurrence, geography, recency).  ║
+// ║                                                                               ║
+// ║ STILL USED BY:                                                                ║
+// ║   - PathMapVisualization.tsx: Fallback when prefixLookup unavailable          ║
+// ║   - buildNeighborAffinity(): Uses prefixMatches for hop position tracking     ║
+// ║                                                                               ║
+// ║ MIGRATION DECISION:                                                           ║
+// ║   Full migration to resolvePrefix() would require pre-computing prefixLookup  ║
+// ║   before buildNeighborAffinity(), creating a circular dependency. The current ║
+// ║   approach of using prefixLookup when available (in PathMapVisualization)     ║
+// ║   and falling back to matchPrefix() is acceptable.                            ║
+// ║                                                                               ║
+// ║ KEEP EXPORTED: Required by PathMapVisualization.tsx                           ║
+// ╚═══════════════════════════════════════════════════════════════════════════════╝
 /**
  * Match a 2-character prefix to known node hashes.
  * Returns matching hashes and the probability based on combined affinity scores.
+ * 
+ * @deprecated Prefer resolvePrefix() from prefix-disambiguation.ts for new code.
+ *             This function lacks position/co-occurrence/geographic scoring.
  * 
  * @param prefix - The 2-char hex prefix to match
  * @param neighbors - Known neighbors
@@ -626,15 +677,16 @@ function makeEdgeKey(hash1: string, hash2: string): string {
   return [hash1, hash2].sort().join('-');
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Loop Detection (H₁ Homology)
-// 
-// Detects cycles in the mesh network graph. Cycles represent redundant paths -
-// critical for mesh resilience. If one link in a cycle fails, traffic can
-// route around via the alternate path.
-// 
-// Uses DFS-based cycle detection with path reconstruction.
-// ═══════════════════════════════════════════════════════════════════════════════
+// ╔═══════════════════════════════════════════════════════════════════════════════╗
+// ║ LOOP DETECTION (H₁ Homology)                                                  ║
+// ╠═══════════════════════════════════════════════════════════════════════════════╣
+// ║ Detects cycles in the mesh network graph. Cycles represent redundant paths   ║
+// ║ critical for mesh resilience. If one link in a cycle fails, traffic can      ║
+// ║ route around via the alternate path.                                          ║
+// ║                                                                               ║
+// ║ Algorithm: BFS-based alternate path detection                                 ║
+// ║ Complexity: O(E × (V + E)) worst case, typically much faster                  ║
+// ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 /**
  * Find all loops (cycles) in the network graph.
@@ -1078,6 +1130,15 @@ function calculateNodeTxDelays(
  * This is a more accurate backbone detection than simply using top-N by count,
  * because it considers the actual routing patterns through the network.
  * 
+ * **Observer Bias Correction (Symmetry Normalization):**
+ * Edges with highly asymmetric traffic (one direction dominates) likely indicate
+ * observer bias — we only see traffic flowing toward the local node. Symmetric
+ * edges suggest genuine bidirectional traffic and are weighted higher.
+ * 
+ * The symmetry factor ranges from 0.5 (completely one-directional) to 1.0 (balanced).
+ * This penalizes edges that appear important only because all observed traffic
+ * flows through them toward the local observer.
+ * 
  * @param pathRegistry - Registry of observed paths
  * @param edges - Topology edges to calculate betweenness for
  * @returns Map of edge key -> betweenness score (0-1)
@@ -1087,6 +1148,9 @@ function calculateEdgeBetweenness(
   edges: TopologyEdge[]
 ): Map<string, number> {
   const betweenness = new Map<string, number>();
+  
+  // Build edge lookup for symmetry data
+  const edgeByKey = new Map(edges.map(e => [e.key, e]));
   
   // Initialize all edges to 0
   for (const edge of edges) {
@@ -1130,6 +1194,36 @@ function calculateEdgeBetweenness(
   const maxBetweenness = Math.max(...betweenness.values(), 1);
   for (const [key, value] of betweenness) {
     betweenness.set(key, value / maxBetweenness);
+  }
+  
+  // ╔═══════════════════════════════════════════════════════════════════════════╗
+  // ║ OBSERVER BIAS CORRECTION: Symmetry Normalization                          ║
+  // ╠═══════════════════════════════════════════════════════════════════════════╣
+  // ║ Problem: All observed paths terminate at the local node, inflating        ║
+  // ║ betweenness of edges near local. Edges with one-way traffic likely        ║
+  // ║ reflect this observer bias rather than true network importance.           ║
+  // ║                                                                           ║
+  // ║ Solution: Penalize asymmetric edges using symmetryRatio from Phase 1.     ║
+  // ║ Symmetric edges (bidirectional traffic) are more likely genuine backbone. ║
+  // ║                                                                           ║
+  // ║ Formula: symmetryFactor = 0.5 + 0.5 × symmetryRatio                       ║
+  // ║   - Perfectly symmetric (ratio=1.0): factor=1.0, no penalty               ║
+  // ║   - Completely one-way (ratio=0.0): factor=0.5, 50% penalty               ║
+  // ║   - Mostly one-way (ratio=0.3): factor=0.65, 35% penalty                  ║
+  // ║                                                                           ║
+  // ║ TODO: Additional observer bias corrections to consider:                   ║
+  // ║   1. Hop-distance weighting: discount edges by distance from local        ║
+  // ║   2. Local-exclusion: exclude local-adjacent edges from backbone ID       ║
+  // ║   3. Cross-node aggregation: combine topology from multiple observers     ║
+  // ║                                                                           ║
+  // ║ @see https://github.com/rightup/pymc_console - Observer Bias Discussion   ║
+  // ╚═══════════════════════════════════════════════════════════════════════════╝
+  for (const [key, rawScore] of betweenness) {
+    const edge = edgeByKey.get(key);
+    if (edge) {
+      const symmetryFactor = 0.5 + 0.5 * edge.symmetryRatio;
+      betweenness.set(key, rawScore * symmetryFactor);
+    }
   }
   
   return betweenness;
@@ -1441,6 +1535,27 @@ function calculatePathHealth(
   return pathHealth;
 }
 
+// ╔═══════════════════════════════════════════════════════════════════════════════╗
+// ║ MAIN ENTRY POINT: buildMeshTopology()                                         ║
+// ╠═══════════════════════════════════════════════════════════════════════════════╣
+// ║ This is the primary function that orchestrates all topology analysis.         ║
+// ║ It is computationally expensive and should be run in a Web Worker.            ║
+// ║                                                                               ║
+// ║ Execution order:                                                              ║
+// ║   1. Build prefix disambiguation lookup                                       ║
+// ║   2. Build neighbor affinity map                                              ║
+// ║   3. Accumulate edge observations from packet paths                           ║
+// ║   4. Calculate node centrality                                                ║
+// ║   5. Convert accumulators to edges                                            ║
+// ║   6. Run loop detection                                                       ║
+// ║   7. Build path registry (Phase 2)                                            ║
+// ║   8. Calculate TX delays (Phase 6)                                            ║
+// ║   9. Calculate edge betweenness (Phase 4)                                     ║
+// ║  10. Detect mobile nodes (Phase 5)                                            ║
+// ║  11. Calculate path health (Phase 7)                                          ║
+// ║                                                                               ║
+// ║ NOTE: Phase numbers are historical and don't reflect execution order.         ║
+// ╚═══════════════════════════════════════════════════════════════════════════════╝
 /**
  * Analyze packets to build mesh topology with confidence-weighted edges.
  * 
@@ -2011,201 +2126,5 @@ export function buildMeshTopology(
   };
 }
 
-/**
- * Get line weight for an edge based on its strength.
- * Returns a weight between minWeight and maxWeight.
- */
-export function getEdgeWeight(
-  strength: number,
-  minWeight: number = 1.5,
-  maxWeight: number = 5
-): number {
-  return minWeight + (maxWeight - minWeight) * strength;
-}
-
-/**
- * Get line color for an edge based on its strength.
- * @deprecated Use getEdgeColorByHopDistance for better topology visualization
- */
-export function getEdgeColor(strength: number): string {
-  if (strength >= 0.7) {
-    return 'rgba(74, 222, 128, 0.8)'; // green-400
-  } else if (strength >= 0.4) {
-    return 'rgba(34, 211, 238, 0.6)'; // cyan-400
-  } else {
-    return 'rgba(255, 255, 255, 0.35)';
-  }
-}
-
-/**
- * Get line color for an edge based on hop distance from local node.
- * Closer edges are more vibrant, further edges fade out.
- * 
- * @param hopDistance - Hops from local (0 = touches local, 1 = one hop away, etc.)
- * @param isHubConnection - Whether this edge connects to a high-centrality hub node
- */
-export function getEdgeColorByHopDistance(hopDistance: number, isHubConnection: boolean = false): string {
-  // Hub connections get a distinct color (gold/amber)
-  if (isHubConnection && hopDistance <= 1) {
-    return 'rgba(251, 191, 36, 0.85)'; // amber-400 - hub connections
-  }
-  
-  switch (hopDistance) {
-    case 0:
-      // Direct connection to local - bright cyan
-      return 'rgba(34, 211, 238, 0.9)'; // cyan-400
-    case 1:
-      // One hop away - green
-      return 'rgba(74, 222, 128, 0.8)'; // green-400
-    case 2:
-      // Two hops - yellow/lime
-      return 'rgba(163, 230, 53, 0.7)'; // lime-400
-    case 3:
-      // Three hops - orange
-      return 'rgba(251, 146, 60, 0.6)'; // orange-400
-    default:
-      // 4+ hops - faded white
-      return 'rgba(255, 255, 255, 0.3)';
-  }
-}
-
-/**
- * Get line weight for an edge based on hop distance and packet count.
- * Closer, high-traffic edges are thicker.
- * 
- * @param hopDistance - Hops from local
- * @param normalizedCount - Packet count normalized to 0-1
- * @param minWeight - Minimum line weight
- * @param maxWeight - Maximum line weight
- */
-export function getEdgeWeightByHopDistance(
-  hopDistance: number,
-  normalizedCount: number,
-  minWeight: number = 1,
-  maxWeight: number = 5
-): number {
-  // Base weight from packet count
-  const countWeight = minWeight + (maxWeight - minWeight) * normalizedCount;
-  
-  // Reduce weight for distant edges
-  const distanceFactor = Math.max(0.4, 1 - hopDistance * 0.15);
-  
-  return countWeight * distanceFactor;
-}
-
-/**
- * Get line weight for a CERTAIN edge based on how many times the path was validated.
- * More frequent = thicker line.
- * 
- * @param certainCount - Number of certain observations
- * @param maxCertainCount - Maximum certain count for normalization
- * @param minWeight - Minimum line weight
- * @param maxWeight - Maximum line weight
- */
-export function getCertainEdgeWeight(
-  certainCount: number,
-  maxCertainCount: number,
-  minWeight: number = 1.5,
-  maxWeight: number = 6
-): number {
-  const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
-  return minWeight + (maxWeight - minWeight) * normalized;
-}
-
-/**
- * Get color for an UNCERTAIN edge based on confidence level.
- * Uses a gradient from red (low confidence) to yellow (medium) to white (high).
- * 
- * @param confidence - Confidence score 0-1
- */
-export function getUncertainEdgeColor(confidence: number): string {
-  if (confidence >= 0.9) {
-    // Very high confidence - light purple (almost certain)
-    return 'rgba(196, 181, 253, 0.6)'; // violet-300
-  } else if (confidence >= 0.7) {
-    // High confidence - blue
-    return 'rgba(147, 197, 253, 0.5)'; // blue-300
-  } else if (confidence >= 0.5) {
-    // Medium confidence - yellow
-    return 'rgba(253, 224, 71, 0.4)'; // yellow-300
-  } else {
-    // Low confidence - orange/red
-    return 'rgba(253, 186, 116, 0.3)'; // orange-300
-  }
-}
-
-/** Relative validation thresholds for link quality tiers (% of max) */
-export const LINK_QUALITY_THRESHOLDS = {
-  STRONG: 0.24,  // 24%+ of max = strong (green)
-  MEDIUM: 0.12,  // 12%+ of max = medium (yellow)
-  WEAK: 0.06,    // 6%+ of max = weak (red)
-};
-
-/**
- * Get color for a CERTAIN edge based on link quality (relative to max validation count).
- * Green = strong (24%+), Yellow = medium (12-23%), Red = weak (6-11%).
- * All colors are fully opaque.
- * 
- * @param certainCount - Number of certain observations
- * @param maxCertainCount - Maximum certain count for normalization
- */
-export function getLinkQualityColor(certainCount: number, maxCertainCount: number): string {
-  const normalized = maxCertainCount > 0 ? certainCount / maxCertainCount : 0;
-  
-  if (normalized >= LINK_QUALITY_THRESHOLDS.STRONG) {
-    // Strong link - bright green (24%+)
-    return 'rgb(74, 222, 128)'; // green-400
-  } else if (normalized >= LINK_QUALITY_THRESHOLDS.MEDIUM) {
-    // Medium link - yellow (12-23%)
-    return 'rgb(250, 204, 21)'; // yellow-400
-  } else {
-    // Weak link - red (<12%)
-    return 'rgb(248, 113, 113)'; // red-400
-  }
-}
-
-/** Absolute validation thresholds for line thickness */
-export const EDGE_WEIGHT_THRESHOLDS = {
-  MAX_THICKNESS_AT: 300,  // 300+ validations = max thickness
-  MIN_VALIDATIONS: 5,     // Below 5 = not rendered (filtered elsewhere)
-};
-
-/** Max edge weight - reduced to keep most edges thin */
-const MAX_EDGE_WEIGHT = 6;
-/** Min edge weight for weakest rendered edges */
-const MIN_EDGE_WEIGHT = 1;
-
-/**
- * Get line weight for a CERTAIN edge based on ABSOLUTE validation count.
- * Uses LOGARITHMIC scaling so most edges stay thin, only high-validation
- * edges get noticeably thicker.
- * 
- * Scale:
- * - 5 validations: 1px (minimum)
- * - 10 validations: ~2px
- * - 25 validations: ~3px
- * - 50 validations: ~4px
- * - 100+ validations: 6px (maximum)
- * 
- * @param certainCount - Number of certain observations
- * @param _maxCertainCount - Unused (kept for API compatibility)
- */
-export function getLinkQualityWeight(
-  certainCount: number,
-  _maxCertainCount: number
-): number {
-  // Clamp to our absolute range: 5 to 100
-  const clamped = Math.max(EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS, 
-                           Math.min(certainCount, EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT));
-  
-  // Logarithmic normalization: log(x) / log(max) gives a 0-1 range that
-  // grows quickly at first, then slows down
-  // We use log base that makes 5->100 span nicely
-  const logMin = Math.log(EDGE_WEIGHT_THRESHOLDS.MIN_VALIDATIONS);
-  const logMax = Math.log(EDGE_WEIGHT_THRESHOLDS.MAX_THICKNESS_AT);
-  const logCurrent = Math.log(clamped);
-  const normalized = (logCurrent - logMin) / (logMax - logMin);
-  
-  // Interpolate from min to max weight using log-normalized value
-  return MIN_EDGE_WEIGHT + (MAX_EDGE_WEIGHT - MIN_EDGE_WEIGHT) * normalized;
-}
+// Edge styling utilities are now in edge-styling.ts
+// Re-exported above for backward compatibility

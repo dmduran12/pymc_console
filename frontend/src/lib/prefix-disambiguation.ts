@@ -16,6 +16,7 @@
 
 import type { Packet, NeighborInfo } from '@/types/api';
 import { parsePacketPath, getHashPrefix as getPrefix, getPositionFromIndex } from '@/lib/path-utils';
+import { calculateDistance, PROXIMITY_BANDS } from '@/lib/geo-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -137,18 +138,8 @@ const MAX_CANDIDATE_AGE_HOURS = 336;
  */
 const RECENCY_DECAY_HOURS = 12;
 
-/** 
- * Distance thresholds for geographic scoring.
- * Closer neighbors get exponentially higher scores.
- */
-const GEO_SCORING = {
-  VERY_CLOSE: 500,    // < 500m = 1.0 (direct neighbor range)
-  CLOSE: 2000,        // < 2km = 0.8
-  MEDIUM: 5000,       // < 5km = 0.6  
-  FAR: 10000,         // < 10km = 0.4
-  VERY_FAR: 20000,    // < 20km = 0.2
-  // > 20km = 0.1
-};
+// Geographic scoring uses PROXIMITY_BANDS from geo-utils.ts
+// See: PROXIMITY_BANDS.VERY_CLOSE (500m), CLOSE (2km), MEDIUM (5km), FAR (10km), VERY_FAR (20km)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helper Functions
@@ -157,23 +148,7 @@ const GEO_SCORING = {
 // Re-export from path-utils for backward compatibility
 export { getHashPrefix, prefixMatches } from '@/lib/path-utils';
 
-/**
- * Calculate distance between two coordinates in meters using Haversine formula.
- */
-function calculateDistance(
-  lat1: number, lon1: number,
-  lat2: number, lon2: number
-): number {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+// calculateDistance is now imported from geo-utils.ts
 
 /**
  * Calculate recency score using exponential decay.
@@ -303,15 +278,15 @@ export function buildPrefixLookup(
     let geoScore = 0.2; // Default for unknown location
     if (distanceToLocal !== undefined) {
       // Distance-based scoring with steep falloff for close neighbors
-      if (distanceToLocal < GEO_SCORING.VERY_CLOSE) {
+      if (distanceToLocal < PROXIMITY_BANDS.VERY_CLOSE) {
         geoScore = 1.0;
-      } else if (distanceToLocal < GEO_SCORING.CLOSE) {
+      } else if (distanceToLocal < PROXIMITY_BANDS.CLOSE) {
         geoScore = 0.8;
-      } else if (distanceToLocal < GEO_SCORING.MEDIUM) {
+      } else if (distanceToLocal < PROXIMITY_BANDS.MEDIUM) {
         geoScore = 0.6;
-      } else if (distanceToLocal < GEO_SCORING.FAR) {
+      } else if (distanceToLocal < PROXIMITY_BANDS.FAR) {
         geoScore = 0.4;
-      } else if (distanceToLocal < GEO_SCORING.VERY_FAR) {
+      } else if (distanceToLocal < PROXIMITY_BANDS.VERY_FAR) {
         geoScore = 0.2;
       } else {
         geoScore = 0.1;
