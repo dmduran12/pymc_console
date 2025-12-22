@@ -514,13 +514,15 @@ print_completion() {
     echo -e "${GREEN}${BOLD}Installation Complete!${NC} ${CHECK}"
     echo ""
     
-    # Version summary
+    # Version and branch summary
     echo -e "${BOLD}Installed Versions:${NC}"
     local core_ver=$(get_core_version)
     local repeater_ver=$(get_repeater_version)
     local console_ver=$(get_console_version)
-    echo -e "  ${DIM}pyMC Core:${NC}     ${CYAN}v${core_ver}${NC}"
-    echo -e "  ${DIM}pyMC Repeater:${NC} ${CYAN}v${repeater_ver}${NC}"
+    local repeater_branch=$(get_repeater_branch)
+    local core_branch=$(get_core_branch_from_toml "$CLONE_DIR")
+    echo -e "  ${DIM}pyMC Core:${NC}     ${CYAN}v${core_ver}${NC}  ${DIM}@${core_branch}${NC}"
+    echo -e "  ${DIM}pyMC Repeater:${NC} ${CYAN}v${repeater_ver}${NC}  ${DIM}@${repeater_branch}${NC}"
     echo -e "  ${DIM}pyMC Console:${NC}  ${CYAN}${console_ver}${NC}"
     echo ""
     
@@ -621,6 +623,39 @@ is_installed() {
 
 backend_running() {
     systemctl is-active "$BACKEND_SERVICE" >/dev/null 2>&1
+}
+
+# Get pymc_core branch/ref from a pyproject.toml file
+# Usage: get_core_branch_from_toml [path_to_dir_with_toml]
+# Returns: branch name (e.g., "feat/anon-req", "main") or "unknown"
+get_core_branch_from_toml() {
+    local dir="${1:-$CLONE_DIR}"
+    local toml_file="$dir/pyproject.toml"
+    
+    if [ ! -f "$toml_file" ]; then
+        echo "unknown"
+        return
+    fi
+    
+    # Extract pymc_core git reference from pyproject.toml
+    # Format: "pymc_core[hardware] @ git+https://github.com/rightup/pyMC_core.git@feat/anon-req"
+    local branch
+    branch=$(grep -i 'pymc_core.*@.*git+' "$toml_file" 2>/dev/null | sed -n 's/.*\.git@\([^"]*\).*/\1/p' | head -1)
+    
+    if [ -n "$branch" ]; then
+        echo "$branch"
+    else
+        echo "unknown"
+    fi
+}
+
+# Get pyMC_Repeater branch from clone directory
+get_repeater_branch() {
+    if [ -d "$CLONE_DIR/.git" ]; then
+        cd "$CLONE_DIR" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+    else
+        echo "unknown"
+    fi
 }
 
 # Get pyMC Repeater version from installed pyproject.toml
@@ -1100,13 +1135,17 @@ Continue?"; then
         echo -e "${BOLD}${GREEN}  Console Upgrade Complete!${NC}"
         echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
         echo ""
-        echo -e "  ${BOLD}Versions:${NC}"
-        echo -e "  ${DIM}pyMC Core:${NC}     v${current_core_ver} ${DIM}(unchanged)${NC}"
-        echo -e "  ${DIM}pyMC Repeater:${NC} v${current_repeater_ver} ${DIM}(unchanged)${NC}"
-        echo -e "  ${CHECK} pyMC Console:  ${DIM}${current_console_ver}${NC} → ${CYAN}${new_console_ver}${NC}"
-        echo ""
-        echo -e "  ${CHECK} Configuration preserved"
-        echo -e "  ${CHECK} Dashboard: ${CYAN}http://$ip_address:8000${NC}"
+    # Get branch info
+    local repeater_branch=$(get_repeater_branch)
+    local core_branch=$(get_core_branch_from_toml "$CLONE_DIR")
+    
+    echo -e "  ${BOLD}Versions:${NC}"
+    echo -e "  ${DIM}pyMC Core:${NC}     v${current_core_ver} ${DIM}(unchanged)${NC}  ${DIM}@${core_branch}${NC}"
+    echo -e "  ${DIM}pyMC Repeater:${NC} v${current_repeater_ver} ${DIM}(unchanged)${NC}  ${DIM}@${repeater_branch}${NC}"
+    echo -e "  ${CHECK} pyMC Console:  ${DIM}${current_console_ver}${NC} → ${CYAN}${new_console_ver}${NC}"
+    echo ""
+    echo -e "  ${CHECK} Configuration preserved"
+    echo -e "  ${CHECK} Dashboard: ${CYAN}http://$ip_address:8000${NC}"
         echo ""
         return 0
     fi
@@ -1224,12 +1263,14 @@ Continue?"; then
     echo -e "${BOLD}${GREEN}  Full Upgrade Complete!${NC}"
     echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════════════${NC}"
     echo ""
+    # Get branch info from the updated clone
+    local core_branch=$(get_core_branch_from_toml "$CLONE_DIR")
+    
     echo -e "  ${BOLD}Versions:${NC}"
-    echo -e "  ${CHECK} pyMC Core:     ${DIM}v${current_core_ver}${NC} → ${CYAN}v${new_core_ver}${NC}"
-    echo -e "  ${CHECK} pyMC Repeater: ${DIM}v${current_repeater_ver}${NC} → ${CYAN}v${new_repeater_ver}${NC}"
+    echo -e "  ${CHECK} pyMC Core:     ${DIM}v${current_core_ver}${NC} → ${CYAN}v${new_core_ver}${NC}  ${DIM}@${core_branch}${NC}"
+    echo -e "  ${CHECK} pyMC Repeater: ${DIM}v${current_repeater_ver}${NC} → ${CYAN}v${new_repeater_ver}${NC}  ${DIM}@${branch}${NC}"
     echo -e "  ${CHECK} pyMC Console:  ${DIM}${current_console_ver}${NC} → ${CYAN}${new_console_ver}${NC}"
     echo ""
-    echo -e "  ${CHECK} Branch: ${BOLD}$branch${NC}"
     echo -e "  ${CHECK} Configuration preserved"
     echo -e "  ${CHECK} Dashboard: ${CYAN}http://$ip_address:8000${NC}"
     echo ""
