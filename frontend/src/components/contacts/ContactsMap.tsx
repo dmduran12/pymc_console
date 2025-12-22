@@ -1936,7 +1936,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const isMobile = meshTopology.mobileNodes.includes(hash);
           
           // Check if this is a room server (by contact_type field)
-          const isRoomServer = neighbor.contact_type?.toLowerCase() === 'room_server' 
+          // API returns "Room Server" (with space), handle both formats
+          const isRoomServer = neighbor.contact_type?.toLowerCase() === 'room server'
+            || neighbor.contact_type?.toLowerCase() === 'room_server' 
             || neighbor.contact_type?.toLowerCase() === 'room' 
             || neighbor.contact_type?.toLowerCase() === 'server';
           
@@ -2191,6 +2193,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             </div>
             {/* Room server indicator - amber chat bubble */}
             {neighborsWithLocation.some(([, n]) => 
+              n.contact_type?.toLowerCase() === 'room server' ||
               n.contact_type?.toLowerCase() === 'room_server' || 
               n.contact_type?.toLowerCase() === 'room' || 
               n.contact_type?.toLowerCase() === 'server'
