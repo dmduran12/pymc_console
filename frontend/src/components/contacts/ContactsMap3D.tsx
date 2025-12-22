@@ -244,8 +244,11 @@ function getNodeColor(
   return hexToRgba(DESIGN.nodeColor);
 }
 
-function brighten(color: [number, number, number, number], factor: number): [number, number, number, number] {
-  const [r,g,b,a] = color;
+function brighten(color: [number, number, number, number] | null | undefined, factor: number): [number, number, number, number] {
+  if (!color || !Array.isArray(color) || color.length < 4) {
+    return [128, 128, 128, 255]; // fallback gray
+  }
+  const [r, g, b, a] = color;
   const f = Math.max(1, factor);
   const nr = Math.min(255, Math.round(r + (255 - r) * (f - 1)));
   const ng = Math.min(255, Math.round(g + (255 - g) * (f - 1)));
@@ -707,7 +710,7 @@ export function ContactsMap3D({
   // ─────────────────────────────────────────────────────────────────────────────
   // Prepare edge data for deck.gl (validated + weak edges)
   // ─────────────────────────────────────────────────────────────────────────────
-  const { edgeData, weakEdgeData, loopEdgeData } = useMemo(() => {
+  const edgeMemoResult = useMemo(() => {
     if (!showTopology) return { edgeData: [], weakEdgeData: [], loopEdgeData: [] };
     
     // Defensive: ensure topology arrays exist
@@ -804,6 +807,11 @@ export function ContactsMap3D({
     
     return { edgeData: edges, weakEdgeData: weakEdges, loopEdgeData: loopEdges };
   }, [showTopology, meshTopology?.validatedEdges, meshTopology?.weakEdges, meshTopology?.backboneEdges, meshTopology?.loopEdgeKeys, meshTopology?.maxCertainCount, nodeData, highlightedEdgeKey, hoveredEdgeKey]);
+  
+  // Safe destructure with fallback
+  const edgeData = edgeMemoResult?.edgeData ?? [];
+  const weakEdgeData = edgeMemoResult?.weakEdgeData ?? [];
+  const loopEdgeData = edgeMemoResult?.loopEdgeData ?? [];
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Edge fade animation effect
