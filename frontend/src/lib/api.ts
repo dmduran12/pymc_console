@@ -9,6 +9,27 @@ import type {
   ApiResponse,
   GraphData,
   HardwareStats,
+  // Identity types
+  Identity,
+  IdentitiesResponse,
+  IdentityCreateRequest,
+  IdentityUpdateRequest,
+  // ACL types
+  ACLInfoResponse,
+  ACLClientsResponse,
+  ACLStats,
+  // Room Server types
+  RoomMessagesResponse,
+  RoomPostMessageRequest,
+  RoomPostMessageResponse,
+  RoomStatsResponse,
+  RoomClientsResponse,
+  // Transport types
+  TransportKey,
+  TransportKeyCreateRequest,
+  TransportKeyUpdateRequest,
+  // Neighbor types
+  AdvertsByContactTypeResponse,
 } from '@/types/api';
 
 // Empty string = same-origin (relative URLs work when served from pyMC_Repeater)
@@ -649,4 +670,256 @@ export async function setLogLevel(level: LogLevel): Promise<ApiResponse<LogLevel
     method: 'POST',
     body: JSON.stringify({ level }),
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Identity Management Endpoints (feat/identity branch)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// List all identities (repeater + room servers)
+export async function getIdentities(): Promise<ApiResponse<IdentitiesResponse>> {
+  return fetchApi<ApiResponse<IdentitiesResponse>>('/api/identities');
+}
+
+// Get specific identity by name
+export async function getIdentity(name: string): Promise<ApiResponse<Identity>> {
+  return fetchApi<ApiResponse<Identity>>(`/api/identity?name=${encodeURIComponent(name)}`);
+}
+
+// Create a new identity (auto-generates key if not provided)
+export async function createIdentity(request: IdentityCreateRequest): Promise<ApiResponse<Identity & { message: string }>> {
+  return fetchApi<ApiResponse<Identity & { message: string }>>('/api/create_identity', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// Update an existing identity
+export async function updateIdentity(request: IdentityUpdateRequest): Promise<ApiResponse<Identity & { message: string }>> {
+  return fetchApi<ApiResponse<Identity & { message: string }>>('/api/update_identity', {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+// Delete an identity
+export async function deleteIdentity(name: string): Promise<ApiResponse<{ name: string; message: string }>> {
+  return fetchApi<ApiResponse<{ name: string; message: string }>>(`/api/delete_identity?name=${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+// Send advert for a room server
+export async function sendRoomServerAdvert(name: string): Promise<ApiResponse<{
+  name: string;
+  node_name: string;
+  latitude: number;
+  longitude: number;
+  message: string;
+}>> {
+  return fetchApi('/api/send_room_server_advert', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACL (Access Control List) Endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Get ACL config and stats for all identities
+export async function getACLInfo(): Promise<ApiResponse<ACLInfoResponse>> {
+  return fetchApi<ApiResponse<ACLInfoResponse>>('/api/acl_info');
+}
+
+// List authenticated clients (optionally filtered by identity)
+export async function getACLClients(params?: {
+  identity_hash?: string;
+  identity_name?: string;
+}): Promise<ApiResponse<ACLClientsResponse>> {
+  const queryParams = new URLSearchParams();
+  if (params?.identity_hash) queryParams.set('identity_hash', params.identity_hash);
+  if (params?.identity_name) queryParams.set('identity_name', params.identity_name);
+  const query = queryParams.toString();
+  return fetchApi<ApiResponse<ACLClientsResponse>>(`/api/acl_clients${query ? '?' + query : ''}`);
+}
+
+// Remove a client from ACL
+export async function removeACLClient(params: {
+  public_key: string;
+  identity_hash?: string;
+}): Promise<ApiResponse<{ removed_count: number; removed_from: string[]; message: string }>> {
+  return fetchApi('/api/acl_remove_client', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+// Get overall ACL statistics
+export async function getACLStats(): Promise<ApiResponse<ACLStats>> {
+  return fetchApi<ApiResponse<ACLStats>>('/api/acl_stats');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Room Server Endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Get messages from a room
+export async function getRoomMessages(params: {
+  room_name?: string;
+  room_hash?: string;
+  limit?: number;
+  offset?: number;
+  since_timestamp?: number;
+}): Promise<ApiResponse<RoomMessagesResponse>> {
+  const queryParams = new URLSearchParams();
+  if (params.room_name) queryParams.set('room_name', params.room_name);
+  if (params.room_hash) queryParams.set('room_hash', params.room_hash);
+  if (params.limit !== undefined) queryParams.set('limit', params.limit.toString());
+  if (params.offset !== undefined) queryParams.set('offset', params.offset.toString());
+  if (params.since_timestamp !== undefined) queryParams.set('since_timestamp', params.since_timestamp.toString());
+  return fetchApi<ApiResponse<RoomMessagesResponse>>(`/api/room_messages?${queryParams.toString()}`);
+}
+
+// Post a message to a room
+export async function postRoomMessage(request: RoomPostMessageRequest): Promise<ApiResponse<RoomPostMessageResponse>> {
+  return fetchApi<ApiResponse<RoomPostMessageResponse>>('/api/room_post_message', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// Get room statistics (one room or all rooms)
+export async function getRoomStats(params?: {
+  room_name?: string;
+  room_hash?: string;
+}): Promise<ApiResponse<RoomStatsResponse>> {
+  const queryParams = new URLSearchParams();
+  if (params?.room_name) queryParams.set('room_name', params.room_name);
+  if (params?.room_hash) queryParams.set('room_hash', params.room_hash);
+  const query = queryParams.toString();
+  return fetchApi<ApiResponse<RoomStatsResponse>>(`/api/room_stats${query ? '?' + query : ''}`);
+}
+
+// Get clients synced to a room
+export async function getRoomClients(params: {
+  room_name?: string;
+  room_hash?: string;
+}): Promise<ApiResponse<RoomClientsResponse>> {
+  const queryParams = new URLSearchParams();
+  if (params.room_name) queryParams.set('room_name', params.room_name);
+  if (params.room_hash) queryParams.set('room_hash', params.room_hash);
+  return fetchApi<ApiResponse<RoomClientsResponse>>(`/api/room_clients?${queryParams.toString()}`);
+}
+
+// Delete a specific message from a room
+export async function deleteRoomMessage(params: {
+  room_name?: string;
+  room_hash?: string;
+  message_id: number;
+}): Promise<ApiResponse<{ message: string }>> {
+  const queryParams = new URLSearchParams();
+  if (params.room_name) queryParams.set('room_name', params.room_name);
+  if (params.room_hash) queryParams.set('room_hash', params.room_hash);
+  queryParams.set('message_id', params.message_id.toString());
+  return fetchApi<ApiResponse<{ message: string }>>(`/api/room_message?${queryParams.toString()}`, {
+    method: 'DELETE',
+  });
+}
+
+// Clear all messages in a room
+export async function clearRoomMessages(params: {
+  room_name?: string;
+  room_hash?: string;
+}): Promise<ApiResponse<{ message: string; deleted_count: number }>> {
+  const queryParams = new URLSearchParams();
+  if (params.room_name) queryParams.set('room_name', params.room_name);
+  if (params.room_hash) queryParams.set('room_hash', params.room_hash);
+  return fetchApi<ApiResponse<{ message: string; deleted_count: number }>>(`/api/room_messages?${queryParams.toString()}`, {
+    method: 'DELETE',
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transport Key Endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+// List all transport keys
+export async function getTransportKeys(): Promise<ApiResponse<TransportKey[]>> {
+  return fetchApi<ApiResponse<TransportKey[]>>('/api/transport_keys');
+}
+
+// Create a new transport key
+export async function createTransportKey(request: TransportKeyCreateRequest): Promise<ApiResponse<{ id: number; message: string }>> {
+  return fetchApi('/api/transport_keys', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// Get a specific transport key by ID
+export async function getTransportKey(keyId: number): Promise<ApiResponse<TransportKey>> {
+  return fetchApi<ApiResponse<TransportKey>>(`/api/transport_key/${keyId}`);
+}
+
+// Update a transport key
+export async function updateTransportKey(keyId: number, request: TransportKeyUpdateRequest): Promise<ApiResponse<{ id: number; message: string }>> {
+  return fetchApi(`/api/transport_key/${keyId}`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+// Delete a transport key
+export async function deleteTransportKey(keyId: number): Promise<ApiResponse<{ id: number; message: string }>> {
+  return fetchApi(`/api/transport_key/${keyId}`, {
+    method: 'DELETE',
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mesh/Flood Policy Endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Update global flood policy
+export async function setGlobalFloodPolicy(allow: boolean): Promise<ApiResponse<{
+  global_flood_allow: boolean;
+  message: string;
+}>> {
+  return fetchApi('/api/global_flood_policy', {
+    method: 'POST',
+    body: JSON.stringify({ global_flood_allow: allow }),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Neighbor/Advert Endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Delete a neighbor/advert
+export async function deleteAdvert(advertId: number): Promise<ApiResponse<{ id: number; message: string }>> {
+  return fetchApi(`/api/advert/${advertId}`, {
+    method: 'DELETE',
+  });
+}
+
+// Ping a neighbor (placeholder - not fully implemented upstream)
+export async function pingNeighbor(targetId: string): Promise<ApiResponse<{ target_id: string; message: string }>> {
+  return fetchApi('/api/ping_neighbor', {
+    method: 'POST',
+    body: JSON.stringify({ target_id: targetId }),
+  });
+}
+
+// Get adverts filtered by contact type
+export async function getAdvertsByContactType(params: {
+  contact_type: string;
+  limit?: number;
+  hours?: number;
+}): Promise<ApiResponse<AdvertsByContactTypeResponse>> {
+  const queryParams = new URLSearchParams();
+  queryParams.set('contact_type', params.contact_type);
+  if (params.limit !== undefined) queryParams.set('limit', params.limit.toString());
+  if (params.hours !== undefined) queryParams.set('hours', params.hours.toString());
+  return fetchApi<ApiResponse<AdvertsByContactTypeResponse>>(`/api/adverts_by_contact_type?${queryParams.toString()}`);
 }

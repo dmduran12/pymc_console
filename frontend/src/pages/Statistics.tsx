@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useStats } from '@/lib/stores/useStore';
-import { BarChart3, TrendingUp, PieChart, Radio, Compass } from 'lucide-react';
+import { BarChart3, TrendingUp, PieChart, Radio, Compass, Network } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { GraphData } from '@/types/api';
 import type { BucketedStats, NoiseFloorHistoryItem } from '@/lib/api';
@@ -11,6 +11,7 @@ import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
 import { TrafficStackedChart } from '@/components/charts/TrafficStackedChart';
 import { NeighborPolarChart } from '@/components/charts/NeighborPolarChart';
 import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
+import { NetworkCompositionChart } from '@/components/charts/NetworkCompositionChart';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 
 export default function Statistics() {
@@ -247,18 +248,27 @@ export default function Statistics() {
             </div>
           </div>
 
-          {/* Row: Packet Types + Noise Floor */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-6">
-            {/* Packet Types - Horizontal Bar Chart */}
+          {/* Row: Network Composition + Packet Types + Noise Floor (3-up on desktop) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-space-6">
+            {/* Network Composition - Node type distribution */}
             <div className="glass-card card-padding">
-              <div className="flex items-center gap-2 mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Network className="w-5 h-5 text-accent-primary" />
+                <h2 className="type-subheading text-text-primary">Network Composition</h2>
+              </div>
+              <NetworkCompositionChart neighbors={stats?.neighbors ?? {}} />
+            </div>
+
+            {/* Packet Types - Treemap Chart */}
+            <div className="glass-card card-padding">
+              <div className="flex items-center gap-2 mb-4">
                 <PieChart className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Packet Types</h2>
               </div>
               {packetTypePieData.length > 0 ? (
                 <PacketTypesChart data={packetTypePieData} />
               ) : (
-                <div className="h-56 flex items-center justify-center text-text-muted">
+                <div className="h-44 flex items-center justify-center text-text-muted">
                   No packet type data available
                 </div>
               )}
@@ -266,7 +276,7 @@ export default function Statistics() {
 
             {/* Noise Floor Heatmap */}
             <div className="glass-card card-padding">
-              <div className="flex items-center gap-2 mb-6">
+              <div className="flex items-center gap-2 mb-4">
                 <Radio className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">RF Noise Floor</h2>
                 <span className="type-data-xs text-text-muted ml-auto">dBm</span>
@@ -274,7 +284,7 @@ export default function Statistics() {
               <NoiseFloorHeatmap
                 timestamps={noiseFloorHeatmapData.timestamps}
                 values={noiseFloorHeatmapData.values}
-                height={224}
+                height={176}
               />
             </div>
           </div>
