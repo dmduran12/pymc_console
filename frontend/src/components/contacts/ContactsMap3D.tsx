@@ -5,14 +5,15 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { ScatterplotLayer, ArcLayer } from '@deck.gl/layers';
 import type { MapboxOverlayProps } from '@deck.gl/mapbox';
 import type { PickingInfo } from '@deck.gl/core';
-import { GitBranch, Network, Radio, Box, Map as MapIcon, Maximize2, Minimize2, Home, MessageCircle, Info, BarChart2 } from 'lucide-react';
+import { GitBranch, Network, Radio, Box, Map as MapIcon, Maximize2, Minimize2, Home, MessageCircle, Info, BarChart2, Copy, Check, Trash2 } from 'lucide-react';
 import { DeepAnalysisModal, type AnalysisStep } from '@/components/ui/DeepAnalysisModal';
-import { usePacketCacheState, useTriggerDeepAnalysis } from '@/lib/stores/useStore';
+import { usePacketCacheState, useTriggerDeepAnalysis, usePackets } from '@/lib/stores/useStore';
 import { useIsComputingTopology } from '@/lib/stores/useTopologyStore';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { NeighborInfo } from '@/types/api';
+import { NeighborInfo, Packet } from '@/types/api';
 import { useTopology } from '@/lib/stores/useTopologyStore';
 import type { TopologyEdge } from '@/lib/stores/useTopologyStore';
+import { formatRelativeTime } from '@/lib/format';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Design System Constants
@@ -138,17 +139,33 @@ interface LocalNode {
   name: string;
 }
 
+/** Full affinity data from topology */
+interface FullAffinity {
+  frequency: number;
+  directForwardCount: number;
+  typicalHopPosition: number;
+  distanceMeters: number | null;
+}
+
 /** Node data for deck.gl ScatterplotLayer */
 interface NodeData {
   hash: string;
+  hashPrefix: string;
   position: [number, number, number]; // [lng, lat, elevation]
   name: string;
   isHub: boolean;
   isMobile: boolean;
   isRoomServer: boolean;
   isLocal: boolean;
+  isZeroHop: boolean;
+  isRepeater: boolean;
   color: [number, number, number, number]; // RGBA
   radius: number;
+  // Rich data for popup
+  neighbor?: NeighborInfo;
+  centrality: number;
+  affinity?: FullAffinity;
+  meanSnr?: number;
 }
 
 /** Edge data for deck.gl ArcLayer */
@@ -167,7 +184,9 @@ interface ContactsMap3DProps {
   localNode?: LocalNode;
   localHash?: string;
   highlightedEdgeKey?: string | null;
-  // Future: onRemoveNode, selectedNodeHash, onNodeSelected
+  onRemoveNode?: (hash: string) => void;
+  selectedNodeHash?: string | null;
+  onNodeSelected?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -228,6 +247,148 @@ function getEdgeWidth(certainCount: number, maxCount: number): number {
   return 2 + normalized * 6;
 }
 
+/** Get hash prefix (first 2 hex chars) */
+function getHashPrefix(hash: string): string {
+  const clean = hash.startsWith('0x') ? hash.slice(2) : hash;
+  return clean.slice(0, 2).toUpperCase();
+}
+
+/** Calculate mean SNR from packets for a source */
+function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefined {
+  const nodePackets = packets.filter(p => p.src_hash === srcHash && p.snr !== undefined);
+  if (nodePackets.length === 0) return undefined;
+  const sum = nodePackets.reduce((acc, p) => acc + (p.snr ?? 0), 0);
+  return sum / nodePackets.length;
+}
+
+/** Format distance for display */
+function formatDistance(meters: number | null): string {
+  if (meters === null) return '—';
+  if (meters < 1000) return `${Math.round(meters)}m`;
+  return `${(meters / 1000).toFixed(1)}km`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Rich Popup Content Component
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface NodePopupContentProps {
+  node: NodeData;
+  onRemove?: () => void;
+  onClose: () => void;
+}
+
+function NodePopupContent({ node, onRemove }: NodePopupContentProps) {
+  const [copied, setCopied] = useState(false);
+  
+  const copyHash = () => {
+    navigator.clipboard.writeText(node.hash);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  
+  // Determine hop label
+  const hopLabel = node.isZeroHop ? 'Direct' 
+    : node.affinity?.typicalHopPosition ? `${node.affinity.typicalHopPosition}-hop` 
+    : null;
+  
+  // Build dynamic third metric based on node type
+  const thirdMetric = node.isZeroHop && node.meanSnr !== undefined 
+    ? { label: 'SNR', value: node.meanSnr.toFixed(1), highlight: false }
+    : node.isHub && node.centrality > 0 
+    ? { label: 'Centrality', value: `${(node.centrality * 100).toFixed(0)}%`, highlight: true }
+    : { label: 'Forwards', value: String(node.affinity?.directForwardCount || 0), highlight: false };
+  
+  return (
+    <div className="min-w-[180px] max-w-[240px]">
+      {/* Header: Name + Close/Remove */}
+      <div className="flex items-center gap-1 mb-0.5">
+        <span className="text-[14px] font-semibold text-text-primary leading-snug flex-1 min-w-0">{node.name}</span>
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            className="p-1 -mr-1 text-text-muted/30 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            title="Remove node"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      
+      {/* Badges: Inline, compact */}
+      <div className="flex items-center gap-1 mb-1 flex-wrap">
+        <code className="font-mono text-[10px] text-text-muted/70 bg-white/5 px-1 py-px rounded">{node.hashPrefix}</code>
+        <button onClick={copyHash} className="p-0.5 hover:bg-white/10 rounded transition-colors" title="Copy full hash">
+          {copied ? <Check className="w-2.5 h-2.5 text-accent-success" /> : <Copy className="w-2.5 h-2.5 text-text-muted/50" />}
+        </button>
+        {node.isHub && (
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
+        )}
+        {hopLabel && (
+          <span 
+            className="px-1 py-px text-[8px] font-bold uppercase rounded"
+            style={{ 
+              backgroundColor: node.isZeroHop ? DESIGN.nodeColor : 'rgba(255,255,255,0.08)', 
+              color: node.isZeroHop ? '#fff' : 'rgba(255,255,255,0.5)' 
+            }}
+          >
+            {hopLabel}
+          </span>
+        )}
+        {node.isMobile && (
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-orange-500/25 text-orange-300" title="Volatile paths">
+            Mobile
+          </span>
+        )}
+        {node.isRepeater && (
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-cyan-500/20 text-cyan-400">Rptr</span>
+        )}
+        {node.isRoomServer && (
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Room</span>
+        )}
+        {node.isLocal && (
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Local</span>
+        )}
+      </div>
+      
+      {/* Meta: Time, Distance, Location */}
+      {node.neighbor && (
+        <div className="text-[10px] text-text-muted/60 mb-1.5 leading-tight">
+          <span>{formatRelativeTime(node.neighbor.last_seen)}</span>
+          {node.affinity?.distanceMeters && (
+            <span className="font-medium text-text-muted/80"> · {formatDistance(node.affinity.distanceMeters)}</span>
+          )}
+          {node.neighbor.latitude && node.neighbor.longitude && node.neighbor.latitude !== 0 && node.neighbor.longitude !== 0 && (
+            <span className="font-mono text-[9px]"> · {node.neighbor.latitude.toFixed(4)}, {node.neighbor.longitude.toFixed(4)}</span>
+          )}
+        </div>
+      )}
+      
+      {/* Metrics: 2x2 grid */}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] mb-1.5">
+        <div className="flex justify-between">
+          <span className="text-text-muted/50">Packets</span>
+          <span className="font-semibold tabular-nums">{node.affinity?.frequency || 0}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-text-muted/50">Adverts</span>
+          <span className="font-semibold tabular-nums">{node.neighbor?.advert_count || 0}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-text-muted/50">{thirdMetric.label}</span>
+          <span className={`font-semibold tabular-nums ${thirdMetric.highlight ? 'text-amber-400' : ''}`}>{thirdMetric.value}</span>
+        </div>
+        {node.isZeroHop && node.neighbor?.rssi !== undefined && (
+          <div className="flex justify-between">
+            <span className="text-text-muted/50">RSSI</span>
+            <span className="font-semibold tabular-nums">{node.neighbor.rssi}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -237,9 +398,13 @@ export function ContactsMap3D({
   localNode,
   localHash,
   highlightedEdgeKey,
+  onRemoveNode,
+  selectedNodeHash: _selectedNodeHash,
+  onNodeSelected: _onNodeSelected,
 }: ContactsMap3DProps) {
   const mapRef = useRef<MapRef>(null);
   const meshTopology = useTopology();
+  const packets = usePackets();
   
   // View state with 3D defaults
   const [viewState, setViewState] = useState({
@@ -411,6 +576,12 @@ export function ContactsMap3D({
   const nodeData = useMemo((): NodeData[] => {
     const allNodes: NodeData[] = [];
     
+    // Build centrality map from topology
+    const centralityMap = new Map<string, number>();
+    for (const hash of meshTopology.hubNodes) {
+      centralityMap.set(hash, meshTopology.centrality?.get(hash) || 0);
+    }
+    
     // Add neighbor nodes
     for (const [hash, neighbor] of Object.entries(neighbors)) {
       if (!neighbor.latitude || !neighbor.longitude) continue;
@@ -419,20 +590,40 @@ export function ContactsMap3D({
       const isMobile = meshTopology.mobileNodes.includes(hash);
       const isRoomServer = neighbor.contact_type?.toLowerCase() === 'room server' 
         || neighbor.contact_type?.toLowerCase() === 'room_server';
+      const isZeroHop = directNodeSet.has(hash);
       
       // Get elevation from cache (0 if not available or terrain disabled)
       const elevation = terrainEnabled ? (elevationCache.get(hash) ?? 0) : 0;
       
+      // Get affinity data from topology (fullAffinity has the full NeighborAffinity data)
+      const affinity = meshTopology.fullAffinity?.get(hash);
+      const affinityData: FullAffinity | undefined = affinity ? {
+        frequency: affinity.frequency,
+        directForwardCount: affinity.directForwardCount,
+        typicalHopPosition: affinity.typicalHopPosition,
+        distanceMeters: affinity.distanceMeters,
+      } : undefined;
+      
+      // Calculate mean SNR from packets
+      const meanSnr = calculateMeanSnr(packets, hash);
+      
       allNodes.push({
         hash,
+        hashPrefix: getHashPrefix(hash),
         position: [neighbor.longitude, neighbor.latitude, elevation],
         name: neighbor.node_name || neighbor.name || 'Unknown',
         isHub,
         isMobile,
         isRoomServer,
         isLocal: false,
+        isZeroHop,
+        isRepeater: neighbor.is_repeater || false,
         color: getNodeColor(false, isHub, isMobile, isRoomServer),
         radius: isHub ? 600 : 400,
+        neighbor,
+        centrality: centralityMap.get(hash) || 0,
+        affinity: affinityData,
+        meanSnr,
       });
     }
     
@@ -443,14 +634,18 @@ export function ContactsMap3D({
       
       allNodes.push({
         hash: localKey,
+        hashPrefix: getHashPrefix(localKey),
         position: [localNode.longitude, localNode.latitude, elevation],
         name: localNode.name,
         isHub: false,
         isMobile: false,
         isRoomServer: false,
         isLocal: true,
+        isZeroHop: false,
+        isRepeater: false,
         color: getNodeColor(true, false, false, false),
         radius: 500,
+        centrality: 0,
       });
     }
     
@@ -466,7 +661,7 @@ export function ContactsMap3D({
       if (soloDirect) return directNodeSet.has(node.hash);
       return true;
     });
-  }, [neighbors, localNode, localHash, meshTopology.hubNodes, meshTopology.mobileNodes, terrainEnabled, elevationCache, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
+  }, [neighbors, localNode, localHash, meshTopology.hubNodes, meshTopology.mobileNodes, meshTopology.fullAffinity, meshTopology.centrality, packets, terrainEnabled, elevationCache, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Prepare edge data for deck.gl
@@ -616,20 +811,32 @@ export function ContactsMap3D({
       },
     }),
     
-    // Node markers
+    // Node markers with ring vs filled iconography
     new ScatterplotLayer<NodeData>({
       id: 'nodes',
       data: nodeData,
       getPosition: d => d.position,
-      getFillColor: d => d.color,
+      getFillColor: d => {
+        // Filled for local, hub, room servers; transparent for standard nodes (ring)
+        if (d.isLocal || d.isHub || d.isRoomServer) return d.color;
+        return [0, 0, 0, 0];
+      },
       getRadius: d => d.radius,
       radiusUnits: 'meters',
       radiusMinPixels: 6,
       radiusMaxPixels: 20,
       pickable: true,
       stroked: true,
-      getLineColor: [255, 255, 255, 80],
-      lineWidthMinPixels: 1,
+      getLineColor: d => {
+        // Ring color for standard nodes, subtle white stroke for filled types
+        if (d.isLocal) return [255, 255, 255, 110];
+        if (d.isHub) return [255, 255, 255, 80];
+        if (d.isRoomServer) return [255, 255, 255, 90];
+        // Standard node ring color
+        const c = hexToRgba(DESIGN.nodeColor, 220);
+        return [c[0], c[1], c[2], c[3]];
+      },
+      lineWidthMinPixels: 2,
       onHover: (info: PickingInfo<NodeData>) => {
         setHoveredNode(info.object ?? null);
       },
@@ -1092,7 +1299,7 @@ export function ContactsMap3D({
         )}
       </div>
       
-      {/* Click popup - MapLibre native popup */}
+      {/* Click popup - MapLibre native popup with rich content */}
       {selectedNode && (
         <Popup
           longitude={selectedNode.position[0]}
@@ -1103,33 +1310,18 @@ export function ContactsMap3D({
           className="maplibre-popup-dark"
           maxWidth="280px"
         >
-          <div className="p-2">
-            <div className="text-text-primary font-semibold text-base">{selectedNode.name}</div>
-            <div className="text-text-muted text-xs font-mono mt-1">
-              {selectedNode.hash}
-            </div>
-            <div className="flex flex-wrap gap-1 mt-2">
-              {selectedNode.isHub && (
-                <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-400 text-xs rounded">Hub</span>
-              )}
-              {selectedNode.isMobile && (
-                <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded">Mobile</span>
-              )}
-              {selectedNode.isRoomServer && (
-                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">Room Server</span>
-              )}
-              {selectedNode.isLocal && (
-                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">Local</span>
-              )}
-              {directNodeSet.has(selectedNode.hash) && !selectedNode.isLocal && (
-                <span className="px-2 py-0.5 bg-teal-500/20 text-teal-400 text-xs rounded">Direct</span>
-              )}
-            </div>
-          </div>
+          <NodePopupContent 
+            node={selectedNode}
+            onRemove={onRemoveNode && !selectedNode.isLocal ? () => {
+              onRemoveNode(selectedNode.hash);
+              setSelectedNode(null);
+            } : undefined}
+            onClose={() => setSelectedNode(null)}
+          />
         </Popup>
       )}
       
-      {/* Hover tooltip (bottom bar) */}
+      {/* Hover tooltip (bottom bar) - enhanced with hash prefix and badges */}
       {hoveredNode && !selectedNode && (
         <div 
           className="absolute z-[700] pointer-events-none px-3 py-2 rounded-lg"
@@ -1139,16 +1331,33 @@ export function ContactsMap3D({
             left: '50%',
             bottom: '1rem',
             transform: 'translateX(-50%)',
+            minWidth: '140px',
           }}
         >
-          <div className="text-text-primary font-medium">{hoveredNode.name}</div>
-          <div className="text-text-muted text-xs font-mono">
-            {hoveredNode.hash.slice(0, 8)}...
+          <div className="flex items-center gap-2">
+            <span className="text-text-primary font-medium">{hoveredNode.name}</span>
+            <code className="font-mono text-[10px] text-text-muted/70 bg-white/5 px-1 py-px rounded">{hoveredNode.hashPrefix}</code>
           </div>
-          {hoveredNode.isHub && <div className="text-indigo-400 text-xs">Hub node</div>}
-          {hoveredNode.isMobile && <div className="text-orange-400 text-xs">Mobile</div>}
-          {hoveredNode.isRoomServer && <div className="text-amber-400 text-xs">Room Server</div>}
-          {hoveredNode.isLocal && <div className="text-amber-400 text-xs">Local Node</div>}
+          <div className="flex flex-wrap gap-1 mt-1">
+            {hoveredNode.isHub && (
+              <span className="px-1 py-px text-[9px] font-bold uppercase rounded" style={{ backgroundColor: '#FBBF24', color: '#000' }}>Hub</span>
+            )}
+            {hoveredNode.isZeroHop && (
+              <span className="px-1 py-px text-[9px] font-bold uppercase rounded" style={{ backgroundColor: DESIGN.nodeColor, color: '#fff' }}>Direct</span>
+            )}
+            {hoveredNode.isMobile && (
+              <span className="px-1 py-px text-[9px] font-bold uppercase rounded bg-orange-500/25 text-orange-300">Mobile</span>
+            )}
+            {hoveredNode.isRoomServer && (
+              <span className="px-1 py-px text-[9px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Room</span>
+            )}
+            {hoveredNode.isLocal && (
+              <span className="px-1 py-px text-[9px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Local</span>
+            )}
+            {hoveredNode.isRepeater && !hoveredNode.isLocal && (
+              <span className="px-1 py-px text-[9px] font-bold uppercase rounded bg-cyan-500/20 text-cyan-400">Rptr</span>
+            )}
+          </div>
         </div>
       )}
       
