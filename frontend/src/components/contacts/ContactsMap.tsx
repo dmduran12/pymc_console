@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Maximize2, Minimize2, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2, MessageCircle } from 'lucide-react';
+import { Maximize2, Minimize2, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2, MessagesSquare } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -185,14 +185,14 @@ function createLocalIcon(isHovered: boolean = false): L.DivIcon {
 
 /**
  * Create room server icon - amber chat bubble icon.
- * Uses lucide-react MessageCircle icon rendered as static SVG.
+ * Uses lucide-react MessagesSquare icon rendered as static SVG.
  * @param opacity - Opacity 0-1 (for fade animations)
  * @param isHovered - Whether the node is currently hovered (adds brightness)
  */
 function createRoomServerIcon(opacity: number = 1, isHovered: boolean = false): L.DivIcon {
-  // Render the MessageCircle icon to static SVG markup
+  // Render the MessagesSquare icon to static SVG markup
   const iconMarkup = renderToStaticMarkup(
-    <MessageCircle 
+    <MessagesSquare 
       size={MARKER_SIZE + 2} 
       color={DESIGN.roomServerColor} 
       strokeWidth={2.5}
@@ -1634,6 +1634,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         <MapContainer
           center={defaultCenter}
           zoom={8}
+          zoomSnap={0}
+          zoomDelta={0.5}
+          wheelPxPerZoomLevel={120}
           style={{ height: '100%', width: '100%', background: '#0d1520' }}
           attributionControl={true}
           className="map-blue-water"
@@ -2199,7 +2202,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               n.contact_type?.toLowerCase() === 'server'
             ) && (
               <div className="flex items-center gap-1.5">
-                <MessageCircle 
+                <MessagesSquare 
                   className="w-3 h-3 flex-shrink-0" 
                   style={{ color: DESIGN.roomServerColor }}
                   strokeWidth={2.5}
