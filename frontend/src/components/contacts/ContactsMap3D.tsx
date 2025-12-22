@@ -962,16 +962,17 @@ export function ContactsMap3D({
     new ScatterplotLayer<NodeData>({
       id: 'nodes',
       data: nodeData,
-      getPosition: d => [d.position[0], d.position[1], d.position[2]],
+      getPosition: d => d?.position ? [d.position[0] ?? 0, d.position[1] ?? 0, d.position[2] ?? 0] : [0, 0, 0],
       billboard: true,
       // Disable depth test so markers always render on top of terrain
       parameters: { depthTest: false, depthMask: false } as Record<string, boolean>,
       getFillColor: d => {
+        if (!d) return [0, 0, 0, 0];
         // Filled for local, hub, room servers; transparent for standard nodes (ring)
         if (d.isLocal || d.isHub || d.isRoomServer) {
           // Brighten slightly on hover for feedback
           if (hoveredNode && hoveredNode.hash === d.hash) return brighten(d.color, 1.2);
-          return d.color;
+          return d.color ?? [128, 128, 128, 255];
         }
         return [0, 0, 0, 0];
       },
@@ -982,6 +983,7 @@ export function ContactsMap3D({
       pickable: true,
       stroked: true,
       getLineColor: d => {
+        if (!d) return [128, 128, 128, 255];
         // Ring color for standard nodes, subtle white stroke for filled types
         if (d.isLocal) return hoveredNode && hoveredNode.hash === d.hash ? [255, 255, 255, 160] : [255, 255, 255, 110];
         if (d.isHub) return hoveredNode && hoveredNode.hash === d.hash ? [255, 255, 255, 120] : [255, 255, 255, 80];
@@ -989,10 +991,9 @@ export function ContactsMap3D({
         // Standard node ring color
         const c = hexToRgba(DESIGN.nodeColor, 220);
         if (hoveredNode && hoveredNode.hash === d.hash) {
-          const bc = brighten(c, 1.25);
-          return [bc[0], bc[1], bc[2], bc[3]];
+          return brighten(c, 1.25);
         }
-        return [c[0], c[1], c[2], c[3]];
+        return c;
       },
       lineWidthMinPixels: 3,
       onHover: (info: PickingInfo<NodeData>) => {
@@ -1077,7 +1078,9 @@ export function ContactsMap3D({
     // Collect positions
     const positions: [number, number][] = [];
     for (const n of nodeData) {
-      positions.push([n.position[0], n.position[1]]);
+      if (n?.position) {
+        positions.push([n.position[0] ?? 0, n.position[1] ?? 0]);
+      }
     }
     if (positions.length === 0) return;
 
