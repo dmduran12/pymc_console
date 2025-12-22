@@ -1361,6 +1361,62 @@ export function ContactsMap3D({
         </div>
       )}
       
+      {/* Edge hover tooltip */}
+      {hoveredEdgeKey && !hoveredNode && !selectedNode && (() => {
+        const edge = edgeData.find(e => e.key === hoveredEdgeKey)?.edge;
+        if (!edge) return null;
+        const fromNode = nodeData.find(n => n.hash === edge.fromHash);
+        const toNode = nodeData.find(n => n.hash === edge.toHash);
+        return (
+          <div 
+            className="absolute z-[700] pointer-events-none px-3 py-2 rounded-lg"
+            style={{
+              background: 'rgba(20, 20, 22, 0.95)',
+              border: '1px solid rgba(140, 160, 200, 0.2)',
+              left: '50%',
+              bottom: '1rem',
+              transform: 'translateX(-50%)',
+              minWidth: '180px',
+            }}
+          >
+            <div className="flex items-center gap-1.5 text-xs">
+              <code className="font-mono text-text-muted bg-white/5 px-1 py-px rounded">{getHashPrefix(edge.fromHash)}</code>
+              <span className="text-text-muted/60">→</span>
+              <code className="font-mono text-text-muted bg-white/5 px-1 py-px rounded">{getHashPrefix(edge.toHash)}</code>
+              {fromNode && toNode && (
+                <span className="text-text-muted/50 text-[10px] ml-1">
+                  {fromNode.name.slice(0, 10)} → {toNode.name.slice(0, 10)}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 mt-1.5 text-[10px]">
+              <div className="flex flex-col">
+                <span className="text-text-muted/50">Confidence</span>
+                <span className="text-text-secondary font-medium">{(edge.avgConfidence * 100).toFixed(0)}%</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-text-muted/50">Validations</span>
+                <span className="text-text-secondary font-medium tabular-nums">{edge.certainCount}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-text-muted/50">Hops</span>
+                <span className="text-text-secondary font-medium tabular-nums">{edge.hopDistanceFromLocal}</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {edge.isDirectPathEdge && (
+                <span className="px-1 py-px text-[8px] font-bold uppercase rounded" style={{ backgroundColor: DESIGN.edges.direct, color: '#000' }}>Direct Path</span>
+              )}
+              {edge.dominantDirection && edge.dominantDirection !== 'balanced' && (
+                <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-white/10 text-text-muted">
+                  {edge.dominantDirection === 'forward' ? '→ Dominant' : '← Dominant'}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+      
       {/* Deep Analysis Modal */}
       <DeepAnalysisModal
         isOpen={showDeepAnalysisModal}
