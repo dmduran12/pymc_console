@@ -1617,11 +1617,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   return (
     <div 
       ref={mapContainerRef}
-      className={`relative overflow-hidden ${isFullscreen ? '' : 'rounded-[1.125rem]'}`}
+      className={`relative overflow-hidden ${isFullscreen ? '' : 'glass-card'}`}
       style={fullscreenStyles}
     >
       {/* Map container with liquid glass effects */}
-      <div className={`h-full relative overflow-hidden border border-white/10 ${isFullscreen ? '' : 'rounded-[1.125rem]'}`}>
+      <div className={`h-full relative overflow-hidden ${isFullscreen ? '' : 'rounded-[1.125rem]'}`}>
         {/* Liquid glass overlay effects */}
         <div className="absolute inset-0 pointer-events-none z-[1000]">
           {/* Top edge highlight */}
