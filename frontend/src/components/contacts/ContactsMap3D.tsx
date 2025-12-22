@@ -534,28 +534,31 @@ export function ContactsMap3D({
   // Compute hub-connected nodes (for Solo Hubs filter)
   const hubConnectedNodes = useMemo(() => {
     const connected = new Set<string>();
-    for (const hub of meshTopology.hubNodes) {
+    const hubNodes = meshTopology?.hubNodes ?? [];
+    const validatedEdges = meshTopology?.validatedEdges ?? [];
+    for (const hub of hubNodes) {
       connected.add(hub);
       // Find edges connected to this hub
-      for (const edge of meshTopology.validatedEdges) {
+      for (const edge of validatedEdges) {
         if (edge.fromHash === hub) connected.add(edge.toHash);
         if (edge.toHash === hub) connected.add(edge.fromHash);
       }
     }
     return connected;
-  }, [meshTopology.hubNodes, meshTopology.validatedEdges]);
+  }, [meshTopology?.hubNodes, meshTopology?.validatedEdges]);
   
   // Compute zero-hop (direct) neighbors
   const directNodeSet = useMemo(() => {
     const direct = new Set<string>();
-    for (const edge of meshTopology.validatedEdges) {
+    const validatedEdges = meshTopology?.validatedEdges ?? [];
+    for (const edge of validatedEdges) {
       if (edge.hopDistanceFromLocal === 0) {
         direct.add(edge.fromHash);
         direct.add(edge.toHash);
       }
     }
     return direct;
-  }, [meshTopology.validatedEdges]);
+  }, [meshTopology?.validatedEdges]);
   
   // Map style (static, created once)
   const [mapStyle] = useState(() => createMapStyle());
@@ -612,16 +615,17 @@ export function ContactsMap3D({
     
     // Build centrality map from topology
     const centralityMap = new Map<string, number>();
-    for (const hash of meshTopology.hubNodes) {
-      centralityMap.set(hash, meshTopology.centrality?.get(hash) || 0);
+    const hubNodes = meshTopology?.hubNodes ?? [];
+    for (const hash of hubNodes) {
+      centralityMap.set(hash, meshTopology?.centrality?.get(hash) || 0);
     }
     
     // Add neighbor nodes
     for (const [hash, neighbor] of Object.entries(neighbors)) {
       if (!neighbor.latitude || !neighbor.longitude) continue;
       
-      const isHub = meshTopology.hubNodes.includes(hash);
-      const isMobile = meshTopology.mobileNodes.includes(hash);
+      const isHub = (meshTopology?.hubNodes ?? []).includes(hash);
+      const isMobile = (meshTopology?.mobileNodes ?? []).includes(hash);
       const isRoomServer = neighbor.contact_type?.toLowerCase() === 'room server' 
         || neighbor.contact_type?.toLowerCase() === 'room_server';
       const isZeroHop = directNodeSet.has(hash);
@@ -632,7 +636,7 @@ export function ContactsMap3D({
       const elevation = terrainEnabled ? Math.max(0, (elevationCache.get(hash) ?? 0)) + 20 : 20;
       
       // Get affinity data from topology (fullAffinity has the full NeighborAffinity data)
-      const affinity = meshTopology.fullAffinity?.get(hash);
+      const affinity = meshTopology?.fullAffinity?.get(hash);
       const affinityData: FullAffinity | undefined = affinity ? {
         frequency: affinity.frequency,
         directForwardCount: affinity.directForwardCount,
@@ -698,7 +702,7 @@ export function ContactsMap3D({
       if (soloDirect) return directNodeSet.has(node.hash);
       return true;
     });
-  }, [neighbors, localNode, localHash, meshTopology.hubNodes, meshTopology.mobileNodes, meshTopology.fullAffinity, meshTopology.centrality, packets, terrainEnabled, elevationCache, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
+  }, [neighbors, localNode, localHash, meshTopology?.hubNodes, meshTopology?.mobileNodes, meshTopology?.fullAffinity, meshTopology?.centrality, packets, terrainEnabled, elevationCache, soloHubs, soloDirect, hubConnectedNodes, directNodeSet]);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Prepare edge data for deck.gl (validated + weak edges)
@@ -707,10 +711,10 @@ export function ContactsMap3D({
     if (!showTopology) return { edgeData: [], weakEdgeData: [], loopEdgeData: [] };
     
     // Defensive: ensure topology arrays exist
-    const validatedEdges = meshTopology.validatedEdges ?? [];
-    const weakEdgesSource = meshTopology.weakEdges ?? [];
-    const backboneEdgesSource = meshTopology.backboneEdges ?? [];
-    const loopEdgeKeysSource = meshTopology.loopEdgeKeys ?? new Set<string>();
+    const validatedEdges = meshTopology?.validatedEdges ?? [];
+    const weakEdgesSource = meshTopology?.weakEdges ?? [];
+    const backboneEdgesSource = meshTopology?.backboneEdges ?? [];
+    const loopEdgeKeysSource = meshTopology?.loopEdgeKeys ?? new Set<string>();
     
     const edges: EdgeData[] = [];
     const weakEdges: EdgeData[] = [];
@@ -732,7 +736,7 @@ export function ContactsMap3D({
       const isLoop = loopEdgeKeysSource.has(edge.key);
       
       const color = getEdgeColor(edge.avgConfidence, isBackbone, edge.isDirectPathEdge ?? false);
-      const width = getEdgeWidth(edge.certainCount, meshTopology.maxCertainCount);
+      const width = getEdgeWidth(edge.certainCount, meshTopology?.maxCertainCount ?? 0);
       
       const edgeKey = `${edge.fromHash}-${edge.toHash}`;
       const isHovered = hoveredEdgeKey === edgeKey || hoveredEdgeKey === `${edge.toHash}-${edge.fromHash}`;
@@ -799,7 +803,7 @@ export function ContactsMap3D({
     }
     
     return { edgeData: edges, weakEdgeData: weakEdges, loopEdgeData: loopEdges };
-  }, [showTopology, meshTopology.validatedEdges, meshTopology.weakEdges, meshTopology.backboneEdges, meshTopology.loopEdgeKeys, meshTopology.maxCertainCount, nodeData, highlightedEdgeKey, hoveredEdgeKey]);
+  }, [showTopology, meshTopology?.validatedEdges, meshTopology?.weakEdges, meshTopology?.backboneEdges, meshTopology?.loopEdgeKeys, meshTopology?.maxCertainCount, nodeData, highlightedEdgeKey, hoveredEdgeKey]);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Edge fade animation effect
@@ -1274,7 +1278,7 @@ export function ContactsMap3D({
         </button>
         
         {/* Solo Hubs toggle */}
-        {meshTopology.hubNodes.length > 0 && (
+        {(meshTopology?.hubNodes?.length ?? 0) > 0 && (
           <button
             onClick={() => setSoloHubs(!soloHubs)}
             className="p-2 transition-colors hover:bg-white/10"
@@ -1411,7 +1415,7 @@ export function ContactsMap3D({
             </div>
           )}
           {/* Mobile node */}
-          {meshTopology.mobileNodes.length > 0 && (
+          {(meshTopology?.mobileNodes?.length ?? 0) > 0 && (
             <div className="flex items-center gap-1.5">
               <div 
                 className="w-3 h-3 rounded-full flex-shrink-0" 
@@ -1453,10 +1457,10 @@ export function ContactsMap3D({
                 <span>Links</span>
                 <span className="text-text-secondary">{edgeData.length}</span>
               </div>
-              {meshTopology.hubNodes.length > 0 && (
+              {(meshTopology?.hubNodes?.length ?? 0) > 0 && (
                 <div className="flex justify-between tabular-nums">
                   <span>Hubs</span>
-                  <span style={{ color: DESIGN.hubColor }}>{meshTopology.hubNodes.length}</span>
+                  <span style={{ color: DESIGN.hubColor }}>{meshTopology?.hubNodes?.length ?? 0}</span>
                 </div>
               )}
             </div>
@@ -1487,7 +1491,7 @@ export function ContactsMap3D({
                 />
                 <span className="text-text-muted">Direct</span>
               </div>
-              {meshTopology.loops.length > 0 && (
+              {(meshTopology?.loops?.length ?? 0) > 0 && (
                 <div className="flex items-center gap-1.5">
                   <div className="flex-shrink-0 flex flex-col gap-0.5" style={{ width: '14px' }}>
                     <div style={{ height: '2px', backgroundColor: DESIGN.edges.loop, borderRadius: '1px' }} />
