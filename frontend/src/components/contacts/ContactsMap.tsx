@@ -93,8 +93,11 @@ function getEdgeColor(
  * Thick ring with small donut hole - no stroke, just the ring itself.
  * @param color - Ring color
  * @param opacity - Opacity 0-1 (for fade animations)
+ * @param isHovered - Whether the node is currently hovered (adds brightness)
  */
-function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1): L.DivIcon {
+function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1, isHovered: boolean = false): L.DivIcon {
+  // Hover: instant on, ease-out off (150ms)
+  const brightness = isHovered ? 1.25 : 1;
   return L.divIcon({
     className: 'map-ring-marker',
     html: `<div style="
@@ -105,6 +108,8 @@ function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1): 
       border: ${RING_THICKNESS}px solid ${color};
       box-sizing: border-box;
       opacity: ${opacity};
+      filter: brightness(${brightness});
+      transition: filter 0s ease-in, filter 150ms ease-out;
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -117,8 +122,11 @@ function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1): 
  * Same outer dimension as ring - no border/stroke.
  * @param color - Fill color
  * @param opacity - Opacity 0-1 (for fade animations)
+ * @param isHovered - Whether the node is currently hovered (adds brightness)
  */
-function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1): L.DivIcon {
+function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1, isHovered: boolean = false): L.DivIcon {
+  // Hover: instant on, ease-out off (150ms)
+  const brightness = isHovered ? 1.25 : 1;
   return L.divIcon({
     className: 'map-filled-marker',
     html: `<div style="
@@ -128,6 +136,8 @@ function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1):
       border-radius: 50%;
       box-sizing: border-box;
       opacity: ${opacity};
+      filter: brightness(${brightness});
+      transition: filter 0s ease-in, filter 150ms ease-out;
     "></div>`,
     iconSize: [MARKER_SIZE, MARKER_SIZE],
     iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
@@ -138,8 +148,9 @@ function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1):
 /**
  * Create local node icon - yellow house icon to indicate "home" node.
  * Uses lucide-react Home icon rendered as static SVG.
+ * @param isHovered - Whether the node is currently hovered (adds brightness)
  */
-function createLocalIcon(): L.DivIcon {
+function createLocalIcon(isHovered: boolean = false): L.DivIcon {
   // Render the Home icon to static SVG markup
   const iconMarkup = renderToStaticMarkup(
     <Home 
@@ -150,6 +161,9 @@ function createLocalIcon(): L.DivIcon {
     />
   );
   
+  // Hover: instant on, ease-out off (150ms)
+  const brightness = isHovered ? 1.25 : 1;
+  
   return L.divIcon({
     className: 'map-local-marker',
     html: `<div style="
@@ -158,7 +172,8 @@ function createLocalIcon(): L.DivIcon {
       display: flex;
       align-items: center;
       justify-content: center;
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
+      transition: filter 0s ease-in, filter 150ms ease-out;
     ">${iconMarkup}</div>`,
     iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
     iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
@@ -618,8 +633,8 @@ function ZoomToNode({ targetHash, nodeCoordinates, onComplete }: {
 }
 
 export default function ContactsMap({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected, highlightedEdgeKey }: ContactsMapProps) {
-  // Track hover state per marker (setHoveredMarker used for events, hoveredMarker reserved for future use)
-  const [, setHoveredMarker] = useState<string | null>(null);
+  // Track hover state per marker for brightness effect
+  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
@@ -1876,27 +1891,29 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Check if this is a mobile node
           const isMobile = meshTopology.mobileNodes.includes(hash);
           
-          // Icon selection with opacity:
+          // Icon selection with opacity and hover state:
           // - Hubs: filled dot (indicates importance)
           // - Mobile nodes: orange ring (indicates volatile/moving)
           // - All other nodes: ring/torus in standard color (elegant, minimal)
           // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
           const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
+          const isNodeHovered = hoveredMarker === hash;
           const icon = isHub 
-            ? createFilledIcon(DESIGN.hubColor, quantizedOpacity) 
+            ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered) 
             : isMobile
-              ? createRingIcon(DESIGN.mobileColor, quantizedOpacity)
-              : createRingIcon(DESIGN.nodeColor, quantizedOpacity);
+              ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered)
+              : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered);
           
-          // Use quantized opacity in key to force icon update when opacity bucket changes
+          // Use quantized opacity and hover state in key to force icon update
           const opacityKey = Math.round(quantizedOpacity * 20);
+          const hoverKey = isNodeHovered ? 'h' : '';
           
           // Get TX delay recommendation for this node
           const txDelayRec = meshTopology.txDelayRecommendations.get(hash);
           
           return (
             <Marker
-              key={`${hash}-${opacityKey}`}
+              key={`${hash}-${opacityKey}${hoverKey}`}
               position={[neighbor.latitude, neighbor.longitude]}
               icon={icon}
               eventHandlers={{
@@ -1927,8 +1944,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         {/* Local node marker - yellow house, rendered LAST to always be on top */}
         {localNode && localNode.latitude && localNode.longitude && (
           <Marker
+            key={`local-${hoveredMarker === 'local' ? 'h' : ''}`}
             position={[localNode.latitude, localNode.longitude]}
-            icon={createLocalIcon()}
+            icon={createLocalIcon(hoveredMarker === 'local')}
             zIndexOffset={10000}
             eventHandlers={{
               mouseover: () => setHoveredMarker('local'),
