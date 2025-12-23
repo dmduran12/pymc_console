@@ -1,11 +1,11 @@
 /**
- * Airtime Spectrogram Chart
+ * Airtime Spectrum Analyzer Chart
  * 
- * True spectrogram visualization with:
- * - Layer 1 (Canvas): 2D intensity field with bilinear splat, blur, log compression
+ * Hybrid visualization with:
+ * - Layer 1 (Canvas): Spectrum analyzer showing spike intensity
  * - Layer 2 (Recharts): Line chart showing avg trend + tooltip
  * 
- * The canvas layer shows utilization density over time (X=time, Y=util%, Color=energy),
+ * The canvas layer ensures spikes are always visible regardless of zoom,
  * while the Recharts layer provides interactivity and trend visualization.
  * 
  * This makes 1H and 7D views feel like the same instrument, just zoomed.
@@ -23,7 +23,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { UtilSample } from '@/lib/spectrum-utils';
-import { drawSpectrogram } from '@/lib/spectrum-utils';
+import { aggregateToColumns, drawSpectrum } from '@/lib/spectrum-utils';
 
 // Fixed colors as per spec: RX = green, TX = gray
 const RX_COLOR = '#39D98A';
@@ -155,7 +155,7 @@ function AirtimeSpectrumChartComponent({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
-  // Draw spectrogram on canvas with ResizeObserver
+  // Draw spectrum on canvas with ResizeObserver
   useEffect(() => {
     const el = wrapRef.current;
     const canvas = canvasRef.current;
@@ -175,17 +175,17 @@ function AirtimeSpectrumChartComponent({
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Draw true spectrogram with Gaussian splat, blur, log compression
-      // Pass DPR so spectrogram renders at native resolution
-      drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
+      // Aggregate to pixel columns (one column per pixel = very spectrum-y)
+      const xBins = width;
+      const cols = aggregateToColumns(samples, startTs, endTs, xBins);
+
+      // Draw spectrum analyzer
+      drawSpectrum(ctx, cols, width, height, {
         yMax,
-        gain: 6,        // Lower gain - adaptive normalization handles dynamic range
-        gamma: 0.5,
-        blurX: 10,      // Strong horizontal blur for persistence
-        blurY: 5,       // Vertical blur for smooth bands
-        splatRadius: 5, // Gaussian splat radius for smooth points
-        dpr,
+        tailPx: 24,
+        showDensity: true,
       });
     };
 
