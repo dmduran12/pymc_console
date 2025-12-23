@@ -11,10 +11,12 @@ export default defineConfig({
   },
   build: {
     outDir: 'out',
-    // Minimize code splitting for simpler static serving
+    chunkSizeWarningLimit: 600, // Acknowledge Recharts adds ~250KB to main bundle
     rollupOptions: {
       output: {
-        manualChunks: undefined,
+        manualChunks: {
+          recharts: ['recharts'],
+        },
       },
     },
   },

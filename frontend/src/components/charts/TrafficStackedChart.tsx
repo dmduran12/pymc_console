@@ -34,8 +34,15 @@ export interface TrafficStackedChartProps {
   received: BucketData[];
   forwarded: BucketData[];
   transmitted?: BucketData[];
-  /** Bucket duration in seconds (from getBucketedStats) */
-  bucketDurationSeconds?: number;
+  /** 
+   * Duration of the RAW bucket (before downsampling) in seconds.
+   * Used to calculate utilization percentage correctly.
+   * After downsampling, airtime_ms represents MAX from any raw bucket,
+   * so we must calculate util as: airtime_ms / (rawBucketDurationSeconds * 1000)
+   */
+  rawBucketDurationSeconds?: number;
+  /** Display bucket duration (for time axis formatting) */
+  displayBucketDurationSeconds?: number;
 }
 
 /**
@@ -95,28 +102,31 @@ function UtilLegend({ payload }: { payload?: Array<{ value: string; color: strin
 /**
  * Airtime Utilization Line Chart
  * 
- * Uses pre-computed airtime_ms from BucketData for accurate utilization.
+ * Displays peak utilization from downsampled bucket data.
+ * airtime_ms in each bucket represents the MAX from the underlying raw buckets,
+ * so utilization is calculated against the RAW bucket duration (typically 5 seconds).
+ * 
  * Y-axis dynamically scales based on max value in dataset.
  */
 function TrafficStackedChartComponent({
   received,
   forwarded,
   transmitted,
-  bucketDurationSeconds = 60,
+  rawBucketDurationSeconds = 5,
+  displayBucketDurationSeconds = 60,
 }: TrafficStackedChartProps) {
-  // Max possible airtime per bucket in ms
-  const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
+  // Utilization is calculated against the RAW bucket duration
+  // because airtime_ms represents the MAX from any raw bucket, not a sum
+  const maxAirtimePerRawBucketMs = rawBucketDurationSeconds * 1000;
   
   // Transform bucket data for chart with TX/RX util calculation
-  // Uses pre-computed airtime_ms from getBucketedStats() which uses proper
-  // LoRa Semtech formula (see lib/airtime.ts)
   const chartData = useMemo(() => {
-    if (!received || received.length === 0 || maxAirtimePerBucketMs <= 0) {
+    if (!received || received.length === 0 || maxAirtimePerRawBucketMs <= 0) {
       return [];
     }
     
-    // Determine time format based on data density
-    const totalMinutes = (received.length * bucketDurationSeconds) / 60;
+    // Determine time format based on data span
+    const totalMinutes = (received.length * displayBucketDurationSeconds) / 60;
     const showDate = totalMinutes > 1440; // More than 24 hours
     
     return received.map((bucket, i) => {
@@ -135,12 +145,15 @@ function TrafficStackedChartComponent({
         });
       }
       
-      // RX utilization: use pre-computed airtime_ms from bucket data
-      const rxUtil = (bucket.airtime_ms / maxAirtimePerBucketMs) * 100;
+      // RX utilization: MAX airtime from any raw bucket / raw bucket duration
+      const rxUtil = (bucket.airtime_ms / maxAirtimePerRawBucketMs) * 100;
       
-      // TX utilization: transmitted (local) + forwarded (relayed) airtime
-      const txAirtimeMs = (transmitted?.[i]?.airtime_ms ?? 0) + (forwarded[i]?.airtime_ms ?? 0);
-      const txUtil = (txAirtimeMs / maxAirtimePerBucketMs) * 100;
+      // TX utilization: MAX of (transmitted + forwarded) airtime
+      const txAirtimeMs = Math.max(
+        transmitted?.[i]?.airtime_ms ?? 0,
+        forwarded[i]?.airtime_ms ?? 0
+      );
+      const txUtil = (txAirtimeMs / maxAirtimePerRawBucketMs) * 100;
       
       return {
         time,
@@ -148,7 +161,7 @@ function TrafficStackedChartComponent({
         txUtil,
       };
     });
-  }, [received, forwarded, transmitted, maxAirtimePerBucketMs, bucketDurationSeconds]);
+  }, [received, forwarded, transmitted, maxAirtimePerRawBucketMs, displayBucketDurationSeconds]);
 
   if (chartData.length === 0) {
     return (
