@@ -1,12 +1,8 @@
 /**
  * Spectrum Analyzer Utilities
  * 
- * True spectrogram visualization with:
- * - 2D intensity field (X = time, Y = utilization %)
- * - Bilinear splatting for smooth energy distribution
- * - Separable box blur for "alive" appearance
- * - Log/gamma compression to handle dynamic range
- * - Inferno-ish colormap (black → purple → orange → yellow → white)
+ * Converts fixed-window W samples into pixel-column aggregates for
+ * canvas-based spectrum analyzer visualization.
  * 
  * Key insight: downsample to chart width in pixels (not MAX_POINTS),
  * so spikes remain visible regardless of time range.
@@ -161,349 +157,207 @@ export function aggregateToColumns(
 }
 
 // ============================================================================
-// Spectrogram Grid Building
+// Canvas Drawing
 // ============================================================================
 
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
+export interface DrawSpectrumOptions {
+  yMax: number;        // Max Y value (e.g., 30%)
+  tailPx: number;      // Peak tail length in pixels
+  showDensity: boolean; // Show density bed at bottom
 }
 
+const RX_COLOR = { r: 57, g: 217, b: 138 };   // #39D98A green
+const TX_COLOR = { r: 176, g: 176, b: 195 };  // #B0B0C3 gray
+
 /**
- * Build a 2D spectrogram grid from fixed-window utilization samples.
+ * Draw spectrum analyzer visualization on canvas.
  * 
- * Each sample places energy at its (time, util%) position using a
- * Gaussian-like splat kernel. This creates smooth "glow" even with sparse data.
- * 
- * @param samples - Fixed-window util samples
- * @param startTs - Range start (seconds)
- * @param endTs - Range end (seconds)
- * @param width - Grid width (pixels)
- * @param height - Grid height (pixels)
- * @param yMax - Max Y value (e.g., 30%)
- * @param mode - Which utilization to use: rx, tx, max, or sum
- * @param splatRadius - Radius of the splat kernel (default 3)
+ * Draws:
+ * - Bright "peak" pixel at rxMax/txMax
+ * - Fading tail below peak (peak-hold vibe)
+ * - Optional density bed near bottom
  */
-export function buildSpectrogramGrid(
-  samples: UtilSample[],
-  startTs: number,
-  endTs: number,
+export function drawSpectrum(
+  ctx: CanvasRenderingContext2D,
+  cols: ColumnAgg[],
   width: number,
   height: number,
-  yMax: number,
-  mode: 'rx' | 'tx' | 'max' | 'sum' = 'max',
-  splatRadius: number = 3
-): Float32Array {
-  const grid = new Float32Array(width * height);
-  const range = endTs - startTs;
-  if (range <= 0 || width <= 0 || height <= 0) return grid;
-
-  // Pre-compute Gaussian-like kernel weights
-  const kernelSize = splatRadius * 2 + 1;
-  const sigma = splatRadius / 2;
-  const kernel: number[] = [];
-  let kernelSum = 0;
-  for (let ky = -splatRadius; ky <= splatRadius; ky++) {
-    for (let kx = -splatRadius; kx <= splatRadius; kx++) {
-      const d2 = kx * kx + ky * ky;
-      const w = Math.exp(-d2 / (2 * sigma * sigma));
-      kernel.push(w);
-      kernelSum += w;
-    }
-  }
-  // Normalize kernel
-  for (let i = 0; i < kernel.length; i++) {
-    kernel[i] /= kernelSum;
-  }
-
-  for (const s of samples) {
-    if (s.timestamp < startTs || s.timestamp > endTs) continue;
-
-    const util =
-      mode === 'rx' ? s.rxUtilW :
-      mode === 'tx' ? s.txUtilW :
-      mode === 'sum' ? (s.rxUtilW + s.txUtilW) :
-      Math.max(s.rxUtilW, s.txUtilW);
-
-    if (util <= 0) continue;
-
-    const u = clamp(util, 0, yMax);
-
-    // Center position
-    const xc = ((s.timestamp - startTs) / range) * (width - 1);
-    const yc = (1 - (u / yMax)) * (height - 1);
-
-    // Energy weighted by utilization
-    const energy = Math.sqrt(u / yMax);
-
-    // Apply Gaussian splat kernel
-    let ki = 0;
-    for (let ky = -splatRadius; ky <= splatRadius; ky++) {
-      const y = Math.round(yc) + ky;
-      if (y < 0 || y >= height) {
-        ki += kernelSize;
-        continue;
-      }
-      for (let kx = -splatRadius; kx <= splatRadius; kx++) {
-        const x = Math.round(xc) + kx;
-        if (x >= 0 && x < width) {
-          grid[y * width + x] += energy * kernel[ki];
-        }
-        ki++;
-      }
-    }
-  }
-
-  return grid;
-}
-
-// ============================================================================
-// Blur (Separable Box Blur)
-// ============================================================================
-
-/**
- * Fast separable box blur: horizontal + vertical passes.
- * This is what makes the spectrogram look "alive" and continuous.
- */
-export function boxBlur2D(
-  grid: Float32Array,
-  width: number,
-  height: number,
-  radiusX: number,
-  radiusY: number
-): Float32Array {
-  const tmp = new Float32Array(grid.length);
-  const out = new Float32Array(grid.length);
-
-  // Horizontal blur per row
-  for (let y = 0; y < height; y++) {
-    const rowOffset = y * width;
-    const winX = radiusX * 2 + 1;
-    let sum = 0;
+  options: DrawSpectrumOptions
+): void {
+  const { yMax, tailPx, showDensity } = options;
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+  
+  // Reserve space for axis labels (match Recharts YAxis)
+  const leftMargin = 44;
+  const rightMargin = 8;
+  const topMargin = 8;
+  const bottomMargin = 40; // space for X axis labels
+  
+  const chartWidth = width - leftMargin - rightMargin;
+  const chartHeight = height - topMargin - bottomMargin;
+  
+  if (chartWidth <= 0 || chartHeight <= 0) return;
+  
+  const colWidth = chartWidth / cols.length;
+  
+  // Helper: Y position from util% (0 at bottom, yMax at top)
+  const yFromUtil = (util: number): number => {
+    const clamped = Math.min(util, yMax);
+    return topMargin + chartHeight * (1 - clamped / yMax);
+  };
+  
+  // Helper: Draw a gradient tail from peak down
+  const drawPeakWithTail = (
+    x: number,
+    peakUtil: number,
+    color: { r: number; g: number; b: number },
+    alpha: number
+  ): void => {
+    if (peakUtil <= 0) return;
     
-    // Initial window
-    for (let k = -radiusX; k <= radiusX; k++) {
-      sum += grid[rowOffset + clamp(k, 0, width - 1)];
-    }
-    tmp[rowOffset] = sum / winX;
+    const peakY = yFromUtil(peakUtil);
+    const baseY = yFromUtil(0);
+    const tailLen = Math.min(tailPx, baseY - peakY);
     
-    // Slide window
-    for (let x = 1; x < width; x++) {
-      const outIdx = clamp(x - radiusX - 1, 0, width - 1);
-      const inIdx = clamp(x + radiusX, 0, width - 1);
-      sum += grid[rowOffset + inIdx] - grid[rowOffset + outIdx];
-      tmp[rowOffset + x] = sum / winX;
+    // Draw peak pixel (bright)
+    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+    ctx.fillRect(x, peakY, Math.max(1, colWidth - 0.5), 2);
+    
+    // Draw fading tail below peak
+    if (tailLen > 2) {
+      const gradient = ctx.createLinearGradient(0, peakY + 2, 0, peakY + tailLen);
+      gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.6})`);
+      gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x, peakY + 2, Math.max(1, colWidth - 0.5), tailLen - 2);
+    }
+  };
+  
+  // Helper: Draw density bed (faint activity indicator at bottom)
+  const drawDensityBed = (
+    x: number,
+    hits: number,
+    maxHits: number,
+    color: { r: number; g: number; b: number }
+  ): void => {
+    if (hits <= 0 || maxHits <= 0) return;
+    
+    const density = hits / maxHits;
+    const bedHeight = 3;
+    const y = topMargin + chartHeight - bedHeight;
+    
+    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${density * 0.25})`;
+    ctx.fillRect(x, y, Math.max(1, colWidth - 0.5), bedHeight);
+  };
+  
+  // Find max hits for density normalization
+  const maxRxHits = Math.max(...cols.map(c => c.rxHits), 1);
+  const maxTxHits = Math.max(...cols.map(c => c.txHits), 1);
+  
+  // Draw each column
+  for (let i = 0; i < cols.length; i++) {
+    const col = cols[i];
+    const x = leftMargin + i * colWidth;
+    
+    // Draw TX first (behind RX)
+    drawPeakWithTail(x, col.txMax, TX_COLOR, 0.5);
+    
+    // Draw RX on top
+    drawPeakWithTail(x, col.rxMax, RX_COLOR, 0.7);
+    
+    // Draw density beds if enabled
+    if (showDensity) {
+      drawDensityBed(x, col.txHits, maxTxHits, TX_COLOR);
+      drawDensityBed(x, col.rxHits, maxRxHits, RX_COLOR);
     }
   }
-
-  // Vertical blur per column
-  for (let x = 0; x < width; x++) {
-    const winY = radiusY * 2 + 1;
-    let sum = 0;
-    
-    // Initial window
-    for (let k = -radiusY; k <= radiusY; k++) {
-      sum += tmp[clamp(k, 0, height - 1) * width + x];
-    }
-    out[x] = sum / winY;
-    
-    // Slide window
-    for (let y = 1; y < height; y++) {
-      const outIdx = clamp(y - radiusY - 1, 0, height - 1);
-      const inIdx = clamp(y + radiusY, 0, height - 1);
-      sum += tmp[inIdx * width + x] - tmp[outIdx * width + x];
-      out[y * width + x] = sum / winY;
-    }
-  }
-
-  return out;
-}
-
-// ============================================================================
-// Colormap (Inferno-ish)
-// ============================================================================
-
-interface ColorStop {
-  t: number;
-  r: number;
-  g: number;
-  b: number;
-}
-
-// Inferno-inspired gradient: deep purple → magenta → orange → yellow → white
-// Note: Alpha handled separately - colormap is just RGB
-const INFERNO_STOPS: ColorStop[] = [
-  { t: 0.00, r:  40, g:   0, b:  80 },  // Deep purple (at threshold)
-  { t: 0.25, r: 120, g:  30, b: 140 },  // Purple-magenta
-  { t: 0.50, r: 200, g:  60, b:  80 },  // Magenta-red
-  { t: 0.70, r: 230, g:  90, b:  40 },  // Orange
-  { t: 0.88, r: 255, g: 190, b:  60 },  // Yellow
-  { t: 1.00, r: 255, g: 255, b: 255 },  // White
-];
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function colorInferno(t: number): { r: number; g: number; b: number } {
-  t = clamp(t, 0, 1);
-  for (let i = 0; i < INFERNO_STOPS.length - 1; i++) {
-    const a = INFERNO_STOPS[i];
-    const b = INFERNO_STOPS[i + 1];
-    if (t >= a.t && t <= b.t) {
-      const u = (t - a.t) / (b.t - a.t || 1);
-      return {
-        r: Math.round(lerp(a.r, b.r, u)),
-        g: Math.round(lerp(a.g, b.g, u)),
-        b: Math.round(lerp(a.b, b.b, u)),
-      };
-    }
-  }
-  return { r: 255, g: 255, b: 255 };
-}
-
-// ============================================================================
-// Spectrogram Rendering
-// ============================================================================
-
-export interface SpectrogramOptions {
-  yMax: number;       // Max Y value (e.g., 30%)
-  gain?: number;      // Contrast boost for low energy (default 6)
-  gamma?: number;     // <1 brightens mids (default 0.65)
-  floor?: number;     // Small floor for glow (default 0)
-  blurX?: number;     // Horizontal blur radius (default 4)
-  blurY?: number;     // Vertical blur radius (default 2)
-  splatRadius?: number; // Gaussian splat kernel radius (default 4)
-  dpr?: number;       // Device pixel ratio (default 1)
 }
 
 /**
- * Draw true spectrogram visualization on canvas.
+ * Draw full spectrogram grid (Y-binned intensity).
  * 
- * Pipeline:
- * 1. Build 2D density grid from samples (bilinear splat)
- * 2. Apply separable box blur
- * 3. Log/gamma compress for dynamic range
- * 4. Apply inferno colormap
+ * Alternative to peak-only display - shows full distribution
+ * of utilization values as a heatmap.
+ * 
+ * @param yBins - Number of Y bins (e.g., 120 for 0.25% per row at 30% max)
  */
 export function drawSpectrogram(
   ctx: CanvasRenderingContext2D,
+  cols: ColumnAgg[],
   samples: UtilSample[],
   startTs: number,
   endTs: number,
   width: number,
   height: number,
-  options: SpectrogramOptions
+  options: { yMax: number; yBins: number }
 ): void {
-  const {
-    yMax,
-    gain = 6,
-    gamma = 0.65,
-    floor = 0,
-    blurX = 4,
-    blurY = 2,
-    splatRadius = 4,
-    dpr = 1,
-  } = options;
-
-  // Scale everything by DPR for crisp rendering on high-DPI displays
-  const scaledWidth = Math.floor(width * dpr);
-  const scaledHeight = Math.floor(height * dpr);
-
-  ctx.clearRect(0, 0, scaledWidth, scaledHeight);
-
-  // Match Recharts chart area margins (empirically determined)
-  // Recharts LineChart with YAxis width=44, Legend, and default padding
-  const leftMargin = Math.floor(52 * dpr);   // YAxis width + internal padding
-  const rightMargin = Math.floor(5 * dpr);   // Right edge padding
-  const topMargin = Math.floor(5 * dpr);     // Top edge padding  
-  const bottomMargin = Math.floor(50 * dpr); // XAxis + Legend height
-
-  const chartWidth = scaledWidth - leftMargin - rightMargin;
-  const chartHeight = scaledHeight - topMargin - bottomMargin;
-
-  if (chartWidth <= 0 || chartHeight <= 0 || samples.length === 0) return;
-
-  // Step 1: Build density grid with Gaussian splatting (at full DPR resolution)
-  // Scale splat radius by DPR for consistent visual appearance
-  const scaledSplatRadius = Math.max(2, Math.round(splatRadius * dpr));
-  const baseGrid = buildSpectrogramGrid(
-    samples,
-    startTs,
-    endTs,
-    chartWidth,
-    chartHeight,
-    yMax,
-    'max',
-    scaledSplatRadius
-  );
-
-  // Step 2: Apply box blur for smooth, "alive" appearance
-  // Scale blur radii by DPR to maintain visual appearance
-  const scaledBlurX = Math.max(1, Math.floor(blurX * dpr));
-  const scaledBlurY = Math.max(1, Math.floor(blurY * dpr));
-  const blurredGrid = boxBlur2D(baseGrid, chartWidth, chartHeight, scaledBlurX, scaledBlurY);
-
-  // Step 3: Adaptive normalization based on data density
-  // Sparse data needs lower percentile to avoid hot spots crushing everything
-  const values = Array.from(blurredGrid).filter(v => v > 0);
-  values.sort((a, b) => a - b);
+  const { yMax, yBins } = options;
   
-  // Use p99 for robust max (outlier rejection)
-  const percentile = 0.99;
-  const pMax = values[Math.floor(values.length * percentile)] || 1;
+  ctx.clearRect(0, 0, width, height);
   
-  // Also compute median for floor calculation
-  const median = values[Math.floor(values.length * 0.5)] || 0;
-
-  // Step 4: Create image with log compression and inferno colormap
-  // Use alpha channel for intensity - fully transparent where no energy
-  const img = ctx.createImageData(chartWidth, chartHeight);
-  const data = img.data;
-
-  // Soft threshold with smooth falloff
-  const softThreshold = 0.002;  // Below this = transparent
-  const fadeZone = 0.03;        // Fade from softThreshold to softThreshold + fadeZone
+  const leftMargin = 44;
+  const rightMargin = 8;
+  const topMargin = 8;
+  const bottomMargin = 40;
   
-  // Add floor based on median to boost low-level detail
-  const adaptiveFloor = floor + (median / pMax) * 0.15;
-
-  for (let i = 0; i < blurredGrid.length; i++) {
-    const raw = blurredGrid[i] / pMax;
+  const chartWidth = width - leftMargin - rightMargin;
+  const chartHeight = height - topMargin - bottomMargin;
+  
+  if (chartWidth <= 0 || chartHeight <= 0) return;
+  
+  const xBins = cols.length;
+  const range = endTs - startTs;
+  if (range <= 0) return;
+  
+  // Build intensity grid
+  const rxGrid = new Uint16Array(xBins * yBins);
+  const txGrid = new Uint16Array(xBins * yBins);
+  
+  for (const s of samples) {
+    if (s.timestamp < startTs || s.timestamp > endTs) continue;
     
-    // Below soft threshold = fully transparent
-    if (raw < softThreshold) {
-      const o = i * 4;
-      data[o + 0] = 0;
-      data[o + 1] = 0;
-      data[o + 2] = 0;
-      data[o + 3] = 0;
-      continue;
-    }
-
-    // Smooth fade-in for values in the fade zone
-    let alphaMultiplier = 1.0;
-    if (raw < softThreshold + fadeZone) {
-      // Smooth cubic ease-in from 0 to 1
-      const fadeT = (raw - softThreshold) / fadeZone;
-      alphaMultiplier = fadeT * fadeT * (3 - 2 * fadeT); // smoothstep
-    }
-
-    // Map to color (log compression with adaptive floor)
-    const boosted = raw + adaptiveFloor;
-    const v = Math.log1p(gain * boosted) / Math.log1p(gain * (1 + adaptiveFloor));
-    const t = Math.pow(clamp(v, 0, 1), gamma);
-
-    const { r, g, b } = colorInferno(t);
-    const o = i * 4;
-    data[o + 0] = r;
-    data[o + 1] = g;
-    data[o + 2] = b;
-    // Alpha: base 0.65, ramps to 1.0, with smooth fade-in near threshold
-    const baseAlpha = 0.65 + 0.35 * t;
-    data[o + 3] = Math.round(255 * baseAlpha * alphaMultiplier);
+    const x = Math.min(xBins - 1, Math.max(0, Math.floor(((s.timestamp - startTs) / range) * xBins)));
+    
+    // Map util to Y bin
+    const rxY = Math.min(yBins - 1, Math.max(0, Math.floor((s.rxUtilW / yMax) * yBins)));
+    const txY = Math.min(yBins - 1, Math.max(0, Math.floor((s.txUtilW / yMax) * yBins)));
+    
+    rxGrid[x * yBins + rxY]++;
+    txGrid[x * yBins + txY]++;
   }
-
-  // Draw the spectrogram image directly at native resolution
-  // (canvas is already sized at width*dpr x height*dpr)
-  ctx.putImageData(img, leftMargin, topMargin);
+  
+  // Find max for normalization
+  let rxMaxCount = 1, txMaxCount = 1;
+  for (let i = 0; i < rxGrid.length; i++) {
+    if (rxGrid[i] > rxMaxCount) rxMaxCount = rxGrid[i];
+    if (txGrid[i] > txMaxCount) txMaxCount = txGrid[i];
+  }
+  
+  // Draw cells
+  const cellWidth = chartWidth / xBins;
+  const cellHeight = chartHeight / yBins;
+  
+  for (let xi = 0; xi < xBins; xi++) {
+    for (let yi = 0; yi < yBins; yi++) {
+      const idx = xi * yBins + yi;
+      const x = leftMargin + xi * cellWidth;
+      const y = topMargin + chartHeight - (yi + 1) * cellHeight; // flip Y
+      
+      // Draw TX (behind)
+      const txIntensity = txGrid[idx] / txMaxCount;
+      if (txIntensity > 0) {
+        ctx.fillStyle = `rgba(${TX_COLOR.r}, ${TX_COLOR.g}, ${TX_COLOR.b}, ${txIntensity * 0.5})`;
+        ctx.fillRect(x, y, cellWidth, cellHeight);
+      }
+      
+      // Draw RX (on top)
+      const rxIntensity = rxGrid[idx] / rxMaxCount;
+      if (rxIntensity > 0) {
+        ctx.fillStyle = `rgba(${RX_COLOR.r}, ${RX_COLOR.g}, ${RX_COLOR.b}, ${rxIntensity * 0.6})`;
+        ctx.fillRect(x, y, cellWidth, cellHeight);
+      }
+    }
+  }
 }
