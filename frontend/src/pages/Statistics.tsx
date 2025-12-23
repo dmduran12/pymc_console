@@ -1,18 +1,19 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useStats } from '@/lib/stores/useStore';
-import { BarChart3, TrendingUp, PieChart, Radio, Compass, Network } from 'lucide-react';
+import { BarChart3, TrendingUp, PieChart, Compass, Network, Radio } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { GraphData } from '@/types/api';
-import type { BucketedStats, BucketData, NoiseFloorHistoryItem } from '@/lib/api';
+import type { BucketedStats, NoiseFloorHistoryItem } from '@/lib/api';
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
-import { TrafficStackedChart } from '@/components/charts/TrafficStackedChart';
+import { AirtimeSpectrumChart } from '@/components/charts/AirtimeSpectrumChart';
 import { NeighborPolarChart } from '@/components/charts/NeighborPolarChart';
 import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { NetworkCompositionChart } from '@/components/charts/NetworkCompositionChart';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
+import { combineTxBuckets, toUtilSamples, type UtilSample } from '@/lib/spectrum-utils';
 
 // ============================================================================
 // Airtime Utilization Data Processing
@@ -27,127 +28,6 @@ import { STATISTICS_TIME_RANGES } from '@/lib/constants';
  * W = 10s is good for spikey networks (captures short bursts)
  */
 const SPIKE_WINDOW_SECONDS = 10;
-
-/** Max display points for chart */
-const MAX_DISPLAY_POINTS = 720;
-
-/**
- * Utilization point for chart display.
- * - avg: time-weighted average over display bin (trend)
- * - peak: max instantaneous util from any W-second window (spike intensity)
- */
-export interface UtilizationPoint {
-  time: string;
-  timestamp: number;
-  rxAvg: number | null;
-  rxPeak: number | null;
-  txAvg: number | null;
-  txPeak: number | null;
-}
-
-/**
- * Time-based rollup with spike preservation.
- * 
- * Key insight: peak is computed from individual W-second buckets,
- * so a 17% spike in a 10s window stays 17% regardless of display bin size.
- */
-function rollupSpikePreserving(
-  rx: BucketData[],
-  tx: BucketData[],
-  baseBucketMs: number,  // W in milliseconds
-  startTs: number,
-  endTs: number,
-  targetPoints: number
-): UtilizationPoint[] {
-  if (endTs <= startTs || targetPoints <= 0 || rx.length === 0) return [];
-  
-  const rangeMs = (endTs - startTs) * 1000; // convert to ms
-  
-  // Choose display bin size (multiple of base bucket)
-  const approxBinMs = rangeMs / targetPoints;
-  const binSizeMs = Math.max(baseBucketMs, Math.ceil(approxBinMs / baseBucketMs) * baseBucketMs);
-  const binSizeSec = binSizeMs / 1000;
-  
-  // Determine time format based on span
-  const totalHours = rangeMs / (1000 * 60 * 60);
-  const showDate = totalHours > 24;
-  
-  const result: UtilizationPoint[] = [];
-  
-  let rxIdx = 0;
-  let txIdx = 0;
-  
-  for (let t0 = startTs; t0 < endTs; t0 += binSizeSec) {
-    const t1 = Math.min(endTs, t0 + binSizeSec);
-    
-    let rxSum = 0, txSum = 0;
-    let rxPeak = 0, txPeak = 0;
-    let rxCount = 0, txCount = 0;
-    
-    // Advance rx pointer and collect buckets in [t0, t1)
-    while (rxIdx < rx.length && rx[rxIdx].start < t0) rxIdx++;
-    let k = rxIdx;
-    while (k < rx.length && rx[k].start < t1) {
-      const util = (rx[k].airtime_ms / baseBucketMs) * 100;
-      if (util > rxPeak) rxPeak = util;
-      rxSum += rx[k].airtime_ms;
-      rxCount++;
-      k++;
-    }
-    
-    // Advance tx pointer and collect buckets in [t0, t1)
-    while (txIdx < tx.length && tx[txIdx].start < t0) txIdx++;
-    let m = txIdx;
-    while (m < tx.length && tx[m].start < t1) {
-      const util = (tx[m].airtime_ms / baseBucketMs) * 100;
-      if (util > txPeak) txPeak = util;
-      txSum += tx[m].airtime_ms;
-      txCount++;
-      m++;
-    }
-    
-    // Avg = total airtime / bin duration
-    const durMs = (t1 - t0) * 1000;
-    const rxAvg = rxCount > 0 ? (rxSum / durMs) * 100 : null;
-    const txAvg = txCount > 0 ? (txSum / durMs) * 100 : null;
-    
-    // Format timestamp
-    const midTs = Math.floor((t0 + t1) / 2);
-    const date = new Date(midTs * 1000);
-    let time: string;
-    if (showDate) {
-      time = date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
-             ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-    } else {
-      time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-    
-    result.push({
-      time,
-      timestamp: midTs,
-      rxAvg,
-      rxPeak: rxCount > 0 ? rxPeak : null,
-      txAvg,
-      txPeak: txCount > 0 ? txPeak : null,
-    });
-    
-    rxIdx = k;
-    txIdx = m;
-  }
-  
-  return result;
-}
-
-/**
- * Combine transmitted and forwarded buckets into single TX array.
- */
-function combineTxBuckets(transmitted: BucketData[], forwarded: BucketData[]): BucketData[] {
-  return transmitted.map((tx, i) => ({
-    ...tx,
-    count: tx.count + (forwarded[i]?.count ?? 0),
-    airtime_ms: tx.airtime_ms + (forwarded[i]?.airtime_ms ?? 0),
-  }));
-}
 
 // ============================================================================
 // Statistics Page Component
@@ -200,25 +80,20 @@ export default function Statistics() {
     fetchData();
   }, [timeRange, timeRangeMinutes, bucketCount]);
   
-  // Compute utilization points with spike-preserving rollup
-  const utilizationData = useMemo((): UtilizationPoint[] => {
-    if (!rawBucketedStats) return [];
+  // Compute utilization samples for spectrum analyzer
+  const { utilSamples, startTs, endTs } = useMemo((): { utilSamples: UtilSample[]; startTs: number; endTs: number } => {
+    if (!rawBucketedStats) return { utilSamples: [], startTs: 0, endTs: 0 };
     
     const { received, transmitted, forwarded, bucket_duration_seconds, start_time, end_time } = rawBucketedStats;
-    const baseBucketMs = bucket_duration_seconds * 1000;
+    const windowMs = bucket_duration_seconds * 1000;
     
-    // Combine TX sources
+    // Combine TX sources (transmitted + forwarded)
     const txBuckets = combineTxBuckets(transmitted, forwarded);
     
-    // Time-based rollup preserving spikes
-    return rollupSpikePreserving(
-      received, 
-      txBuckets, 
-      baseBucketMs, 
-      start_time, 
-      end_time, 
-      MAX_DISPLAY_POINTS
-    );
+    // Convert to fixed-window utilization samples
+    const samples = toUtilSamples(received, txBuckets, windowMs);
+    
+    return { utilSamples: samples, startTs: start_time, endTs: end_time };
   }, [rawBucketedStats]);
 
   // Poll utilization only, with intervals by range:
@@ -294,18 +169,17 @@ export default function Statistics() {
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
   
-  // Calculate RX utilization stats from the utilization data
+  // Calculate RX utilization stats from the utilization samples
   const rxUtilStats = useMemo(() => {
-    const validPoints = utilizationData.filter(p => p.rxAvg !== null);
-    if (validPoints.length === 0) return { peak: 0, mean: 0 };
+    if (utilSamples.length === 0) return { peak: 0, mean: 0 };
     
-    // Peak = max of all rxPeak values (highest spike in any raw bucket)
-    const peak = Math.max(...validPoints.map(p => p.rxPeak ?? 0));
-    // Mean = average of rxAvg values (overall trend)
-    const mean = validPoints.reduce((sum, p) => sum + (p.rxAvg ?? 0), 0) / validPoints.length;
+    // Peak = max of all rxUtilW values (highest spike in any W-second window)
+    const peak = Math.max(...utilSamples.map(s => s.rxUtilW));
+    // Mean = average of rxUtilW values (overall trend)
+    const mean = utilSamples.reduce((sum, s) => sum + s.rxUtilW, 0) / utilSamples.length;
     
     return { peak, mean };
-  }, [utilizationData]);
+  }, [utilSamples]);
 
   return (
     <div className="section-gap">
@@ -353,13 +227,11 @@ export default function Statistics() {
                   <span className="pill-tag">{currentRange.label}</span>
                 </div>
               </div>
-              {utilizationData.length > 0 ? (
-                <TrafficStackedChart data={utilizationData} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-text-muted">
-                  No traffic data available
-                </div>
-              )}
+              <AirtimeSpectrumChart
+                samples={utilSamples}
+                startTs={startTs}
+                endTs={endTs}
+              />
             </div>
 
             {/* Neighbor Link Quality Polar Chart */}
