@@ -30,11 +30,6 @@ import type {
   TransportKeyUpdateRequest,
   // Neighbor types
   AdvertsByContactTypeResponse,
-  // LBT & Channel Health types
-  LBTStats,
-  NoiseFloorStatsExtended,
-  LinkQualityResponse,
-  ChannelHealthResponse,
 } from '@/types/api';
 
 // Empty string = same-origin (relative URLs work when served from pyMC_Repeater)
@@ -958,39 +953,3 @@ export async function getAdvertsByContactType(params: {
   return fetchApi<ApiResponse<AdvertsByContactTypeResponse>>(`/api/adverts_by_contact_type?${queryParams.toString()}`);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LBT (Listen Before Talk) & Channel Health Endpoints
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Get LBT (Listen Before Talk) statistics.
- * @param hours - Time range in hours (default: 24)
- */
-export async function getLBTStats(hours: number = 24): Promise<ApiResponse<LBTStats>> {
-  return fetchApi<ApiResponse<LBTStats>>(`/api/lbt_stats?hours=${hours}`);
-}
-
-/**
- * Get extended noise floor statistics with trend analysis.
- * @param hours - Time range in hours (default: 24)
- */
-export async function getNoiseFloorStatsExtended(hours: number = 24): Promise<ApiResponse<NoiseFloorStatsExtended>> {
-  return fetchApi<ApiResponse<NoiseFloorStatsExtended>>(`/api/noise_floor_stats_extended?hours=${hours}`);
-}
-
-/**
- * Get link quality scores for all neighbors.
- * Returns per-neighbor quality scores, network average, best/worst links.
- * Note: Backend uses last 24h of advert data (hardcoded).
- */
-export async function getLinkQualityScores(): Promise<ApiResponse<LinkQualityResponse>> {
-  return fetchApi<ApiResponse<LinkQualityResponse>>('/api/link_quality_scores');
-}
-
-/**
- * Get composite channel health status.
- * Combines LBT, noise floor, and link quality into a single health score.
- */
-export async function getChannelHealth(): Promise<ApiResponse<ChannelHealthResponse>> {
-  return fetchApi<ApiResponse<ChannelHealthResponse>>('/api/channel_health');
-}

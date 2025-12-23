@@ -9,11 +9,10 @@ import { useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line } from 'recharts';
 import { MiniWidget } from './MiniWidget';
-import { useLBTData } from './LBTDataContext';
-import type { ChannelHealthStatus } from '@/types/api';
+import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
 
 /** Status color map using CSS variables */
-const STATUS_COLORS: Record<ChannelHealthStatus | 'unknown', string> = {
+const STATUS_COLORS: Record<ComputedChannelHealth['status'] | 'unknown', string> = {
   excellent: 'var(--signal-excellent)',
   good: 'var(--signal-good)',
   fair: 'var(--signal-fair)',
@@ -23,7 +22,7 @@ const STATUS_COLORS: Record<ChannelHealthStatus | 'unknown', string> = {
 };
 
 /** Convert retry rate to status color */
-function getRetryStatus(rate: number): ChannelHealthStatus {
+function getRetryStatus(rate: number): ComputedChannelHealth['status'] {
   if (rate < 2) return 'excellent';
   if (rate < 5) return 'good';
   if (rate < 10) return 'fair';
@@ -32,18 +31,18 @@ function getRetryStatus(rate: number): ChannelHealthStatus {
 }
 
 export function LBTRetryWidget() {
-  const { lbtStats, isTrendLoading, error } = useLBTData();
+  const { lbtStats, isLoading, error } = useLBTData();
 
-  const retryRate = lbtStats?.lbt_retry_rate ?? 0;
-  const avgBackoff = lbtStats?.avg_backoff_ms ?? 0;
+  const retryRate = lbtStats?.retryRate ?? 0;
+  const avgBackoff = lbtStats?.avgBackoffMs ?? 0;
   const status = lbtStats ? getRetryStatus(retryRate) : 'unknown';
 
-  // Transform hourly data for Recharts
-  const byHour = lbtStats?.by_hour;
+  // Transform hourly data for Recharts sparkline
+  const hourlyRates = lbtStats?.hourlyRetryRates;
   const chartData = useMemo(() => {
-    if (!byHour || byHour.length < 2) return [];
-    return byHour.map((h) => ({ value: h.retry_rate }));
-  }, [byHour]);
+    if (!hourlyRates || hourlyRates.length < 2) return [];
+    return hourlyRates.map((value) => ({ value }));
+  }, [hourlyRates]);
 
   const strokeColor = STATUS_COLORS[status];
 
@@ -55,7 +54,7 @@ export function LBTRetryWidget() {
       unit="%"
       status={status}
       subtitle={lbtStats ? `Avg ${Math.round(avgBackoff)}ms backoff` : undefined}
-      isLoading={isTrendLoading}
+      isLoading={isLoading}
       error={error}
     >
       {chartData.length > 0 && (

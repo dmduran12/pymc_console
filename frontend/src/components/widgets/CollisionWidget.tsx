@@ -7,35 +7,34 @@
 
 import { Zap } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
-import { useLBTData } from './LBTDataContext';
-import type { LBTStats, ChannelHealthStatus } from '@/types/api';
+import { useLBTData, type ComputedLBTStats, type ComputedChannelHealth } from './LBTDataContext';
 
 /**
  * Estimate collision risk from LBT metrics
  * This combines retry rate with channel busy events to estimate interference
  */
-function estimateCollisionRisk(data: LBTStats): number {
-  const { lbt_retry_rate, channel_busy_events, total_tx_packets, max_backoff_ms } = data;
+function estimateCollisionRisk(data: ComputedLBTStats): number {
+  const { retryRate, channelBusyCount, totalPacketsWithLBT, maxBackoffMs } = data;
 
-  if (total_tx_packets === 0) return 0;
+  if (totalPacketsWithLBT === 0) return 0;
 
   // Base collision estimate from retry rate (retries indicate activity when trying to TX)
-  let risk = lbt_retry_rate * 0.5;
+  let risk = retryRate * 0.5;
 
   // Channel busy events are strong collision indicators
-  const busyRate = (channel_busy_events / total_tx_packets) * 100;
+  const busyRate = (channelBusyCount / totalPacketsWithLBT) * 100;
   risk += busyRate * 2;
 
   // High max backoff indicates persistent interference
-  if (max_backoff_ms > 500) {
-    risk += Math.min((max_backoff_ms - 500) / 100, 10);
+  if (maxBackoffMs > 500) {
+    risk += Math.min((maxBackoffMs - 500) / 100, 10);
   }
 
   return Math.min(risk, 100);
 }
 
 /** Convert collision risk to status */
-function getCollisionStatus(risk: number): ChannelHealthStatus {
+function getCollisionStatus(risk: number): ComputedChannelHealth['status'] {
   if (risk < 5) return 'excellent';
   if (risk < 15) return 'good';
   if (risk < 30) return 'fair';
@@ -44,11 +43,11 @@ function getCollisionStatus(risk: number): ChannelHealthStatus {
 }
 
 export function CollisionWidget() {
-  const { lbtStats, isTrendLoading, error } = useLBTData();
+  const { lbtStats, isLoading, error } = useLBTData();
 
   const collisionRisk = lbtStats ? estimateCollisionRisk(lbtStats) : 0;
   const status = lbtStats ? getCollisionStatus(collisionRisk) : 'unknown';
-  const maxBackoff = lbtStats?.max_backoff_ms ?? 0;
+  const maxBackoff = lbtStats?.maxBackoffMs ?? 0;
 
   return (
     <MiniWidget
@@ -57,8 +56,8 @@ export function CollisionWidget() {
       value={collisionRisk.toFixed(1)}
       unit="%"
       status={status}
-      subtitle={lbtStats ? `Max backoff: ${maxBackoff}ms` : undefined}
-      isLoading={isTrendLoading}
+      subtitle={lbtStats ? `Max backoff: ${Math.round(maxBackoff)}ms` : undefined}
+      isLoading={isLoading}
       error={error}
     />
   );
