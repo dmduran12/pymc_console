@@ -159,7 +159,7 @@ function TrafficStackedChartComponent({
           
           {/* RX Utilization - Green */}
           <Line
-            type="monotone"
+            type="linear"
             dataKey="rxUtil"
             name="RX Airtime"
             stroke={RX_COLOR}
@@ -171,7 +171,7 @@ function TrafficStackedChartComponent({
           
           {/* TX Utilization - Gray */}
           <Line
-            type="monotone"
+            type="linear"
             dataKey="txUtil"
             name="TX Airtime"
             stroke={TX_COLOR}
