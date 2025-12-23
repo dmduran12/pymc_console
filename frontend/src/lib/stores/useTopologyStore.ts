@@ -6,11 +6,11 @@
  */
 
 import { create } from 'zustand';
-import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation, type PathRegistry, type ObservedPath, type NodeMobility, type PathHealth } from '@/lib/topology-service';
+import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation, type PathRegistry, type ObservedPath, type NodeMobility, type PathHealth, type LastHopNeighbor } from '@/lib/topology-service';
 import { createEmptyPathRegistry } from '@/lib/path-registry';
 
 // Re-export types for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth, LastHopNeighbor };
 
 interface TopologyState {
   // Topology data
@@ -55,6 +55,8 @@ function createEmptyTopology(): MeshTopology {
     mobileNodes: [],
     // Phase 7: Path health indicators
     pathHealth: [],
+    // Last-hop neighbors (ground truth from packet paths)
+    lastHopNeighbors: [],
   };
 }
 
@@ -226,3 +228,13 @@ export const useTopHealthyPaths = (n: number = 10) => useTopologyStoreBase((s) =
 export const useDecliningPaths = () => useTopologyStoreBase((s) => 
   s.topology.pathHealth.filter(p => p.observationTrend < 0)
 );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Last-Hop Neighbors (Ground Truth Direct RF Contacts)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Last-hop neighbors (ground truth from packet paths - nodes that forwarded directly to us) */
+export const useLastHopNeighbors = () => useTopologyStoreBase((s) => s.topology.lastHopNeighbors);
+
+/** Number of last-hop neighbors */
+export const useLastHopNeighborCount = () => useTopologyStoreBase((s) => s.topology.lastHopNeighbors.length);

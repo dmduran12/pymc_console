@@ -8,7 +8,7 @@ import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { DeepAnalysisModal, type AnalysisStep } from '@/components/ui/DeepAnalysisModal';
-import { getLinkQualityWeight, type TopologyEdge } from '@/lib/mesh-topology';
+import { getLinkQualityWeight, type TopologyEdge, type LastHopNeighbor } from '@/lib/mesh-topology';
 import { useTopology, useIsComputingTopology } from '@/lib/stores/useTopologyStore';
 import { usePackets, usePacketCacheState, useTriggerDeepAnalysis } from '@/lib/stores/useStore';
 import { parsePath, getHashPrefix } from '@/lib/path-utils';
@@ -682,16 +682,36 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Get packets for SNR calculation (lightweight, still needed)
   const packets = usePackets();
   
-  // Infer zero-hop neighbors from packet analysis AND topology edges
-  // Topology edges use the disambiguation system for more accurate prefix resolution
-  const zeroHopNeighbors = useMemo(() => {
-    return inferZeroHopNeighbors(
-      packets, 
-      neighbors, 
-      meshTopology.validatedEdges,  // Use disambiguated edges
-      localHash
-    );
-  }, [packets, neighbors, meshTopology.validatedEdges, localHash]);
+  // Get zero-hop neighbors from topology's lastHopNeighbors (ground truth from packet paths)
+  // These are nodes that appeared as the LAST hop in packet paths (i.e., forwarded directly to us)
+  // Build both a Set (for .has() checks) and a Map (for looking up RSSI/SNR data)
+  const { zeroHopNeighbors, lastHopNeighborMap } = useMemo(() => {
+    const neighborSet = new Set<string>();
+    const neighborMap = new Map<string, LastHopNeighbor>();
+    
+    // Use topology's lastHopNeighbors if available
+    for (const lastHop of meshTopology.lastHopNeighbors) {
+      neighborSet.add(lastHop.hash);
+      neighborMap.set(lastHop.hash, lastHop);
+    }
+    
+    // Fallback: if no lastHopNeighbors yet, use the old inference method
+    // This handles the case before deep analysis has been run
+    if (neighborSet.size === 0) {
+      const inferred = inferZeroHopNeighbors(
+        packets, 
+        neighbors, 
+        meshTopology.validatedEdges,
+        localHash
+      );
+      // Add inferred neighbors to the set (no LastHopNeighbor data available)
+      for (const hash of inferred) {
+        neighborSet.add(hash);
+      }
+    }
+    
+    return { zeroHopNeighbors: neighborSet, lastHopNeighborMap: neighborMap };
+  }, [meshTopology.lastHopNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
@@ -775,12 +795,14 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   
   // Generate polylines for neighbor edges (direct RF links from local to zero-hop neighbors)
   // These are ALWAYS visible - not gated by topology toggle - since they represent real API neighbor data
+  // Uses lastHopNeighbor data from topology for RSSI/SNR when available (computed from actual packets)
   const neighborPolylines = useMemo(() => {
     const lines: Array<{
       from: [number, number];
       to: [number, number];
       hash: string;  // neighbor hash for link quality lookup
       neighbor: NeighborInfo;
+      lastHopData: LastHopNeighbor | null;  // Topology-computed RSSI/SNR data
     }> = [];
     
     // Get local node coordinates
@@ -795,16 +817,20 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       const neighbor = neighbors[neighborHash];
       if (!neighbor) continue;
       
+      // Get topology-computed RSSI/SNR data if available
+      const lastHopData = lastHopNeighborMap.get(neighborHash) || null;
+      
       lines.push({
         from: localCoords,
         to: neighborCoords,
         hash: neighborHash,
         neighbor,
+        lastHopData,
       });
     }
     
     return lines;
-  }, [nodeCoordinates, zeroHopNeighbors, neighbors]);
+  }, [nodeCoordinates, zeroHopNeighbors, neighbors, lastHopNeighborMap]);
   
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
@@ -1906,10 +1932,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Draw neighbor edges (direct RF links to local) - green, always visible */}
         {/* Weight based on signal strength: higher RSSI = thicker line */}
-        {neighborPolylines.map(({ from, to, hash, neighbor }) => {
+        {/* Uses topology-computed avgRssi/avgSnr when available (from lastHopNeighbors) */}
+        {neighborPolylines.map(({ from, to, hash, neighbor, lastHopData }) => {
           const name = neighbor.node_name || neighbor.name || hash.slice(0, 8);
-          const snr = neighbor.snr;
-          const rssi = neighbor.rssi;
+          
+          // Prefer topology-computed RSSI/SNR (averaged from actual packets) over API snapshot
+          const snr = lastHopData?.avgSnr ?? neighbor.snr;
+          const rssi = lastHopData?.avgRssi ?? neighbor.rssi;
+          const packetCount = lastHopData?.count;
+          const confidence = lastHopData?.confidence;
           
           // Weight scales with RSSI: -50 dBm = 4px, -120 dBm = 1.5px
           const minWeight = 1.5;
@@ -1917,7 +1948,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const minRssi = -120;
           const maxRssi = -50;
           let weight = minWeight;
-          if (rssi !== undefined) {
+          if (rssi !== undefined && rssi !== null) {
             const normalized = Math.max(0, Math.min(1, (rssi - minRssi) / (maxRssi - minRssi)));
             weight = minWeight + normalized * (maxWeight - minWeight);
           }
@@ -1942,11 +1973,26 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">
                     <span className="text-accent-success">●</span> {name}
+                    {lastHopData?.prefix && (
+                      <span className="ml-1 text-text-muted font-mono text-[10px]">
+                        ({lastHopData.prefix})
+                      </span>
+                    )}
                   </div>
                   <div className="text-text-secondary flex gap-2">
-                    {rssi !== undefined && <span>RSSI: {rssi} dBm</span>}
-                    {snr !== undefined && <span>SNR: {snr.toFixed(1)} dB</span>}
+                    {rssi !== undefined && rssi !== null && (
+                      <span>RSSI: {Math.round(rssi)} dBm{lastHopData?.avgRssi && ' avg'}</span>
+                    )}
+                    {snr !== undefined && snr !== null && (
+                      <span>SNR: {snr.toFixed(1)} dB{lastHopData?.avgSnr && ' avg'}</span>
+                    )}
                   </div>
+                  {packetCount !== undefined && (
+                    <div className="text-text-muted text-[10px]">
+                      {packetCount.toLocaleString()} packets
+                      {confidence !== undefined && ` • ${Math.round(confidence * 100)}% conf`}
+                    </div>
+                  )}
                   <div className="text-accent-success text-[10px] mt-0.5">Direct RF neighbor</div>
                 </div>
               </Tooltip>

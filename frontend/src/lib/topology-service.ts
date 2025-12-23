@@ -8,7 +8,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, NodeMobility, PathHealth } from '@/lib/mesh-topology';
+import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, NodeMobility, PathHealth, LastHopNeighbor } from '@/lib/mesh-topology';
 import { deserializePathRegistry, createEmptyPathRegistry, type PathRegistry, type ObservedPath } from '@/lib/path-registry';
 import type { 
   TopologyWorkerRequest, 
@@ -17,7 +17,7 @@ import type {
 } from '@/lib/workers/topology.worker';
 
 // Re-export for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth, LastHopNeighbor };
 
 /** Listener for topology changes */
 export type TopologyListener = (topology: MeshTopology, computeTimeMs: number) => void;
@@ -53,6 +53,8 @@ function deserializeTopology(serialized: SerializedTopology): MeshTopology {
     mobileNodes: serialized.mobileNodes ?? [],
     // Phase 7: Path health indicators
     pathHealth: serialized.pathHealth ?? [],
+    // Last-hop neighbors (ground truth from packet paths)
+    lastHopNeighbors: serialized.lastHopNeighbors ?? [],
   };
 }
 
@@ -85,6 +87,8 @@ function createEmptyTopology(): MeshTopology {
     mobileNodes: [],
     // Phase 7: Path health indicators
     pathHealth: [],
+    // Last-hop neighbors (ground truth from packet paths)
+    lastHopNeighbors: [],
   };
 }
 

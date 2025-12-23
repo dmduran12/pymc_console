@@ -264,6 +264,27 @@ export interface PathHealth {
   involvesHub: boolean;
 }
 
+/**
+ * A neighbor identified by appearing as the last hop in packet paths.
+ * This is ground truth: they forwarded packets directly to our local node.
+ */
+export interface LastHopNeighbor {
+  /** Full hash of the neighbor (resolved from prefix via disambiguation) */
+  hash: string;
+  /** 2-char prefix as seen in packet paths */
+  prefix: string;
+  /** Number of times this node was the last hop */
+  count: number;
+  /** Disambiguation confidence (0-1) */
+  confidence: number;
+  /** Average RSSI of packets received via this neighbor */
+  avgRssi: number | null;
+  /** Average SNR of packets received via this neighbor */
+  avgSnr: number | null;
+  /** Most recent packet timestamp from this neighbor */
+  lastSeen: number;
+}
+
 /** Result of topology analysis */
 export interface MeshTopology {
   /** All edges with 3+ validations */
@@ -324,6 +345,14 @@ export interface MeshTopology {
   // === PHASE 7: Path Health Indicators ===
   /** Health metrics for top observed paths */
   pathHealth: PathHealth[];
+  
+  // === LAST-HOP NEIGHBORS (Ground Truth) ===
+  /** 
+   * Neighbors identified by appearing as the last hop in packet paths.
+   * This is ground truth from actual traffic: these nodes forwarded packets directly to us.
+   * Sorted by count descending (most traffic first).
+   */
+  lastHopNeighbors: LastHopNeighbor[];
 }
 
 interface EdgeAccumulator {
@@ -1621,6 +1650,22 @@ export function buildMeshTopology(
   const nodeBridgeCounts = new Map<string, number>(); // How many times node is in middle of path
   const nodeGatewayCounts = new Map<string, number>(); // How many times node is at position 1 (last hop to local)
   
+  // === LAST-HOP NEIGHBOR TRACKING ===
+  // Track all prefixes that appear as last hop with signal quality data
+  // This is ground truth: these are nodes that forwarded packets directly to us
+  interface LastHopPrefixAccumulator {
+    prefix: string;
+    count: number;
+    rssiSum: number;
+    rssiCount: number;  // Count of valid RSSI values
+    snrSum: number;
+    snrCount: number;   // Count of valid SNR values
+    lastSeen: number;
+    // Track which full hashes this prefix resolved to (with confidence)
+    resolvedHashes: Map<string, { count: number; confidenceSum: number }>;
+  }
+  const lastHopPrefixData = new Map<string, LastHopPrefixAccumulator>();
+  
   // Current time for recency calculations (compute once per topology build)
   const nowTimestamp = Math.floor(Date.now() / 1000);
   
@@ -1773,6 +1818,34 @@ export function buildMeshTopology(
       const lastHopIndex = effectiveLength - 1;
       const lastHopPrefix = effectivePath[lastHopIndex];
       
+      // === TRACK LAST-HOP PREFIX DATA (before disambiguation) ===
+      // This captures ALL prefixes that appear as last hop, with signal quality
+      // The prefix is ground truth; disambiguation resolves which node it is
+      const existingPrefixData = lastHopPrefixData.get(lastHopPrefix);
+      if (existingPrefixData) {
+        existingPrefixData.count++;
+        if (typeof packet.rssi === 'number' && !isNaN(packet.rssi)) {
+          existingPrefixData.rssiSum += packet.rssi;
+          existingPrefixData.rssiCount++;
+        }
+        if (typeof packet.snr === 'number' && !isNaN(packet.snr)) {
+          existingPrefixData.snrSum += packet.snr;
+          existingPrefixData.snrCount++;
+        }
+        existingPrefixData.lastSeen = Math.max(existingPrefixData.lastSeen, packet.timestamp ?? 0);
+      } else {
+        lastHopPrefixData.set(lastHopPrefix, {
+          prefix: lastHopPrefix,
+          count: 1,
+          rssiSum: typeof packet.rssi === 'number' && !isNaN(packet.rssi) ? packet.rssi : 0,
+          rssiCount: typeof packet.rssi === 'number' && !isNaN(packet.rssi) ? 1 : 0,
+          snrSum: typeof packet.snr === 'number' && !isNaN(packet.snr) ? packet.snr : 0,
+          snrCount: typeof packet.snr === 'number' && !isNaN(packet.snr) ? 1 : 0,
+          lastSeen: packet.timestamp ?? 0,
+          resolvedHashes: new Map(),
+        });
+      }
+      
       // Resolve the last hop using disambiguation system
       // Position 1 = last forwarder (closest to local)
       const lastHopResult = resolvePrefix(prefixLookup, lastHopPrefix, {
@@ -1780,6 +1853,21 @@ export function buildMeshTopology(
         adjacentPrefixes: lastHopIndex > 0 ? [effectivePath[lastHopIndex - 1]] : [],
         isLastHop: true,
       });
+      
+      // Track which hash this prefix resolved to (for later aggregation)
+      if (lastHopResult.hash) {
+        const prefixData = lastHopPrefixData.get(lastHopPrefix)!;
+        const existingHashData = prefixData.resolvedHashes.get(lastHopResult.hash);
+        if (existingHashData) {
+          existingHashData.count++;
+          existingHashData.confidenceSum += lastHopResult.confidence;
+        } else {
+          prefixData.resolvedHashes.set(lastHopResult.hash, {
+            count: 1,
+            confidenceSum: lastHopResult.confidence,
+          });
+        }
+      }
       
       if (lastHopResult.hash && lastHopResult.hash !== localHash) {
         // This edge touches local directly - hop distance = 0
@@ -2179,6 +2267,61 @@ export function buildMeshTopology(
     })));
   }
   
+  // === BUILD LAST-HOP NEIGHBORS ARRAY ===
+  // Convert collected prefix data into LastHopNeighbor objects
+  // Each prefix that appeared as last hop becomes a neighbor entry
+  // Disambiguation resolves which full hash each prefix maps to
+  const lastHopNeighbors: LastHopNeighbor[] = [];
+  
+  for (const data of lastHopPrefixData.values()) {
+    // Find the most likely hash for this prefix (highest count with reasonable confidence)
+    let bestHash: string | null = null;
+    let bestScore = 0;
+    let bestConfidence = 0;
+    
+    for (const [hash, hashData] of data.resolvedHashes) {
+      // Skip local node
+      if (hash === localHash) continue;
+      
+      const avgConfidence = hashData.count > 0 ? hashData.confidenceSum / hashData.count : 0;
+      // Score combines count and confidence
+      const score = hashData.count * avgConfidence;
+      
+      if (score > bestScore) {
+        bestScore = score;
+        bestHash = hash;
+        bestConfidence = avgConfidence;
+      }
+    }
+    
+    if (bestHash) {
+      lastHopNeighbors.push({
+        hash: bestHash,
+        prefix: data.prefix,
+        count: data.count,
+        confidence: bestConfidence,
+        avgRssi: data.rssiCount > 0 ? data.rssiSum / data.rssiCount : null,
+        avgSnr: data.snrCount > 0 ? data.snrSum / data.snrCount : null,
+        lastSeen: data.lastSeen,
+      });
+    }
+  }
+  
+  // Sort by count descending (most traffic first)
+  lastHopNeighbors.sort((a, b) => b.count - a.count);
+  
+  // Log last-hop neighbors in development
+  if (process.env.NODE_ENV === 'development' && lastHopNeighbors.length > 0) {
+    console.log(`[mesh-topology] Last-hop neighbors (${lastHopNeighbors.length}):`, lastHopNeighbors.map(n => ({
+      prefix: n.prefix,
+      hash: n.hash.slice(0, 8),
+      count: n.count,
+      conf: n.confidence.toFixed(2),
+      rssi: n.avgRssi?.toFixed(0),
+      snr: n.avgSnr?.toFixed(1),
+    })));
+  }
+  
   return {
     edges, 
     validatedEdges: cappedEdges,
@@ -2206,6 +2349,8 @@ export function buildMeshTopology(
     mobileNodes,
     // Phase 7: Path health indicators
     pathHealth,
+    // Last-hop neighbors (ground truth from packet paths)
+    lastHopNeighbors,
   };
 }
 
