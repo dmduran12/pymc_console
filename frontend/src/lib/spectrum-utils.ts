@@ -423,7 +423,7 @@ export function drawSpectrogram(
   const data = img.data;
 
   // Threshold below which we consider "no signal" (transparent)
-  const threshold = 0.01;
+  const threshold = 0.005;
 
   for (let i = 0; i < blurredGrid.length; i++) {
     // Log-ish compression for dynamic range
@@ -449,8 +449,8 @@ export function drawSpectrogram(
     data[o + 0] = r;
     data[o + 1] = g;
     data[o + 2] = b;
-    // Alpha: stronger base, full opacity at high intensity
-    data[o + 3] = Math.round(255 * (0.6 + 0.4 * t));
+    // Alpha: high base opacity, fully opaque at high intensity
+    data[o + 3] = Math.round(255 * (0.75 + 0.25 * t));
   }
 
   // Draw the spectrogram image directly at native resolution
