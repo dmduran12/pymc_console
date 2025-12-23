@@ -1,11 +1,11 @@
 /**
- * Airtime Spectrum Analyzer Chart
+ * Airtime Spectrogram Chart
  * 
- * Hybrid visualization with:
- * - Layer 1 (Canvas): Spectrum analyzer showing spike intensity
+ * True spectrogram visualization with:
+ * - Layer 1 (Canvas): 2D intensity field with bilinear splat, blur, log compression
  * - Layer 2 (Recharts): Line chart showing avg trend + tooltip
  * 
- * The canvas layer ensures spikes are always visible regardless of zoom,
+ * The canvas layer shows utilization density over time (X=time, Y=util%, Color=energy),
  * while the Recharts layer provides interactivity and trend visualization.
  * 
  * This makes 1H and 7D views feel like the same instrument, just zoomed.
@@ -23,7 +23,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { UtilSample } from '@/lib/spectrum-utils';
-import { aggregateToColumns, drawSpectrum } from '@/lib/spectrum-utils';
+import { drawSpectrogram } from '@/lib/spectrum-utils';
 
 // Fixed colors as per spec: RX = green, TX = gray
 const RX_COLOR = '#39D98A';
@@ -155,7 +155,7 @@ function AirtimeSpectrumChartComponent({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
-  // Draw spectrum on canvas with ResizeObserver
+  // Draw spectrogram on canvas with ResizeObserver
   useEffect(() => {
     const el = wrapRef.current;
     const canvas = canvasRef.current;
@@ -177,15 +177,13 @@ function AirtimeSpectrumChartComponent({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Aggregate to pixel columns (one column per pixel = very spectrum-y)
-      const xBins = width;
-      const cols = aggregateToColumns(samples, startTs, endTs, xBins);
-
-      // Draw LED-style spectrum analyzer
-      drawSpectrum(ctx, cols, width, height, {
+      // Draw true spectrogram with bilinear splat, blur, log compression
+      drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
         yMax,
-        ledSteps: 24,
-        ledGap: 1,
+        gain: 8,
+        gamma: 0.6,
+        blurX: 4,
+        blurY: 2,
       });
     };
 
