@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
-import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
+import { useHubNodes, useCentrality, useLastHopNeighbors } from '@/lib/stores/useTopologyStore';
 import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
@@ -47,6 +47,7 @@ export default function Contacts() {
   const hideContact = useHideContact();
   const hubNodes = useHubNodes();
   const centrality = useCentrality();
+  const lastHopNeighbors = useLastHopNeighbors();
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
@@ -57,6 +58,9 @@ export default function Contacts() {
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Neighbors-only filter toggle
+  const [showNeighborsOnly, setShowNeighborsOnly] = useState(false);
   
   // Selected node for zoom-to-map
   const [selectedNodeHash, setSelectedNodeHash] = useState<string | null>(null);
@@ -100,19 +104,39 @@ export default function Contacts() {
     return distances;
   }, [visibleContacts, localNode]);
   
-  // Filter contacts based on search query
+  // Build set of neighbor hashes for efficient lookup
+  const neighborHashSet = useMemo(() => {
+    return new Set(lastHopNeighbors.map(n => n.hash));
+  }, [lastHopNeighbors]);
+  
+  // Filter contacts based on search query and neighbors toggle
   const filteredContacts = useMemo(() => {
-    if (!searchQuery.trim()) return visibleContacts;
-    
     const query = searchQuery.toLowerCase().trim();
+    
+    // Check if search query is "neighbor" or "neighbors" - treat as filter
+    const isNeighborSearch = query === 'neighbor' || query === 'neighbors';
+    const shouldFilterNeighbors = showNeighborsOnly || isNeighborSearch;
+    
     return Object.fromEntries(
       Object.entries(visibleContacts).filter(([hash, contact]) => {
+        // If neighbors-only filter is active, check membership first
+        if (shouldFilterNeighbors && !neighborHashSet.has(hash)) {
+          return false;
+        }
+        
+        // If filtering by neighbors keyword, skip text search
+        if (isNeighborSearch) return true;
+        
+        // If no search query, show all (that passed neighbor filter)
+        if (!query) return true;
+        
+        // Text search on name, prefix, and full hash
         const name = (contact.node_name || contact.name || '').toLowerCase();
         const prefix = hash.slice(2, 4).toLowerCase(); // Extract 2-char prefix from hash
         return name.includes(query) || prefix.includes(query) || hash.toLowerCase().includes(query);
       })
     );
-  }, [visibleContacts, searchQuery]);
+  }, [visibleContacts, searchQuery, showNeighborsOnly, neighborHashSet]);
   
   // Sort contacts based on current sort field and direction
   const sortedContacts = useMemo(() => {
@@ -229,8 +253,28 @@ export default function Contacts() {
           
           {/* Search and sort controls */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Neighbors filter toggle */}
+            {lastHopNeighbors.length > 0 && (
+              <button
+                onClick={() => setShowNeighborsOnly(!showNeighborsOnly)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors min-h-[32px] order-1 sm:order-1 ${
+                  showNeighborsOnly
+                    ? 'bg-accent-success/20 text-accent-success border border-accent-success/30'
+                    : 'text-text-muted hover:text-text-secondary hover:bg-white/5 border border-transparent'
+                }`}
+                title={showNeighborsOnly ? 'Show all contacts' : 'Show only MeshCore neighbors (direct RF contact)'}
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Neighbors</span>
+                <span className="sm:hidden">{lastHopNeighbors.length}</span>
+                {showNeighborsOnly && (
+                  <span className="text-[10px] font-semibold tabular-nums">{neighborHashSet.size}</span>
+                )}
+              </button>
+            )}
+            
             {/* Search bar */}
-            <div className="relative order-2 sm:order-1">
+            <div className="relative order-2 sm:order-2">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
               <input
                 type="text"
@@ -241,7 +285,13 @@ export default function Contacts() {
               />
               {searchQuery && (
                 <button
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => {
+                    setSearchQuery('');
+                    // If search was "neighbor(s)", also clear the toggle
+                    if (searchQuery.toLowerCase().trim() === 'neighbor' || searchQuery.toLowerCase().trim() === 'neighbors') {
+                      setShowNeighborsOnly(false);
+                    }
+                  }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary p-0.5"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -307,6 +357,7 @@ export default function Contacts() {
                                   contact.latitude !== 0 && contact.longitude !== 0;
               const displayName = contact.node_name || contact.name || 'Unknown';
               const isHub = hubNodeSet.has(hash);
+              const isNeighbor = neighborHashSet.has(hash);
               const distance = contactDistances.get(hash);
               const nodeCentrality = centrality.get(hash) || 0;
               
@@ -332,6 +383,11 @@ export default function Contacts() {
                     <div className="roster-content">
                       <div className="flex items-center gap-2">
                         <span className="roster-title">{displayName}</span>
+                        {isNeighbor && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: 'rgba(57, 217, 138, 0.2)', color: '#39D98A' }}>
+                            NBR
+                          </span>
+                        )}
                         {isHub && (
                           <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded flex items-center gap-1" style={{ backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#FBBF24' }}>
                             <Network className="w-3 h-3" />
