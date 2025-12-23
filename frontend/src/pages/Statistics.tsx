@@ -18,116 +18,142 @@ import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 // Airtime Utilization Data Processing
 // ============================================================================
 
-/** Always use 5-second buckets for fine-grained spike detection */
-const RAW_BUCKET_DURATION_SECONDS = 5;
+/**
+ * CANONICAL UTILIZATION DEFINITION:
+ * 
+ *   util% = (Σ airtime_ms in interval) / (interval_duration_ms) × 100
+ * 
+ * This is a time-weighted average that stays consistent across zoom levels.
+ * 
+ * Key principles:
+ * 1. Sum airtime over the interval (not average of per-point percentages)
+ * 2. Missing data = null (not 0) - prevents dragging down mean
+ * 3. Weighted rollup: bucket_util = Σairtime / Σvalid_duration
+ */
 
-/** Max display points - downsample to this if raw buckets exceed it */
+/** Max display points - rollup to this count */
 const MAX_DISPLAY_POINTS = 720;
 
-type DownsampleMode = 'max' | 'avg';
+/** Bucket duration targets by time range for consistent feel */
+const BUCKET_DURATIONS: Record<number, number> = {
+  1: 5,      // 1H: 5s buckets (720 points)
+  3: 15,    // 3H: 15s buckets (720 points)
+  12: 60,   // 12H: 1m buckets (720 points)
+  24: 120,  // 24H: 2m buckets (720 points)
+  72: 360,  // 3D: 6m buckets (720 points)
+  168: 840, // 7D: 14m buckets (720 points)
+};
 
 /**
- * Downsample bucket arrays with configurable aggregation.
- * 
- * @param buckets - Raw fine-grained buckets (e.g., 5-second intervals)
- * @param targetCount - Target number of display buckets (720)
- * @param bucketDurationSeconds - Duration of raw buckets in seconds
- * @param mode - 'max' preserves peaks (for RX), 'avg' shows patterns (for TX)
- * @returns Downsampled buckets
+ * Utilization point for chart display.
+ * null values represent gaps (no data) - chart will break the line.
  */
-function downsampleBuckets(
-  buckets: BucketData[],
-  targetCount: number,
-  bucketDurationSeconds: number,
-  mode: DownsampleMode = 'max'
-): { buckets: BucketData[]; displayBucketDurationSeconds: number } {
-  if (buckets.length <= targetCount) {
-    // No downsampling needed
-    return { buckets, displayBucketDurationSeconds: bucketDurationSeconds };
-  }
-  
-  const ratio = buckets.length / targetCount;
-  const displayBucketDurationSeconds = bucketDurationSeconds * ratio;
-  const result: BucketData[] = [];
-  
-  for (let i = 0; i < targetCount; i++) {
-    const startIdx = Math.floor(i * ratio);
-    const endIdx = Math.floor((i + 1) * ratio);
-    const slice = buckets.slice(startIdx, endIdx);
-    
-    if (slice.length === 0) continue;
-    
-    const totalCount = slice.reduce((sum, b) => sum + b.count, 0);
-    
-    // Aggregate airtime based on mode
-    let airtime: number;
-    if (mode === 'max') {
-      // MAX preserves spikes - use for RX (capacity planning)
-      airtime = Math.max(...slice.map(b => b.airtime_ms));
-    } else {
-      // AVG shows patterns - use for TX (organic traffic flow)
-      airtime = slice.reduce((sum, b) => sum + b.airtime_ms, 0) / slice.length;
-    }
-    
-    result.push({
-      bucket: i,
-      start: slice[0].start,
-      end: slice[slice.length - 1].end,
-      count: totalCount,
-      airtime_ms: airtime,
-      avg_snr: slice.reduce((sum, b) => sum + b.avg_snr * b.count, 0) / (totalCount || 1),
-      avg_rssi: slice.reduce((sum, b) => sum + b.avg_rssi * b.count, 0) / (totalCount || 1),
-    });
-  }
-  
-  return { buckets: result, displayBucketDurationSeconds };
+export interface UtilizationPoint {
+  time: string;
+  timestamp: number;
+  rxUtil: number | null;  // null = no data (gap)
+  txUtil: number | null;
 }
 
 /**
- * Process raw bucketed stats: downsample with appropriate aggregation per type
- * - RX: MAX (preserve spikes for capacity planning)
- * - TX: AVG (show organic traffic patterns)
+ * Rollup buckets with proper time-weighted utilization.
+ * 
+ * For each output bucket:
+ *   - Sum all airtime_ms from input buckets with data
+ *   - Sum the duration of those buckets (not empty ones)
+ *   - util% = (total_airtime / total_valid_duration) × 100
+ * 
+ * Buckets with no data emit null (gaps in chart).
  */
-function processStatsForDisplay(rawStats: BucketedStats): BucketedStats {
-  // RX uses MAX to preserve spikes (capacity concern)
-  const { buckets: received, displayBucketDurationSeconds } = downsampleBuckets(
-    rawStats.received,
-    MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds,
-    'max'
-  );
+function rollupToUtilization(
+  rxBuckets: BucketData[],
+  txBuckets: BucketData[],  // transmitted + forwarded combined
+  rawBucketDurationMs: number,
+  targetCount: number
+): UtilizationPoint[] {
+  if (rxBuckets.length === 0) return [];
   
-  // TX uses AVG to show organic patterns (not every window's peak)
-  const { buckets: transmitted } = downsampleBuckets(
-    rawStats.transmitted,
-    MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds,
-    'avg'
-  );
+  const ratio = Math.max(1, rxBuckets.length / targetCount);
+  const result: UtilizationPoint[] = [];
   
-  const { buckets: forwarded } = downsampleBuckets(
-    rawStats.forwarded,
-    MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds,
-    'avg'
-  );
+  // Determine time format based on span
+  const totalHours = (rxBuckets.length * rawBucketDurationMs) / (1000 * 60 * 60);
+  const showDate = totalHours > 24;
   
-  const { buckets: dropped } = downsampleBuckets(
-    rawStats.dropped,
-    MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds,
-    'avg'
-  );
+  for (let i = 0; i < targetCount && i * ratio < rxBuckets.length; i++) {
+    const startIdx = Math.floor(i * ratio);
+    const endIdx = Math.min(Math.floor((i + 1) * ratio), rxBuckets.length);
+    const rxSlice = rxBuckets.slice(startIdx, endIdx);
+    const txSlice = txBuckets.slice(startIdx, endIdx);
+    
+    if (rxSlice.length === 0) continue;
+    
+    // Sum airtime and count valid buckets (those with any packets)
+    let rxAirtimeMs = 0;
+    let txAirtimeMs = 0;
+    let rxValidBuckets = 0;
+    let txValidBuckets = 0;
+    
+    for (let j = 0; j < rxSlice.length; j++) {
+      if (rxSlice[j].count > 0) {
+        rxAirtimeMs += rxSlice[j].airtime_ms;
+        rxValidBuckets++;
+      }
+      if (txSlice[j]?.count > 0) {
+        txAirtimeMs += txSlice[j].airtime_ms;
+        txValidBuckets++;
+      }
+    }
+    
+    // Time-weighted utilization: airtime / valid_duration
+    // null if no valid buckets (gap in data)
+    const rxValidDurationMs = rxValidBuckets * rawBucketDurationMs;
+    const txValidDurationMs = txValidBuckets * rawBucketDurationMs;
+    
+    const rxUtil = rxValidDurationMs > 0 
+      ? (rxAirtimeMs / rxValidDurationMs) * 100 
+      : null;
+    const txUtil = txValidDurationMs > 0 
+      ? (txAirtimeMs / txValidDurationMs) * 100 
+      : null;
+    
+    // Format timestamp
+    const date = new Date(rxSlice[0].start * 1000);
+    let time: string;
+    if (showDate) {
+      time = date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
+             ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    } else {
+      time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    
+    result.push({
+      time,
+      timestamp: rxSlice[0].start,
+      rxUtil,
+      txUtil,
+    });
+  }
   
-  return {
-    ...rawStats,
-    bucket_count: received.length,
-    bucket_duration_seconds: displayBucketDurationSeconds,
-    received,
-    transmitted,
-    forwarded,
-    dropped,
-  };
+  return result;
+}
+
+/**
+ * Combine transmitted and forwarded buckets into single TX array.
+ */
+function combineTxBuckets(transmitted: BucketData[], forwarded: BucketData[]): BucketData[] {
+  return transmitted.map((tx, i) => ({
+    ...tx,
+    count: tx.count + (forwarded[i]?.count ?? 0),
+    airtime_ms: tx.airtime_ms + (forwarded[i]?.airtime_ms ?? 0),
+  }));
+}
+
+/**
+ * Get optimal bucket duration for a time range.
+ */
+function getBucketDuration(hours: number): number {
+  return BUCKET_DURATIONS[hours] ?? Math.ceil((hours * 3600) / MAX_DISPLAY_POINTS);
 }
 
 // ============================================================================
@@ -148,18 +174,16 @@ export default function Statistics() {
   const timeRange = STATISTICS_TIME_RANGES[debouncedRange].hours;
   const timeRangeMinutes = timeRange * 60;
   
-  // Calculate raw bucket count for 5-second intervals
-  // 1h  → 720 buckets × 5s = 3600s (no downsampling)
-  // 3h  → 2160 buckets → downsample to 720
-  // 7d  → 120960 buckets → downsample to 720
-  const rawBucketCount = Math.ceil((timeRangeMinutes * 60) / RAW_BUCKET_DURATION_SECONDS);
+  // Get bucket duration for this time range
+  const bucketDurationSeconds = getBucketDuration(timeRange);
+  const bucketCount = Math.ceil((timeRangeMinutes * 60) / bucketDurationSeconds);
 
   useEffect(() => {
     async function fetchData() {
       setError(null);
       try {
         const [bucketedRes, packetTypeRes, noiseFloorRes] = await Promise.all([
-          api.getBucketedStats(timeRangeMinutes, rawBucketCount),
+          api.getBucketedStats(timeRangeMinutes, bucketCount),
           api.getPacketTypeGraphData(timeRange),
           api.getNoiseFloorHistory(timeRange),
         ]);
@@ -181,12 +205,20 @@ export default function Statistics() {
     }
 
     fetchData();
-  }, [timeRange, timeRangeMinutes, rawBucketCount]);
+  }, [timeRange, timeRangeMinutes, bucketCount]);
   
-  // Process raw stats: downsample to 720 points preserving max utilization
-  const bucketedStats = useMemo(() => {
-    if (!rawBucketedStats) return null;
-    return processStatsForDisplay(rawBucketedStats);
+  // Compute utilization points with proper time-weighted rollup
+  const utilizationData = useMemo((): UtilizationPoint[] => {
+    if (!rawBucketedStats) return [];
+    
+    const { received, transmitted, forwarded, bucket_duration_seconds } = rawBucketedStats;
+    const rawBucketDurationMs = bucket_duration_seconds * 1000;
+    
+    // Combine TX sources
+    const txBuckets = combineTxBuckets(transmitted, forwarded);
+    
+    // Rollup to display points with proper weighted utilization
+    return rollupToUtilization(received, txBuckets, rawBucketDurationMs, MAX_DISPLAY_POINTS);
   }, [rawBucketedStats]);
 
   // Poll utilization only, with intervals by range:
@@ -202,15 +234,15 @@ export default function Statistics() {
     }
   }, [timeRange]);
 
-  // Poll bucketed stats (received/forwarded/dropped/transmitted)
+  // Poll bucketed stats
   const pollBucketed = useCallback(async () => {
     try {
-      const res = await api.getBucketedStats(timeRangeMinutes, rawBucketCount);
+      const res = await api.getBucketedStats(timeRangeMinutes, bucketCount);
       if (res.success && res.data) setRawBucketedStats(res.data);
     } catch {
       // ignore polling errors
     }
-  }, [timeRangeMinutes, rawBucketCount]);
+  }, [timeRangeMinutes, bucketCount]);
 
   // Poll packet type distribution
   const pollPacketTypes = useCallback(async () => {
@@ -262,28 +294,18 @@ export default function Statistics() {
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
   
-  // Calculate RX utilization stats from RAW (5-second) buckets
-  // This ensures peak is calculated from fine-grained data, not downsampled
+  // Calculate RX utilization stats from the utilization data
+  // Uses proper time-weighted calculation
   const rxUtilStats = useMemo(() => {
-    const received = rawBucketedStats?.received;
-    const bucketDurationSeconds = rawBucketedStats?.bucket_duration_seconds ?? 0;
+    const validPoints = utilizationData.filter(p => p.rxUtil !== null);
+    if (validPoints.length === 0) return { peak: 0, mean: 0 };
     
-    if (!received || received.length === 0 || bucketDurationSeconds <= 0) {
-      return { peak: 0, mean: 0 };
-    }
-    
-    const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
-    
-    // Calculate util for each raw bucket
-    const utils = received.map(bucket => 
-      (bucket.airtime_ms / maxAirtimePerBucketMs) * 100
-    );
-    
-    const peak = Math.max(...utils, 0);
-    const mean = utils.length > 0 ? utils.reduce((a, b) => a + b, 0) / utils.length : 0;
+    const rxValues = validPoints.map(p => p.rxUtil!);
+    const peak = Math.max(...rxValues);
+    const mean = rxValues.reduce((a, b) => a + b, 0) / rxValues.length;
     
     return { peak, mean };
-  }, [rawBucketedStats?.received, rawBucketedStats?.bucket_duration_seconds]);
+  }, [utilizationData]);
 
   return (
     <div className="section-gap">
@@ -331,14 +353,8 @@ export default function Statistics() {
                   <span className="pill-tag">{currentRange.label}</span>
                 </div>
               </div>
-              {bucketedStats?.received && bucketedStats.received.length > 0 ? (
-                <TrafficStackedChart
-                  received={bucketedStats.received}
-                  forwarded={bucketedStats.forwarded}
-                  transmitted={bucketedStats.transmitted}
-                  rawBucketDurationSeconds={RAW_BUCKET_DURATION_SECONDS}
-                  displayBucketDurationSeconds={bucketedStats.bucket_duration_seconds}
-                />
+              {utilizationData.length > 0 ? (
+                <TrafficStackedChart data={utilizationData} />
               ) : (
                 <div className="h-80 flex items-center justify-center text-text-muted">
                   No traffic data available
