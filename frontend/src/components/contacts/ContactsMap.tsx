@@ -34,6 +34,8 @@ const DESIGN = {
   mobileColor: '#F97316',      // Orange-500 - indicates volatile/mobile node
   // Room server indicator - amber/gold (chat/server functionality)
   roomServerColor: '#F59E0B',  // Amber-500 - indicates room server node
+  // Zero-hop neighbor - success green (direct RF contact)
+  neighborColor: '#39D98A',    // accent-success - matches forward button
   
   // ─── EDGE COLOR HIERARCHY ───────────────────────────────────────────────────
   // Designed for dark maps - subtle but distinguishable
@@ -48,6 +50,8 @@ const DESIGN = {
     direct: '#5EEAD4',         // Teal-300 - distinguishes verified routes
     // Loop edges (redundant paths) - subtle purple
     loop: '#6366F1',           // Indigo-500 - indicates redundancy
+    // Neighbor edges (direct RF contact) - success green
+    neighbor: '#39D98A',       // accent-success - matches neighbor markers
   },
   
   // Base opacity for edges (increased from 0.7 for better visibility)
@@ -280,18 +284,6 @@ interface ContactsMapProps {
   onNodeSelected?: () => void;  // Callback when selection is handled
   highlightedEdgeKey?: string | null; // Edge key to highlight (from PathHealth panel)
 }
-
-// Legacy signal colors (kept for popup display)
-const SIGNAL_COLORS = {
-  excellent: '#4CFFB5',
-  good: '#39D98A',
-  fair: '#F9D26F',
-  poor: '#FF8A5C',
-  critical: '#FF5C7A',
-  unknown: '#767688',
-  localNode: DESIGN.localColor,
-  zeroHop: DESIGN.nodeColor,
-};
 
 /**
  * Calculate mean SNR from packets for a given source hash.
@@ -528,8 +520,8 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
           <span 
             className="px-1 py-px text-[8px] font-bold uppercase rounded"
             style={{ 
-              backgroundColor: isZeroHop ? SIGNAL_COLORS.zeroHop : 'rgba(255,255,255,0.08)', 
-              color: isZeroHop ? '#fff' : 'rgba(255,255,255,0.5)' 
+              backgroundColor: isZeroHop ? DESIGN.neighborColor : 'rgba(255,255,255,0.08)', 
+              color: isZeroHop ? '#000' : 'rgba(255,255,255,0.5)' 
             }}
           >
             {hopLabel}
@@ -780,6 +772,39 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     return lines;
   }, [meshTopology, nodeCoordinates]);
+  
+  // Generate polylines for neighbor edges (direct RF links from local to zero-hop neighbors)
+  // These are ALWAYS visible - not gated by topology toggle - since they represent real API neighbor data
+  const neighborPolylines = useMemo(() => {
+    const lines: Array<{
+      from: [number, number];
+      to: [number, number];
+      hash: string;  // neighbor hash for link quality lookup
+      neighbor: NeighborInfo;
+    }> = [];
+    
+    // Get local node coordinates
+    const localCoords = nodeCoordinates.get('local');
+    if (!localCoords) return lines;
+    
+    // Draw lines to all zero-hop neighbors with coordinates
+    for (const neighborHash of zeroHopNeighbors) {
+      const neighborCoords = nodeCoordinates.get(neighborHash);
+      if (!neighborCoords) continue;
+      
+      const neighbor = neighbors[neighborHash];
+      if (!neighbor) continue;
+      
+      lines.push({
+        from: localCoords,
+        to: neighborCoords,
+        hash: neighborHash,
+        neighbor,
+      });
+    }
+    
+    return lines;
+  }, [nodeCoordinates, zeroHopNeighbors, neighbors]);
   
   // Collect all positions for bounds fitting
   const allPositions = useMemo(() => {
@@ -1879,6 +1904,56 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
+        {/* Draw neighbor edges (direct RF links to local) - green, always visible */}
+        {/* Weight based on signal strength: higher RSSI = thicker line */}
+        {neighborPolylines.map(({ from, to, hash, neighbor }) => {
+          const name = neighbor.node_name || neighbor.name || hash.slice(0, 8);
+          const snr = neighbor.snr;
+          const rssi = neighbor.rssi;
+          
+          // Weight scales with RSSI: -50 dBm = 4px, -120 dBm = 1.5px
+          const minWeight = 1.5;
+          const maxWeight = 4;
+          const minRssi = -120;
+          const maxRssi = -50;
+          let weight = minWeight;
+          if (rssi !== undefined) {
+            const normalized = Math.max(0, Math.min(1, (rssi - minRssi) / (maxRssi - minRssi)));
+            weight = minWeight + normalized * (maxWeight - minWeight);
+          }
+          
+          return (
+            <Polyline
+              key={`neighbor-edge-${hash}`}
+              positions={[from, to]}
+              pathOptions={{
+                color: DESIGN.edges.neighbor,
+                weight,
+                opacity: 0.75,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            >
+              <Tooltip
+                permanent={false}
+                direction="auto"
+                className="topology-edge-tooltip"
+              >
+                <div className="text-xs">
+                  <div className="font-medium text-text-primary">
+                    <span className="text-accent-success">●</span> {name}
+                  </div>
+                  <div className="text-text-secondary flex gap-2">
+                    {rssi !== undefined && <span>RSSI: {rssi} dBm</span>}
+                    {snr !== undefined && <span>SNR: {snr.toFixed(1)} dB</span>}
+                  </div>
+                  <div className="text-accent-success text-[10px] mt-0.5">Direct RF neighbor</div>
+                </div>
+              </Tooltip>
+            </Polyline>
+          );
+        })}
+        
         {/* Neighbor markers - rings for standard nodes, filled for hubs */}
         {/* Use neighborsWithLocation for fade animation, but apply visibility rules */}
         {neighborsWithLocation.map(([hash, neighbor]) => {
@@ -1937,9 +2012,10 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             || neighbor.contact_type?.toLowerCase() === 'server';
           
           // Icon selection with opacity and hover state:
-          // Priority: Room Server > Hub > Mobile > Standard
+          // Priority: Room Server > Hub > Zero-hop Neighbor > Mobile > Standard
           // - Room servers: amber chat bubble icon (service node)
           // - Hubs: filled dot (indicates importance)
+          // - Zero-hop neighbors: green ring (direct RF contact)
           // - Mobile nodes: orange ring (indicates volatile/moving)
           // - All other nodes: ring/torus in standard color (elegant, minimal)
           // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
@@ -1948,10 +2024,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const icon = isRoomServer
             ? createRoomServerIcon(quantizedOpacity, isNodeHovered)
             : isHub 
-              ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered) 
-              : isMobile
-                ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered)
-                : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered);
+              ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered)
+              : isZeroHop
+                ? createRingIcon(DESIGN.neighborColor, quantizedOpacity, isNodeHovered)
+                : isMobile
+                  ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered)
+                  : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered);
           
           // Use quantized opacity and hover state in key to force icon update
           const opacityKey = Math.round(quantizedOpacity * 20);

@@ -1619,6 +1619,7 @@ export function buildMeshTopology(
   // Track node appearances for centrality calculation
   const nodePathCounts = new Map<string, number>(); // How many paths include this node
   const nodeBridgeCounts = new Map<string, number>(); // How many times node is in middle of path
+  const nodeGatewayCounts = new Map<string, number>(); // How many times node is at position 1 (last hop to local)
   
   // Current time for recency calculations (compute once per topology build)
   const nowTimestamp = Math.floor(Date.now() / 1000);
@@ -1797,6 +1798,11 @@ export function buildMeshTopology(
         // Track for centrality
         nodesInPath.add(lastHopResult.hash);
         nodesInPath.add(localHash);
+        
+        // Track gateway count (node at position 1 = last hop to local)
+        // This is used for "gateway hub" detection - nodes that forward lots of traffic
+        // directly to local but don't appear in the middle of paths
+        nodeGatewayCounts.set(lastHopResult.hash, (nodeGatewayCounts.get(lastHopResult.hash) || 0) + 1);
       }
     }
     
@@ -1914,20 +1920,58 @@ export function buildMeshTopology(
     }
   }
   
-  // Identify hub nodes using the 3+ validation baseline
-  // Hub = appears in at least 3 validated paths AND has high centrality
+  // Identify hub nodes using TWO criteria:
+  // 1. Bridge hubs: nodes that appear in the MIDDLE of many paths (high betweenness centrality)
+  // 2. Gateway hubs: nodes at position 1 (last hop to local) with high traffic volume
+  //
+  // The second criterion fixes a bug where gateway nodes that forward lots of traffic
+  // to local but never appear in the middle of paths were not identified as hubs.
   const minPathsForHub = Math.max(MIN_EDGE_VALIDATIONS, Math.floor(packets.length * 0.01)); // At least 3 or 1% of packets
-  const hubNodes: string[] = [];
+  const hubNodesSet = new Set<string>();
+  
+  // === BRIDGE HUBS: High betweenness centrality ===
   const sortedByCentrality = [...centrality.entries()]
     .filter(([hash, _]) => (nodePathCounts.get(hash) || 0) >= minPathsForHub)
     .sort((a, b) => b[1] - a[1]);
   
-  // Take nodes with centrality >= 0.5 (normalized) as hubs
+  // Take nodes with centrality >= 0.5 (normalized) as bridge hubs
   for (const [hash, score] of sortedByCentrality) {
     if (score >= 0.5) {
-      hubNodes.push(hash);
+      hubNodesSet.add(hash);
     }
   }
+  
+  // === GATEWAY HUBS: High traffic at position 1 (last hop to local) ===
+  // These nodes may have zero bridge count (never in middle of paths) but still
+  // forward significant traffic directly to the local node.
+  //
+  // Gateway hub threshold: forwarded at least 5% of all packets as last hop
+  // OR forwarded at least 100 packets as last hop (whichever is lower)
+  const minGatewayPackets = Math.min(100, Math.floor(packets.length * 0.05));
+  const maxGatewayCount = Math.max(...nodeGatewayCounts.values(), 1);
+  
+  for (const [hash, gatewayCount] of nodeGatewayCounts) {
+    // Skip local node
+    if (hash === localHash) continue;
+    
+    // Already identified as a bridge hub
+    if (hubNodesSet.has(hash)) continue;
+    
+    // Gateway hub if:
+    // 1. Forwarded significant traffic as last hop, OR
+    // 2. Is the dominant gateway (handles >50% of last-hop traffic)
+    const gatewayRatio = gatewayCount / maxGatewayCount;
+    if (gatewayCount >= minGatewayPackets || gatewayRatio >= 0.5) {
+      hubNodesSet.add(hash);
+      // Also set centrality for gateway hubs based on gateway traffic share
+      // This ensures they appear properly in centrality-based UI elements
+      const gatewayCentrality = gatewayCount / (nodePathCounts.get(hash) || gatewayCount);
+      const existingCentrality = centrality.get(hash) || 0;
+      centrality.set(hash, Math.max(existingCentrality, gatewayCentrality));
+    }
+  }
+  
+  const hubNodes = Array.from(hubNodesSet);
   
   // Convert accumulators to edges
   // Only include edges with MIN_EDGE_VALIDATIONS (5+) certain observations
