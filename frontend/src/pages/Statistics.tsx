@@ -25,9 +25,9 @@ import { combineTxBuckets, toUtilSamples, type UtilSample } from '@/lib/spectrum
  * Peak utilization is always measured over this fixed window, regardless of
  * time range. This ensures "17% spike" means the same thing in 1H and 7D views.
  * 
- * W = 2s for high resolution on short timeframes
+ * W = 0.5s (500ms) for maximum resolution
  */
-const SPIKE_WINDOW_SECONDS = 2;
+const SPIKE_WINDOW_SECONDS = 0.5;
 
 /**
  * MAX BUCKETS TO FETCH
