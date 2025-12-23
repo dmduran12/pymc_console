@@ -448,9 +448,8 @@ export function drawSpectrogram(
   const values = Array.from(blurredGrid).filter(v => v > 0);
   values.sort((a, b) => a - b);
   
-  // Use lower percentile for sparse data, higher for dense
-  const density = values.length / (chartWidth * chartHeight);
-  const percentile = density > 0.3 ? 0.99 : density > 0.1 ? 0.95 : 0.20;
+  // Use p99 for robust max (outlier rejection)
+  const percentile = 0.99;
   const pMax = values[Math.floor(values.length * percentile)] || 1;
   
   // Also compute median for floor calculation
