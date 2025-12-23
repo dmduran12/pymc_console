@@ -3,14 +3,16 @@
  * 
  * Displays TX/RX airtime utilization as clean line charts.
  * 
- * Data source: BucketData from getBucketedStats() which includes pre-computed
- * airtime_ms using proper LoRa Semtech formula (see lib/airtime.ts).
+ * Accepts pre-computed UtilizationPoint[] data with proper time-weighted
+ * utilization calculation: util% = Σairtime / Σinterval_duration × 100
+ * 
+ * null values represent gaps (no data) - shown as breaks in line.
  * 
  * Colors:
  * - RX Airtime: Green (#39D98A) - time spent receiving
  * - TX Airtime: Gray (#B0B0C3) - time spent transmitting
  * 
- * Y-axis: Dynamic range based on max utilization in data set
+ * Y-axis: Fixed at 0-30% for consistent feel across time ranges
  */
 
 import { memo, useMemo } from 'react';
@@ -24,25 +26,20 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import type { BucketData } from '@/lib/api';
+import type { UtilizationPoint } from '@/pages/Statistics';
 
 // Fixed colors as per spec: RX = green, TX = gray
 const RX_COLOR = '#39D98A'; // Green - semantic positive
 const TX_COLOR = '#B0B0C3'; // Gray - neutral
 
+// Fixed Y-axis domain for consistent feel across time ranges
+const Y_AXIS_MAX = 30; // 30% - reasonable ceiling for LoRa mesh
+
 export interface TrafficStackedChartProps {
-  received: BucketData[];
-  forwarded: BucketData[];
-  transmitted?: BucketData[];
-  /** 
-   * Duration of the RAW bucket (before downsampling) in seconds.
-   * Used to calculate utilization percentage correctly.
-   * After downsampling, airtime_ms represents MAX from any raw bucket,
-   * so we must calculate util as: airtime_ms / (rawBucketDurationSeconds * 1000)
-   */
-  rawBucketDurationSeconds?: number;
-  /** Display bucket duration (for time axis formatting) */
-  displayBucketDurationSeconds?: number;
+  /** Pre-computed utilization points with proper time-weighted values */
+  data: UtilizationPoint[];
+  /** Optional fixed Y-axis max (default 30%) */
+  yAxisMax?: number;
 }
 
 /**
@@ -74,7 +71,7 @@ function UtilTooltip({
           />
           <span className="text-text-muted">{entry.name}:</span>
           <span className="text-text-primary tabular-nums font-mono">
-            {entry.value!.toFixed(3)}%
+            {entry.value!.toFixed(2)}%
           </span>
         </div>
       ))}
@@ -104,127 +101,36 @@ function UtilLegend({ payload }: { payload?: Array<{ value: string; color: strin
 }
 
 /**
- * Apply Exponential Moving Average (EMA) smoothing to a series.
- * Returns null for gaps (where input is 0 or null).
- * 
- * @param values - Raw values (0 treated as gap)
- * @param alpha - Smoothing factor (0.2 = slow/smooth, 0.5 = responsive)
- */
-function applyEMA(values: number[], alpha = 0.2): (number | null)[] {
-  const result: (number | null)[] = [];
-  let ema: number | null = null;
-  
-  for (const val of values) {
-    // Treat 0 as a gap (no data)
-    if (val === 0) {
-      result.push(null);
-      // Don't reset EMA - continue from last value when data resumes
-      continue;
-    }
-    
-    if (ema === null) {
-      // First non-zero value initializes EMA
-      ema = val;
-    } else {
-      // EMA formula: new = alpha * current + (1 - alpha) * previous
-      ema = alpha * val + (1 - alpha) * ema;
-    }
-    result.push(ema);
-  }
-  
-  return result;
-}
-
-/**
  * Airtime Utilization Line Chart
  * 
- * Displays smoothed utilization trends using EMA.
- * Gaps (no traffic) shown as breaks in the line.
- * 
- * Y-axis dynamically scales based on max value in dataset.
+ * Displays utilization with:
+ * - Pre-computed time-weighted values (no internal calculation)
+ * - null gaps shown as line breaks (connectNulls=false)
+ * - Fixed Y-axis (0-30%) for consistent feel across zoom levels
+ * - Monotone interpolation for smooth curves
  */
 function TrafficStackedChartComponent({
-  received,
-  forwarded,
-  transmitted,
-  rawBucketDurationSeconds = 5,
-  displayBucketDurationSeconds = 60,
+  data,
+  yAxisMax = Y_AXIS_MAX,
 }: TrafficStackedChartProps) {
-  // EMA smoothing factor - 0.2 gives smooth trend lines
-  const EMA_ALPHA = 0.2;
-  
-  // Utilization is calculated against the RAW bucket duration
-  // because airtime_ms represents the MAX from any raw bucket, not a sum
-  const maxAirtimePerRawBucketMs = rawBucketDurationSeconds * 1000;
-  
-  // Transform bucket data for chart with TX/RX util calculation
-  const chartData = useMemo(() => {
-    if (!received || received.length === 0 || maxAirtimePerRawBucketMs <= 0) {
-      return [];
-    }
-    
-    // Determine time format based on data span
-    const totalMinutes = (received.length * displayBucketDurationSeconds) / 60;
-    const showDate = totalMinutes > 1440; // More than 24 hours
-    
-    // Calculate raw utilization values first
-    const rawRxUtils: number[] = [];
-    const rawTxUtils: number[] = [];
-    const times: string[] = [];
-    
-    for (let i = 0; i < received.length; i++) {
-      const bucket = received[i];
-      const date = new Date(bucket.start * 1000);
-      
-      if (showDate) {
-        times.push(
-          date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
-          ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-        );
-      } else {
-        times.push(date.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }));
-      }
-      
-      // RX utilization
-      rawRxUtils.push((bucket.airtime_ms / maxAirtimePerRawBucketMs) * 100);
-      
-      // TX utilization
-      const txAirtimeMs = (transmitted?.[i]?.airtime_ms ?? 0) + (forwarded[i]?.airtime_ms ?? 0);
-      rawTxUtils.push((txAirtimeMs / (displayBucketDurationSeconds * 1000)) * 100);
-    }
-    
-    // Apply EMA smoothing (gaps become null)
-    const smoothedRx = applyEMA(rawRxUtils, EMA_ALPHA);
-    const smoothedTx = applyEMA(rawTxUtils, EMA_ALPHA);
-    
-    // Build final chart data
-    return times.map((time, i) => ({
-      time,
-      rxUtil: smoothedRx[i],
-      txUtil: smoothedTx[i],
-    }));
-  }, [received, forwarded, transmitted, maxAirtimePerRawBucketMs, displayBucketDurationSeconds]);
+  // Calculate appropriate tick interval based on data points
+  const tickInterval = useMemo(() => 
+    Math.max(1, Math.floor(data.length / 10)), 
+    [data.length]
+  );
 
-  if (chartData.length === 0) {
+  if (data.length === 0) {
     return (
       <div className="h-80 flex items-center justify-center text-text-muted">
         No traffic data available
       </div>
     );
   }
-  
-  // Calculate appropriate tick interval based on data points
-  // Aim for ~10-12 ticks on x-axis for 1440 data points
-  const tickInterval = Math.max(1, Math.floor(chartData.length / 10));
 
   return (
     <div className="h-80">
       <ResponsiveContainer width="100%" height={320}>
-        <LineChart data={chartData}>
+        <LineChart data={data}>
           <CartesianGrid
             strokeDasharray="3 3"
             stroke="rgba(255,255,255,0.06)"
@@ -245,13 +151,13 @@ function TrafficStackedChartComponent({
             tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
             dx={-8}
             width={44}
-            tickFormatter={(v) => `${v.toFixed(1)}%`}
-            domain={[0, 'auto']}
+            tickFormatter={(v) => `${v.toFixed(0)}%`}
+            domain={[0, yAxisMax]}
           />
           <Tooltip content={<UtilTooltip />} />
           <Legend content={<UtilLegend />} />
           
-          {/* RX Utilization - Green, EMA smoothed */}
+          {/* RX Utilization - Green */}
           <Line
             type="monotone"
             dataKey="rxUtil"
@@ -263,7 +169,7 @@ function TrafficStackedChartComponent({
             isAnimationActive={false}
           />
           
-          {/* TX Utilization - Gray, EMA smoothed */}
+          {/* TX Utilization - Gray */}
           <Line
             type="monotone"
             dataKey="txUtil"
