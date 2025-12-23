@@ -21,8 +21,11 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, t
 import { getStats, getFilteredPackets } from '@/lib/api';
 import type { Packet, Stats, NeighborInfo } from '@/types/api';
 
-/** Refresh interval - 30s for all data (balance between freshness and load) */
-const REFRESH_INTERVAL = 30000;
+/** Fast refresh for real-time stats (noise floor, neighbors) */
+const REFRESH_INTERVAL_FAST = 3000; // 3 seconds
+
+/** Slow refresh for historical packet data (LBT trends) */
+const REFRESH_INTERVAL_SLOW = 60000; // 60 seconds
 
 /** Time window - 24 hours in seconds */
 const HOURS_24 = 24 * 60 * 60;
@@ -313,51 +316,74 @@ export function LBTDataProvider({ children }: LBTDataProviderProps) {
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Fetch stats and recent packets
+   * Fast poll: /api/stats for real-time noise floor and neighbor data
+   * This is lightweight and can poll every 3 seconds
    */
-  const fetchData = useCallback(async () => {
+  const fetchStats = useCallback(async () => {
     try {
-      const now = Math.floor(Date.now() / 1000);
-
-      // Fetch stats and 24h packets in parallel
-      const [statsRes, packetsRes] = await Promise.all([
-        getStats(),
-        getFilteredPackets({
-          start_timestamp: now - HOURS_24,
-          limit: 10000, // Should be enough for 24h
-        }),
-      ]);
-
+      const statsRes = await getStats();
       if (statsRes) {
         setStats(statsRes);
+        setError(null);
       }
+    } catch (err) {
+      // Don't clear packet data on stats error
+      if (!packets.length) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch stats');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [packets.length]);
+
+  /**
+   * Slow poll: 24h packets for LBT historical statistics
+   * This is heavier and polls every 60 seconds
+   */
+  const fetchPackets = useCallback(async () => {
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const packetsRes = await getFilteredPackets({
+        start_timestamp: now - HOURS_24,
+        limit: 10000,
+      });
 
       if (packetsRes.success && packetsRes.data) {
         setPackets(packetsRes.data);
       }
-
-      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch data');
-    } finally {
-      setIsLoading(false);
+      // Don't override stats error
+      if (!stats) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch packets');
+      }
     }
-  }, []);
+  }, [stats]);
 
   /**
-   * Manual refresh
+   * Manual refresh - fetches all data
    */
   const refresh = useCallback(async () => {
     setIsLoading(true);
-    await fetchData();
-  }, [fetchData]);
+    await Promise.all([fetchStats(), fetchPackets()]);
+  }, [fetchStats, fetchPackets]);
 
-  // Initial fetch and interval
+  // Initial fetch and separate intervals for fast/slow polling
   useEffect(() => {
-    void fetchData();
-    const interval = setInterval(() => void fetchData(), REFRESH_INTERVAL);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    // Initial fetch of both
+    void fetchStats();
+    void fetchPackets();
+
+    // Fast interval for stats (real-time: noise floor, neighbors)
+    const fastInterval = setInterval(() => void fetchStats(), REFRESH_INTERVAL_FAST);
+    
+    // Slow interval for packets (historical LBT data)
+    const slowInterval = setInterval(() => void fetchPackets(), REFRESH_INTERVAL_SLOW);
+
+    return () => {
+      clearInterval(fastInterval);
+      clearInterval(slowInterval);
+    };
+  }, [fetchStats, fetchPackets]);
 
   // Compute derived stats
   const lbtStats = useMemo(() => computeLBTStats(packets, 24), [packets]);
