@@ -120,6 +120,7 @@ function BarChart({
           start: slice[0]?.start ?? 0,
           end: slice[slice.length - 1]?.end ?? 0,
           count: totalCount,
+          airtime_ms: slice.reduce((sum, b) => sum + b.airtime_ms, 0),
           avg_snr: avgSnr,
           avg_rssi: 0,
         });

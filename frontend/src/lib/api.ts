@@ -1,6 +1,7 @@
 // API Client for pyMC Repeater backend
 // Features: SWR caching, request deduplication, background revalidation
 
+import { calculateAirtimeMs, radioConfigFromStats } from '@/lib/airtime';
 import type {
   Stats,
   Packet,
@@ -384,12 +385,21 @@ export async function getPacketTypeStats(hours = 24): Promise<ApiResponse<Record
   return fetchApi<ApiResponse<Record<string, number>>>(`/api/packet_type_stats?hours=${hours}`);
 }
 
-// Bucketed stats for dashboard visualization
+// ═══════════════════════════════════════════════════════════════════════════
+// Bucketed Stats for Airtime Utilization Chart
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Bucket data for airtime utilization visualization
+ * Includes both packet counts and total airtime for proper utilization calculation
+ */
 export interface BucketData {
   bucket: number;
   start: number;
   end: number;
   count: number;
+  /** Total airtime in milliseconds for all packets in this bucket */
+  airtime_ms: number;
   avg_snr: number;
   avg_rssi: number;
 }
@@ -406,7 +416,15 @@ export interface BucketedStats {
   dropped: BucketData[];
 }
 
-// Compute bucketed stats client-side from filtered_packets
+/**
+ * Compute bucketed stats client-side from filtered_packets
+ * 
+ * Uses proper LoRa airtime calculation (Semtech formula) for accurate
+ * TX/RX utilization percentages. Fetches stats to get radio config.
+ * 
+ * @param minutes - Time range in minutes
+ * @param bucketCount - Number of buckets (1440 recommended for high resolution)
+ */
 export async function getBucketedStats(minutes = 20, bucketCount = 20): Promise<ApiResponse<BucketedStats>> {
   try {
     const endTime = Math.floor(Date.now() / 1000);
@@ -418,20 +436,26 @@ export async function getBucketedStats(minutes = 20, bucketCount = 20): Promise<
     const estimatedPackets = Math.ceil((minutes / 60) * 1000);
     const limit = Math.max(5000, Math.min(estimatedPackets, 50000));
     
-    // Fetch packets for the time range
-    const response = await getFilteredPackets({
-      start_timestamp: startTime,
-      end_timestamp: endTime,
-      limit,
-    });
+    // Fetch packets and stats in parallel
+    const [packetsResponse, stats] = await Promise.all([
+      getFilteredPackets({
+        start_timestamp: startTime,
+        end_timestamp: endTime,
+        limit,
+      }),
+      getStats(),
+    ]);
     
-    if (!response.success || !response.data) {
-      return { success: false, error: response.error || 'Failed to fetch packets' };
+    if (!packetsResponse.success || !packetsResponse.data) {
+      return { success: false, error: packetsResponse.error || 'Failed to fetch packets' };
     }
     
-    const packets = response.data;
+    const packets = packetsResponse.data;
     
-    // Initialize buckets
+    // Get radio config for proper airtime calculation
+    const radioConfig = radioConfigFromStats(stats);
+    
+    // Initialize buckets with airtime_ms field
     const createEmptyBuckets = (): BucketData[] => {
       const buckets: BucketData[] = [];
       for (let i = 0; i < bucketCount; i++) {
@@ -440,6 +464,7 @@ export async function getBucketedStats(minutes = 20, bucketCount = 20): Promise<
           start: startTime + (i * bucketDuration),
           end: startTime + ((i + 1) * bucketDuration),
           count: 0,
+          airtime_ms: 0,
           avg_snr: 0,
           avg_rssi: 0,
         });
@@ -455,24 +480,32 @@ export async function getBucketedStats(minutes = 20, bucketCount = 20): Promise<
     // Track SNR/RSSI sums for averaging
     const rxSums = received.map(() => ({ snr: 0, rssi: 0, count: 0 }));
     
-    // Categorize packets into buckets
+    // Categorize packets into buckets and calculate airtime
     for (const pkt of packets) {
       const bucketIdx = Math.floor((pkt.timestamp - startTime) / bucketDuration);
       if (bucketIdx < 0 || bucketIdx >= bucketCount) continue;
+      
+      // Calculate airtime for this packet using proper LoRa formula
+      const pktLen = pkt.length || pkt.payload_length || 32;
+      const airtime = calculateAirtimeMs(pktLen, radioConfig);
       
       // Determine packet category
       const origin = pkt.packet_origin;
       if (origin === 'tx_local') {
         transmitted[bucketIdx].count++;
+        transmitted[bucketIdx].airtime_ms += airtime;
       } else if (origin === 'tx_forward' || pkt.transmitted) {
         forwarded[bucketIdx].count++;
+        forwarded[bucketIdx].airtime_ms += airtime;
       } else if (pkt.drop_reason) {
         dropped[bucketIdx].count++;
+        dropped[bucketIdx].airtime_ms += airtime;
       }
       
       // All non-local packets count as received
       if (origin !== 'tx_local') {
         received[bucketIdx].count++;
+        received[bucketIdx].airtime_ms += airtime;
         rxSums[bucketIdx].snr += pkt.snr || 0;
         rxSums[bucketIdx].rssi += pkt.rssi || 0;
         rxSums[bucketIdx].count++;
@@ -499,146 +532,6 @@ export async function getBucketedStats(minutes = 20, bucketCount = 20): Promise<
         transmitted,
         forwarded,
         dropped,
-      },
-    };
-  } catch (error) {
-    return { success: false, error: String(error) };
-  }
-}
-
-// Airtime utilization stats
-export interface UtilizationBin {
-  t: number; // bin start timestamp in ms
-  tx_airtime_ms: number;
-  rx_airtime_ms: number;
-  tx_pkts: number;
-  rx_pkts_ok: number;
-  tx_util_pct: number;
-  rx_util_decoded_pct: number;
-  radio_activity_pct: number;
-  avg_rx_airtime_ms_per_pkt: number;
-  avg_tx_airtime_ms_per_pkt: number;
-}
-
-export interface UtilizationStats {
-  bins: UtilizationBin[];
-  bin_duration_seconds: number;
-  hours: number;
-  anomaly_counters: {
-    missing_airtime_ms: number;
-    outlier_bins: number;
-  };
-}
-
-// Estimate airtime for a packet based on LoRa parameters
-// Matches the simplified calculation in pyMC_Repeater/repeater/airtime.py
-function estimateAirtimeMs(
-  payloadLen: number,
-  spreadingFactor: number = 8,
-  bandwidthHz: number = 125000
-): number {
-  const bwKhz = bandwidthHz / 1000;
-  const symbolTime = Math.pow(2, spreadingFactor) / bwKhz;
-  const preambleTime = 8 * symbolTime;
-  const payloadSymbols = (payloadLen + 4.25) * 8;
-  const payloadTime = payloadSymbols * symbolTime;
-  return preambleTime + payloadTime;
-}
-
-// Compute utilization stats client-side from filtered_packets and stats
-export async function getUtilizationStats(hours = 24): Promise<ApiResponse<UtilizationStats>> {
-  try {
-    const endTime = Math.floor(Date.now() / 1000);
-    const startTime = endTime - (hours * 3600);
-    const binDurationSeconds = 3600; // 1 hour bins
-    const binCount = hours;
-    
-    // Fetch packets and stats in parallel
-    const [packetsResponse, stats] = await Promise.all([
-      getFilteredPackets({
-        start_timestamp: startTime,
-        end_timestamp: endTime,
-        limit: 50000, // Large limit for 24h of data
-      }),
-      getStats(),
-    ]);
-    
-    if (!packetsResponse.success || !packetsResponse.data) {
-      return { success: false, error: packetsResponse.error || 'Failed to fetch packets' };
-    }
-    
-    const packets = packetsResponse.data;
-    
-    // Get radio config for airtime calculation
-    const sf = stats.config?.radio?.spreading_factor || 8;
-    const bw = (stats.config?.radio?.bandwidth || 125) * 1000; // bandwidth is in kHz, convert to Hz
-    
-    // Initialize bins
-    const bins: UtilizationBin[] = [];
-    for (let i = 0; i < binCount; i++) {
-      bins.push({
-        t: (startTime + (i * binDurationSeconds)) * 1000, // Convert to ms for frontend
-        tx_airtime_ms: 0,
-        rx_airtime_ms: 0,
-        tx_pkts: 0,
-        rx_pkts_ok: 0,
-        tx_util_pct: 0,
-        rx_util_decoded_pct: 0,
-        radio_activity_pct: 0,
-        avg_rx_airtime_ms_per_pkt: 0,
-        avg_tx_airtime_ms_per_pkt: 0,
-      });
-    }
-    
-    // Categorize packets into bins and calculate airtime
-    for (const pkt of packets) {
-      const binIdx = Math.floor((pkt.timestamp - startTime) / binDurationSeconds);
-      if (binIdx < 0 || binIdx >= binCount) continue;
-      
-      // Get packet length (prefer 'length' field, fallback to payload_length)
-      const pktLen = pkt.length || pkt.payload_length || 32;
-      const airtime = estimateAirtimeMs(pktLen, sf, bw);
-      
-      const origin = pkt.packet_origin;
-      if (origin === 'tx_local' || origin === 'tx_forward' || pkt.transmitted) {
-        // Transmitted packet
-        bins[binIdx].tx_airtime_ms += airtime;
-        bins[binIdx].tx_pkts++;
-      } else {
-        // Received packet
-        bins[binIdx].rx_airtime_ms += airtime;
-        bins[binIdx].rx_pkts_ok++;
-      }
-    }
-    
-    // Calculate utilization percentages
-    // Max airtime per bin = binDurationSeconds * 1000 ms
-    const maxAirtimePerBin = binDurationSeconds * 1000;
-    
-    for (const bin of bins) {
-      bin.tx_util_pct = (bin.tx_airtime_ms / maxAirtimePerBin) * 100;
-      bin.rx_util_decoded_pct = (bin.rx_airtime_ms / maxAirtimePerBin) * 100;
-      bin.radio_activity_pct = ((bin.tx_airtime_ms + bin.rx_airtime_ms) / maxAirtimePerBin) * 100;
-      
-      // Calculate averages
-      if (bin.rx_pkts_ok > 0) {
-        bin.avg_rx_airtime_ms_per_pkt = bin.rx_airtime_ms / bin.rx_pkts_ok;
-      }
-      if (bin.tx_pkts > 0) {
-        bin.avg_tx_airtime_ms_per_pkt = bin.tx_airtime_ms / bin.tx_pkts;
-      }
-    }
-    
-    return {
-      success: true,
-      data: {
-        bins,
-        bin_duration_seconds: binDurationSeconds,
-        hours,
-        anomaly_counters: {
-          missing_airtime_ms: 0,
-          outlier_bins: 0,
-        },
       },
     };
   } catch (error) {

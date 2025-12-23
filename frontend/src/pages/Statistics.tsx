@@ -28,24 +28,14 @@ export default function Statistics() {
   const timeRange = STATISTICS_TIME_RANGES[debouncedRange].hours;
   const timeRangeMinutes = timeRange * 60;
   
-  // Bucket counts optimized for ~720 data points per time range
-  // 1h — 5 second buckets (720 buckets)
-  // 3h — 15 second buckets (720 buckets)
-  // 12h — 1 min buckets (720 buckets)
-  // 24h — 2 min buckets (720 buckets)
-  // 3d — 5 min buckets (864 buckets)
-  // 7d — 12 min buckets (840 buckets)
-  const bucketCount = useMemo(() => {
-    switch (timeRange) {
-      case 1: return 720;   // 1h / 720 = 5 sec buckets
-      case 3: return 720;   // 3h / 720 = 15 sec buckets
-      case 12: return 720;  // 12h / 720 = 1 min buckets
-      case 24: return 720;  // 24h / 720 = 2 min buckets
-      case 72: return 864;  // 3d / 864 = 5 min buckets
-      case 168: return 840; // 7d / 840 = 12 min buckets
-      default: return 720;
-    }
-  }, [timeRange]);
+  // Fixed 1440 data points for all time ranges (high resolution charts)
+  // 1h  → 1440 buckets = 2.5s per bucket
+  // 3h  → 1440 buckets = 7.5s per bucket
+  // 12h → 1440 buckets = 30s per bucket
+  // 24h → 1440 buckets = 1min per bucket
+  // 3d  → 1440 buckets = 3min per bucket
+  // 7d  → 1440 buckets = 7min per bucket
+  const bucketCount = 1440;
 
   useEffect(() => {
     async function fetchData() {
@@ -149,13 +139,8 @@ export default function Statistics() {
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
   
-  // Get radio config for utilization calculation
-  const spreadingFactor = stats?.config?.radio?.spreading_factor ?? 8;
-  // API returns bandwidth in Hz (e.g., 125000), convert to kHz for airtime calc
-  const bandwidthHz = stats?.config?.radio?.bandwidth ?? 125000;
-  const bandwidthKhz = bandwidthHz >= 1000 ? bandwidthHz / 1000 : bandwidthHz;
-  
-  // Calculate RX util stats directly from bucket data
+  // Calculate RX utilization stats from pre-computed airtime_ms in bucket data
+  // getBucketedStats() now uses proper LoRa airtime formula (Semtech)
   const rxUtilStats = useMemo(() => {
     const received = bucketedStats?.received;
     const bucketDurationSeconds = bucketedStats?.bucket_duration_seconds ?? 0;
@@ -164,28 +149,18 @@ export default function Statistics() {
       return { max: 0, mean: 0 };
     }
     
-    // Calculate airtime per packet based on radio config
-    // Simplified formula matching pyMC_Repeater/repeater/airtime.py
-    const pktLen = 40; // Average packet length
-    const symbolTime = Math.pow(2, spreadingFactor) / bandwidthKhz; // ms
-    const preambleTime = 8 * symbolTime;
-    const payloadSymbols = (pktLen + 4.25) * 8;
-    const payloadTime = payloadSymbols * symbolTime;
-    const airtimePerPacketMs = preambleTime + payloadTime;
-    
     const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
     
-    // Calculate util for each bucket
-    const utils = received.map(bucket => {
-      const rxAirtimeMs = bucket.count * airtimePerPacketMs;
-      return (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
-    });
+    // Calculate util for each bucket from pre-computed airtime_ms
+    const utils = received.map(bucket => 
+      (bucket.airtime_ms / maxAirtimePerBucketMs) * 100
+    );
     
     const max = Math.max(...utils, 0);
-    const mean = utils.reduce((a, b) => a + b, 0) / utils.length;
+    const mean = utils.length > 0 ? utils.reduce((a, b) => a + b, 0) / utils.length : 0;
     
     return { max, mean };
-  }, [bucketedStats?.received, bucketedStats?.bucket_duration_seconds, spreadingFactor, bandwidthKhz]);
+  }, [bucketedStats?.received, bucketedStats?.bucket_duration_seconds]);
 
   return (
     <div className="section-gap">
@@ -237,11 +212,8 @@ export default function Statistics() {
                 <TrafficStackedChart
                   received={bucketedStats.received}
                   forwarded={bucketedStats.forwarded}
-                  dropped={bucketedStats.dropped}
                   transmitted={bucketedStats.transmitted}
                   bucketDurationSeconds={bucketedStats.bucket_duration_seconds}
-                  spreadingFactor={spreadingFactor}
-                  bandwidthKhz={bandwidthKhz}
                 />
               ) : (
                 <div className="h-80 flex items-center justify-center text-text-muted">
