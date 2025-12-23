@@ -171,8 +171,8 @@ function clamp(v: number, lo: number, hi: number): number {
 /**
  * Build a 2D spectrogram grid from fixed-window utilization samples.
  * 
- * Each sample contributes "energy" into cells at (x=timePixel, y=utilPixel).
- * Uses bilinear splatting so it doesn't look blocky.
+ * For each sample, fills energy from the baseline (y=0%) up to the sample's
+ * utilization value, creating a filled area effect that matches line charts.
  * 
  * @param samples - Fixed-window util samples
  * @param startTs - Range start (seconds)
@@ -204,28 +204,39 @@ export function buildSpectrogramGrid(
       mode === 'sum' ? (s.rxUtilW + s.txUtilW) :
       Math.max(s.rxUtilW, s.txUtilW);
 
+    if (util <= 0) continue;
+
     const u = clamp(util, 0, yMax);
 
-    // x in [0, width)
+    // X position with sub-pixel interpolation
     const xf = ((s.timestamp - startTs) / range) * (width - 1);
     const x0 = Math.floor(xf);
     const x1 = Math.min(width - 1, x0 + 1);
     const tx = xf - x0;
 
-    // y: top is high util, bottom is low util
-    const yf = (1 - (u / yMax)) * (height - 1);
-    const y0 = Math.floor(yf);
-    const y1 = Math.min(height - 1, y0 + 1);
-    const ty = yf - y0;
+    // Y position of the peak (top of fill)
+    // In grid coords: y=0 is top (high util), y=height-1 is bottom (0%)
+    const peakYf = (1 - (u / yMax)) * (height - 1);
+    const peakY = Math.floor(peakYf);
+    
+    // Fill from baseline (bottom) up to peak
+    // Energy decreases as we go up (intensity gradient)
+    const baselineY = height - 1;
+    const fillHeight = baselineY - peakY;
+    
+    if (fillHeight <= 0) continue;
 
-    // Energy: 1 for density, or weight by util for intensity
-    const energy = 1;
-
-    // Bilinear splat
-    grid[y0 * width + x0] += energy * (1 - tx) * (1 - ty);
-    grid[y0 * width + x1] += energy * tx * (1 - ty);
-    grid[y1 * width + x0] += energy * (1 - tx) * ty;
-    grid[y1 * width + x1] += energy * tx * ty;
+    for (let y = peakY; y <= baselineY; y++) {
+      // Intensity: strongest at peak, fading toward baseline
+      const distFromPeak = y - peakY;
+      const intensity = 1.0 - (distFromPeak / fillHeight) * 0.7; // 1.0 at peak, 0.3 at baseline
+      
+      // Distribute across x0 and x1 based on sub-pixel position
+      grid[y * width + x0] += intensity * (1 - tx);
+      if (x1 < width) {
+        grid[y * width + x1] += intensity * tx;
+      }
+    }
   }
 
   return grid;
