@@ -4,7 +4,7 @@ import { useStats } from '@/lib/stores/useStore';
 import { BarChart3, TrendingUp, PieChart, Radio, Compass, Network } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { GraphData } from '@/types/api';
-import type { BucketedStats, NoiseFloorHistoryItem } from '@/lib/api';
+import type { BucketedStats, BucketData, NoiseFloorHistoryItem } from '@/lib/api';
 import { TimeRangeSelector } from '@/components/shared/TimeRangeSelector';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { PacketTypesChart } from '@/components/charts/PacketTypesChart';
@@ -14,9 +14,111 @@ import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { NetworkCompositionChart } from '@/components/charts/NetworkCompositionChart';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 
+// ============================================================================
+// Airtime Utilization Data Processing
+// ============================================================================
+
+/** Always use 5-second buckets for fine-grained spike detection */
+const RAW_BUCKET_DURATION_SECONDS = 5;
+
+/** Max display points - downsample to this if raw buckets exceed it */
+const MAX_DISPLAY_POINTS = 720;
+
+/**
+ * Downsample bucket arrays preserving MAXIMUM values (not averages).
+ * This ensures utilization spikes are never hidden when zooming out.
+ * 
+ * @param buckets - Raw fine-grained buckets (e.g., 5-second intervals)
+ * @param targetCount - Target number of display buckets (720)
+ * @param bucketDurationSeconds - Duration of raw buckets in seconds
+ * @returns Downsampled buckets with max airtime_ms preserved
+ */
+function downsampleBucketsPreservingMax(
+  buckets: BucketData[],
+  targetCount: number,
+  bucketDurationSeconds: number
+): { buckets: BucketData[]; displayBucketDurationSeconds: number } {
+  if (buckets.length <= targetCount) {
+    // No downsampling needed
+    return { buckets, displayBucketDurationSeconds: bucketDurationSeconds };
+  }
+  
+  const ratio = buckets.length / targetCount;
+  const displayBucketDurationSeconds = bucketDurationSeconds * ratio;
+  const result: BucketData[] = [];
+  
+  for (let i = 0; i < targetCount; i++) {
+    const startIdx = Math.floor(i * ratio);
+    const endIdx = Math.floor((i + 1) * ratio);
+    const slice = buckets.slice(startIdx, endIdx);
+    
+    if (slice.length === 0) continue;
+    
+    // Preserve MAX airtime (not sum or average) - this is the key insight
+    // A 16% spike in any 5-second window should show as 16% in the display bucket
+    const maxAirtime = Math.max(...slice.map(b => b.airtime_ms));
+    const totalCount = slice.reduce((sum, b) => sum + b.count, 0);
+    
+    result.push({
+      bucket: i,
+      start: slice[0].start,
+      end: slice[slice.length - 1].end,
+      count: totalCount,
+      airtime_ms: maxAirtime, // MAX not SUM!
+      avg_snr: slice.reduce((sum, b) => sum + b.avg_snr * b.count, 0) / (totalCount || 1),
+      avg_rssi: slice.reduce((sum, b) => sum + b.avg_rssi * b.count, 0) / (totalCount || 1),
+    });
+  }
+  
+  return { buckets: result, displayBucketDurationSeconds };
+}
+
+/**
+ * Process raw bucketed stats: downsample all arrays preserving max utilization
+ */
+function processStatsForDisplay(rawStats: BucketedStats): BucketedStats {
+  const { buckets: received, displayBucketDurationSeconds } = downsampleBucketsPreservingMax(
+    rawStats.received,
+    MAX_DISPLAY_POINTS,
+    rawStats.bucket_duration_seconds
+  );
+  
+  const { buckets: transmitted } = downsampleBucketsPreservingMax(
+    rawStats.transmitted,
+    MAX_DISPLAY_POINTS,
+    rawStats.bucket_duration_seconds
+  );
+  
+  const { buckets: forwarded } = downsampleBucketsPreservingMax(
+    rawStats.forwarded,
+    MAX_DISPLAY_POINTS,
+    rawStats.bucket_duration_seconds
+  );
+  
+  const { buckets: dropped } = downsampleBucketsPreservingMax(
+    rawStats.dropped,
+    MAX_DISPLAY_POINTS,
+    rawStats.bucket_duration_seconds
+  );
+  
+  return {
+    ...rawStats,
+    bucket_count: received.length,
+    bucket_duration_seconds: displayBucketDurationSeconds,
+    received,
+    transmitted,
+    forwarded,
+    dropped,
+  };
+}
+
+// ============================================================================
+// Statistics Page Component
+// ============================================================================
+
 export default function Statistics() {
   const stats = useStats();
-  const [bucketedStats, setBucketedStats] = useState<BucketedStats | null>(null);
+  const [rawBucketedStats, setRawBucketedStats] = useState<BucketedStats | null>(null);
   const [packetTypeData, setPacketTypeData] = useState<GraphData | null>(null);
   const [noiseFloorHistory, setNoiseFloorHistory] = useState<NoiseFloorHistoryItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -28,27 +130,24 @@ export default function Statistics() {
   const timeRange = STATISTICS_TIME_RANGES[debouncedRange].hours;
   const timeRangeMinutes = timeRange * 60;
   
-  // Fixed 1440 data points for all time ranges (high resolution charts)
-  // 1h  → 1440 buckets = 2.5s per bucket
-  // 3h  → 1440 buckets = 7.5s per bucket
-  // 12h → 1440 buckets = 30s per bucket
-  // 24h → 1440 buckets = 1min per bucket
-  // 3d  → 1440 buckets = 3min per bucket
-  // 7d  → 1440 buckets = 7min per bucket
-  const bucketCount = 1440;
+  // Calculate raw bucket count for 5-second intervals
+  // 1h  → 720 buckets × 5s = 3600s (no downsampling)
+  // 3h  → 2160 buckets → downsample to 720
+  // 7d  → 120960 buckets → downsample to 720
+  const rawBucketCount = Math.ceil((timeRangeMinutes * 60) / RAW_BUCKET_DURATION_SECONDS);
 
   useEffect(() => {
     async function fetchData() {
       setError(null);
       try {
         const [bucketedRes, packetTypeRes, noiseFloorRes] = await Promise.all([
-          api.getBucketedStats(timeRangeMinutes, bucketCount),
+          api.getBucketedStats(timeRangeMinutes, rawBucketCount),
           api.getPacketTypeGraphData(timeRange),
           api.getNoiseFloorHistory(timeRange),
         ]);
 
         if (bucketedRes.success && bucketedRes.data) {
-          setBucketedStats(bucketedRes.data);
+          setRawBucketedStats(bucketedRes.data);
         }
         if (packetTypeRes.success && packetTypeRes.data) {
           setPacketTypeData(packetTypeRes.data);
@@ -64,7 +163,13 @@ export default function Statistics() {
     }
 
     fetchData();
-  }, [timeRange, timeRangeMinutes, bucketCount]);
+  }, [timeRange, timeRangeMinutes, rawBucketCount]);
+  
+  // Process raw stats: downsample to 720 points preserving max utilization
+  const bucketedStats = useMemo(() => {
+    if (!rawBucketedStats) return null;
+    return processStatsForDisplay(rawBucketedStats);
+  }, [rawBucketedStats]);
 
   // Poll utilization only, with intervals by range:
   // default 5m; 3d → 10m; 7d → 30m
@@ -82,12 +187,12 @@ export default function Statistics() {
   // Poll bucketed stats (received/forwarded/dropped/transmitted)
   const pollBucketed = useCallback(async () => {
     try {
-      const res = await api.getBucketedStats(timeRangeMinutes, bucketCount);
-      if (res.success && res.data) setBucketedStats(res.data);
+      const res = await api.getBucketedStats(timeRangeMinutes, rawBucketCount);
+      if (res.success && res.data) setRawBucketedStats(res.data);
     } catch {
       // ignore polling errors
     }
-  }, [timeRangeMinutes, bucketCount]);
+  }, [timeRangeMinutes, rawBucketCount]);
 
   // Poll packet type distribution
   const pollPacketTypes = useCallback(async () => {
@@ -139,28 +244,28 @@ export default function Statistics() {
 
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
   
-  // Calculate RX utilization stats from pre-computed airtime_ms in bucket data
-  // getBucketedStats() now uses proper LoRa airtime formula (Semtech)
+  // Calculate RX utilization stats from RAW (5-second) buckets
+  // This ensures peak is calculated from fine-grained data, not downsampled
   const rxUtilStats = useMemo(() => {
-    const received = bucketedStats?.received;
-    const bucketDurationSeconds = bucketedStats?.bucket_duration_seconds ?? 0;
+    const received = rawBucketedStats?.received;
+    const bucketDurationSeconds = rawBucketedStats?.bucket_duration_seconds ?? 0;
     
     if (!received || received.length === 0 || bucketDurationSeconds <= 0) {
-      return { max: 0, mean: 0 };
+      return { peak: 0, mean: 0 };
     }
     
     const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
     
-    // Calculate util for each bucket from pre-computed airtime_ms
+    // Calculate util for each raw bucket
     const utils = received.map(bucket => 
       (bucket.airtime_ms / maxAirtimePerBucketMs) * 100
     );
     
-    const max = Math.max(...utils, 0);
+    const peak = Math.max(...utils, 0);
     const mean = utils.length > 0 ? utils.reduce((a, b) => a + b, 0) / utils.length : 0;
     
-    return { max, mean };
-  }, [bucketedStats?.received, bucketedStats?.bucket_duration_seconds]);
+    return { peak, mean };
+  }, [rawBucketedStats?.received, rawBucketedStats?.bucket_duration_seconds]);
 
   return (
     <div className="section-gap">
@@ -200,10 +305,10 @@ export default function Statistics() {
                 </div>
                 <div className="flex items-center gap-3 sm:gap-4 sm:ml-auto">
                   <span className="type-data-xs text-text-muted">
-                    RX Peak <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.max.toFixed(2)}%</span>
+                    Peak <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.peak.toFixed(2)}%</span>
                   </span>
                   <span className="type-data-xs text-text-muted">
-                    RX Avg <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.mean.toFixed(2)}%</span>
+                    Mean <span className="text-text-secondary tabular-nums font-medium">{rxUtilStats.mean.toFixed(2)}%</span>
                   </span>
                   <span className="pill-tag">{currentRange.label}</span>
                 </div>
@@ -213,7 +318,8 @@ export default function Statistics() {
                   received={bucketedStats.received}
                   forwarded={bucketedStats.forwarded}
                   transmitted={bucketedStats.transmitted}
-                  bucketDurationSeconds={bucketedStats.bucket_duration_seconds}
+                  rawBucketDurationSeconds={RAW_BUCKET_DURATION_SECONDS}
+                  displayBucketDurationSeconds={bucketedStats.bucket_duration_seconds}
                 />
               ) : (
                 <div className="h-80 flex items-center justify-center text-text-muted">
