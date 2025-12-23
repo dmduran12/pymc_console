@@ -347,6 +347,7 @@ export interface SpectrogramOptions {
   floor?: number;     // Small floor for glow (default 0)
   blurX?: number;     // Horizontal blur radius (default 4)
   blurY?: number;     // Vertical blur radius (default 2)
+  dpr?: number;       // Device pixel ratio (default 1)
 }
 
 /**
@@ -374,22 +375,27 @@ export function drawSpectrogram(
     floor = 0,
     blurX = 4,
     blurY = 2,
+    dpr = 1,
   } = options;
 
-  ctx.clearRect(0, 0, width, height);
+  // Scale everything by DPR for crisp rendering on high-DPI displays
+  const scaledWidth = Math.floor(width * dpr);
+  const scaledHeight = Math.floor(height * dpr);
 
-  // Reserve space for axis labels (match Recharts)
-  const leftMargin = 44;
-  const rightMargin = 8;
-  const topMargin = 8;
-  const bottomMargin = 40;
+  ctx.clearRect(0, 0, scaledWidth, scaledHeight);
 
-  const chartWidth = width - leftMargin - rightMargin;
-  const chartHeight = height - topMargin - bottomMargin;
+  // Reserve space for axis labels (match Recharts) - scaled by DPR
+  const leftMargin = Math.floor(44 * dpr);
+  const rightMargin = Math.floor(8 * dpr);
+  const topMargin = Math.floor(8 * dpr);
+  const bottomMargin = Math.floor(40 * dpr);
+
+  const chartWidth = scaledWidth - leftMargin - rightMargin;
+  const chartHeight = scaledHeight - topMargin - bottomMargin;
 
   if (chartWidth <= 0 || chartHeight <= 0 || samples.length === 0) return;
 
-  // Step 1: Build density grid with bilinear splatting
+  // Step 1: Build density grid with bilinear splatting (at full DPR resolution)
   const baseGrid = buildSpectrogramGrid(
     samples,
     startTs,
@@ -401,7 +407,10 @@ export function drawSpectrogram(
   );
 
   // Step 2: Apply box blur for smooth, "alive" appearance
-  const blurredGrid = boxBlur2D(baseGrid, chartWidth, chartHeight, blurX, blurY);
+  // Scale blur radii by DPR to maintain visual appearance
+  const scaledBlurX = Math.max(1, Math.floor(blurX * dpr));
+  const scaledBlurY = Math.max(1, Math.floor(blurY * dpr));
+  const blurredGrid = boxBlur2D(baseGrid, chartWidth, chartHeight, scaledBlurX, scaledBlurY);
 
   // Step 3: Find robust max (p99) so outliers don't crush everything
   const values = Array.from(blurredGrid).filter(v => v > 0);
@@ -414,7 +423,7 @@ export function drawSpectrogram(
   const data = img.data;
 
   // Threshold below which we consider "no signal" (transparent)
-  const threshold = 0.02;
+  const threshold = 0.01;
 
   for (let i = 0; i < blurredGrid.length; i++) {
     // Log-ish compression for dynamic range
@@ -440,10 +449,11 @@ export function drawSpectrogram(
     data[o + 0] = r;
     data[o + 1] = g;
     data[o + 2] = b;
-    // Alpha ramps with intensity: dim at low energy, solid at high
-    data[o + 3] = Math.round(255 * (0.4 + 0.55 * t));
+    // Alpha: stronger base, full opacity at high intensity
+    data[o + 3] = Math.round(255 * (0.6 + 0.4 * t));
   }
 
-  // Draw the spectrogram image in the chart area
+  // Draw the spectrogram image directly at native resolution
+  // (canvas is already sized at width*dpr x height*dpr)
   ctx.putImageData(img, leftMargin, topMargin);
 }
