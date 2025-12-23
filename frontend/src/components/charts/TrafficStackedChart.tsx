@@ -1,9 +1,16 @@
 /**
- * Traffic Flow Chart - TX/RX Airtime Utilization
+ * Airtime Utilization Chart
  * 
- * Displays airtime utilization as clean line charts:
- * - RX util: Green (semantic positive) - time spent receiving
- * - TX util: Neutral color - time spent transmitting
+ * Displays TX/RX airtime utilization as clean line charts.
+ * 
+ * Data source: BucketData from getBucketedStats() which includes pre-computed
+ * airtime_ms using proper LoRa Semtech formula (see lib/airtime.ts).
+ * 
+ * Colors:
+ * - RX Airtime: Green (#39D98A) - time spent receiving
+ * - TX Airtime: Gray (#B0B0C3) - time spent transmitting
+ * 
+ * Y-axis: Dynamic range based on max utilization in data set
  */
 
 import { memo, useMemo } from 'react';
@@ -18,39 +25,55 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { BucketData } from '@/lib/api';
-import { useMetricColors } from '@/lib/hooks/useThemeColors';
+
+// Fixed colors as per spec: RX = green, TX = gray
+const RX_COLOR = '#39D98A'; // Green - semantic positive
+const TX_COLOR = '#B0B0C3'; // Gray - neutral
 
 export interface TrafficStackedChartProps {
   received: BucketData[];
   forwarded: BucketData[];
-  dropped: BucketData[];
   transmitted?: BucketData[];
   /** Bucket duration in seconds (from getBucketedStats) */
   bucketDurationSeconds?: number;
-  /** Spreading factor from radio config */
-  spreadingFactor?: number;
-  /** Bandwidth in kHz from radio config */
-  bandwidthKhz?: number;
 }
-
-// Default LoRa parameters
-const DEFAULT_SF = 8;
-const DEFAULT_BW_KHZ = 125;
-const DEFAULT_PKT_LEN = 40; // Average packet length in bytes
 
 /**
- * Estimate airtime for a packet based on LoRa parameters
- * Simplified calculation matching pyMC_Repeater/repeater/airtime.py
+ * Custom tooltip for chart hover
  */
-function estimateAirtimeMs(payloadLen: number, sf: number, bwKhz: number): number {
-  const symbolTime = Math.pow(2, sf) / bwKhz; // ms per symbol
-  const preambleTime = 8 * symbolTime;
-  const payloadSymbols = (payloadLen + 4.25) * 8;
-  const payloadTime = payloadSymbols * symbolTime;
-  return preambleTime + payloadTime;
+function UtilTooltip({ 
+  active, 
+  payload, 
+  label 
+}: { 
+  active?: boolean; 
+  payload?: Array<{ name: string; value: number; color: string }>; 
+  label?: string 
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  
+  return (
+    <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
+      <div className="font-medium text-text-primary mb-1 font-mono">{label}</div>
+      {payload.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div
+            className="w-3 h-0.5"
+            style={{ backgroundColor: entry.color }}
+          />
+          <span className="text-text-muted">{entry.name}:</span>
+          <span className="text-text-primary tabular-nums font-mono">
+            {entry.value.toFixed(3)}%
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-// Custom legend component
+/**
+ * Custom legend component
+ */
 function UtilLegend({ payload }: { payload?: Array<{ value: string; color: string }> }) {
   if (!payload) return null;
   
@@ -69,58 +92,24 @@ function UtilLegend({ payload }: { payload?: Array<{ value: string; color: strin
   );
 }
 
-// Custom tooltip
-function UtilTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
-  if (!active || !payload || payload.length === 0) return null;
-  
-  return (
-    <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
-      <div className="font-medium text-text-primary mb-1 font-mono">{label}</div>
-      {payload.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <div
-            className="w-3 h-0.5"
-            style={{ backgroundColor: entry.color }}
-          />
-          <span className="text-text-muted">{entry.name}:</span>
-          <span className="text-text-primary tabular-nums font-mono">
-            {entry.value.toFixed(2)}%
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /**
- * Line chart showing TX and RX airtime utilization
- * Clean, non-smoothed lines without dots
+ * Airtime Utilization Line Chart
+ * 
+ * Uses pre-computed airtime_ms from BucketData for accurate utilization.
+ * Y-axis dynamically scales based on max value in dataset.
  */
 function TrafficStackedChartComponent({
   received,
   forwarded,
   transmitted,
   bucketDurationSeconds = 60,
-  spreadingFactor = DEFAULT_SF,
-  bandwidthKhz = DEFAULT_BW_KHZ,
 }: TrafficStackedChartProps) {
-  // Theme-aware colors
-  const metricColors = useMetricColors();
-  
-  // RX = semantic positive (green), TX = neutral
-  const RX_COLOR = metricColors.received; // Green
-  const TX_COLOR = metricColors.neutral;  // Neutral gray
-  
-  // Calculate airtime per packet based on radio config
-  const airtimePerPacketMs = useMemo(() => 
-    estimateAirtimeMs(DEFAULT_PKT_LEN, spreadingFactor, bandwidthKhz),
-    [spreadingFactor, bandwidthKhz]
-  );
-  
   // Max possible airtime per bucket in ms
   const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
   
   // Transform bucket data for chart with TX/RX util calculation
+  // Uses pre-computed airtime_ms from getBucketedStats() which uses proper
+  // LoRa Semtech formula (see lib/airtime.ts)
   const chartData = useMemo(() => {
     if (!received || received.length === 0 || maxAirtimePerBucketMs <= 0) {
       return [];
@@ -146,17 +135,11 @@ function TrafficStackedChartComponent({
         });
       }
       
-      // RX utilization: received packets * airtime / bucket duration
-      const rxPackets = bucket.count;
-      const rxAirtimeMs = rxPackets * airtimePerPacketMs;
-      const rxUtil = (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
+      // RX utilization: use pre-computed airtime_ms from bucket data
+      const rxUtil = (bucket.airtime_ms / maxAirtimePerBucketMs) * 100;
       
-      // TX utilization: transmitted (local) + forwarded (relayed)
-      // transmitted = packets we originated locally
-      // forwarded = packets we received and re-transmitted (relayed)
-      // dropped = packets we received but did NOT transmit (not counted in TX)
-      const txPackets = (transmitted?.[i]?.count ?? 0) + (forwarded[i]?.count ?? 0);
-      const txAirtimeMs = txPackets * airtimePerPacketMs;
+      // TX utilization: transmitted (local) + forwarded (relayed) airtime
+      const txAirtimeMs = (transmitted?.[i]?.airtime_ms ?? 0) + (forwarded[i]?.airtime_ms ?? 0);
       const txUtil = (txAirtimeMs / maxAirtimePerBucketMs) * 100;
       
       return {
@@ -165,7 +148,7 @@ function TrafficStackedChartComponent({
         txUtil,
       };
     });
-  }, [received, forwarded, transmitted, airtimePerPacketMs, maxAirtimePerBucketMs, bucketDurationSeconds]);
+  }, [received, forwarded, transmitted, maxAirtimePerBucketMs, bucketDurationSeconds]);
 
   if (chartData.length === 0) {
     return (
@@ -176,7 +159,7 @@ function TrafficStackedChartComponent({
   }
   
   // Calculate appropriate tick interval based on data points
-  // Aim for ~8-12 ticks on x-axis
+  // Aim for ~10-12 ticks on x-axis for 1440 data points
   const tickInterval = Math.max(1, Math.floor(chartData.length / 10));
 
   return (
@@ -209,7 +192,7 @@ function TrafficStackedChartComponent({
           <Tooltip content={<UtilTooltip />} />
           <Legend content={<UtilLegend />} />
           
-          {/* RX Utilization - Green (positive semantic) */}
+          {/* RX Utilization - Green */}
           <Line
             type="linear"
             dataKey="rxUtil"
@@ -220,7 +203,7 @@ function TrafficStackedChartComponent({
             isAnimationActive={false}
           />
           
-          {/* TX Utilization - Neutral */}
+          {/* TX Utilization - Gray */}
           <Line
             type="linear"
             dataKey="txUtil"
@@ -237,40 +220,3 @@ function TrafficStackedChartComponent({
 }
 
 export const TrafficStackedChart = memo(TrafficStackedChartComponent);
-
-/** Result type for RX utilization stats */
-export interface RxUtilStats {
-  max: number;
-  mean: number;
-}
-
-/**
- * Hook to calculate RX util stats from bucket data using radio config
- * Always calculates from packet counts for accuracy and consistency
- */
-export function useRxUtilStats(
-  _utilizationBins?: unknown[], // Kept for API compatibility but not used
-  received?: BucketData[],
-  bucketDurationSeconds = 60,
-  spreadingFactor = DEFAULT_SF,
-  bandwidthKhz = DEFAULT_BW_KHZ
-): RxUtilStats {
-  return useMemo(() => {
-    // Calculate from received bucket data using radio config
-    if (received && received.length > 0 && bucketDurationSeconds > 0) {
-      const airtimePerPacketMs = estimateAirtimeMs(DEFAULT_PKT_LEN, spreadingFactor, bandwidthKhz);
-      const maxAirtimePerBucketMs = bucketDurationSeconds * 1000;
-      
-      const utils = received.map(bucket => {
-        const rxAirtimeMs = bucket.count * airtimePerPacketMs;
-        return (rxAirtimeMs / maxAirtimePerBucketMs) * 100;
-      });
-      
-      const max = Math.max(...utils, 0);
-      const mean = utils.length > 0 ? utils.reduce((a, b) => a + b, 0) / utils.length : 0;
-      return { max, mean };
-    }
-    
-    return { max: 0, mean: 0 };
-  }, [received, bucketDurationSeconds, spreadingFactor, bandwidthKhz]);
-}
