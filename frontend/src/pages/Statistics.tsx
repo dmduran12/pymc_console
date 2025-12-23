@@ -24,19 +24,22 @@ const RAW_BUCKET_DURATION_SECONDS = 5;
 /** Max display points - downsample to this if raw buckets exceed it */
 const MAX_DISPLAY_POINTS = 720;
 
+type DownsampleMode = 'max' | 'avg';
+
 /**
- * Downsample bucket arrays preserving MAXIMUM values (not averages).
- * This ensures utilization spikes are never hidden when zooming out.
+ * Downsample bucket arrays with configurable aggregation.
  * 
  * @param buckets - Raw fine-grained buckets (e.g., 5-second intervals)
  * @param targetCount - Target number of display buckets (720)
  * @param bucketDurationSeconds - Duration of raw buckets in seconds
- * @returns Downsampled buckets with max airtime_ms preserved
+ * @param mode - 'max' preserves peaks (for RX), 'avg' shows patterns (for TX)
+ * @returns Downsampled buckets
  */
-function downsampleBucketsPreservingMax(
+function downsampleBuckets(
   buckets: BucketData[],
   targetCount: number,
-  bucketDurationSeconds: number
+  bucketDurationSeconds: number,
+  mode: DownsampleMode = 'max'
 ): { buckets: BucketData[]; displayBucketDurationSeconds: number } {
   if (buckets.length <= targetCount) {
     // No downsampling needed
@@ -54,17 +57,24 @@ function downsampleBucketsPreservingMax(
     
     if (slice.length === 0) continue;
     
-    // Preserve MAX airtime (not sum or average) - this is the key insight
-    // A 16% spike in any 5-second window should show as 16% in the display bucket
-    const maxAirtime = Math.max(...slice.map(b => b.airtime_ms));
     const totalCount = slice.reduce((sum, b) => sum + b.count, 0);
+    
+    // Aggregate airtime based on mode
+    let airtime: number;
+    if (mode === 'max') {
+      // MAX preserves spikes - use for RX (capacity planning)
+      airtime = Math.max(...slice.map(b => b.airtime_ms));
+    } else {
+      // AVG shows patterns - use for TX (organic traffic flow)
+      airtime = slice.reduce((sum, b) => sum + b.airtime_ms, 0) / slice.length;
+    }
     
     result.push({
       bucket: i,
       start: slice[0].start,
       end: slice[slice.length - 1].end,
       count: totalCount,
-      airtime_ms: maxAirtime, // MAX not SUM!
+      airtime_ms: airtime,
       avg_snr: slice.reduce((sum, b) => sum + b.avg_snr * b.count, 0) / (totalCount || 1),
       avg_rssi: slice.reduce((sum, b) => sum + b.avg_rssi * b.count, 0) / (totalCount || 1),
     });
@@ -74,31 +84,39 @@ function downsampleBucketsPreservingMax(
 }
 
 /**
- * Process raw bucketed stats: downsample all arrays preserving max utilization
+ * Process raw bucketed stats: downsample with appropriate aggregation per type
+ * - RX: MAX (preserve spikes for capacity planning)
+ * - TX: AVG (show organic traffic patterns)
  */
 function processStatsForDisplay(rawStats: BucketedStats): BucketedStats {
-  const { buckets: received, displayBucketDurationSeconds } = downsampleBucketsPreservingMax(
+  // RX uses MAX to preserve spikes (capacity concern)
+  const { buckets: received, displayBucketDurationSeconds } = downsampleBuckets(
     rawStats.received,
     MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds
+    rawStats.bucket_duration_seconds,
+    'max'
   );
   
-  const { buckets: transmitted } = downsampleBucketsPreservingMax(
+  // TX uses AVG to show organic patterns (not every window's peak)
+  const { buckets: transmitted } = downsampleBuckets(
     rawStats.transmitted,
     MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds
+    rawStats.bucket_duration_seconds,
+    'avg'
   );
   
-  const { buckets: forwarded } = downsampleBucketsPreservingMax(
+  const { buckets: forwarded } = downsampleBuckets(
     rawStats.forwarded,
     MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds
+    rawStats.bucket_duration_seconds,
+    'avg'
   );
   
-  const { buckets: dropped } = downsampleBucketsPreservingMax(
+  const { buckets: dropped } = downsampleBuckets(
     rawStats.dropped,
     MAX_DISPLAY_POINTS,
-    rawStats.bucket_duration_seconds
+    rawStats.bucket_duration_seconds,
+    'avg'
   );
   
   return {

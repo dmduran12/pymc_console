@@ -146,14 +146,14 @@ function TrafficStackedChartComponent({
       }
       
       // RX utilization: MAX airtime from any raw bucket / raw bucket duration
+      // This shows peak channel congestion (capacity planning)
       const rxUtil = (bucket.airtime_ms / maxAirtimePerRawBucketMs) * 100;
       
-      // TX utilization: MAX of (transmitted + forwarded) airtime
-      const txAirtimeMs = Math.max(
-        transmitted?.[i]?.airtime_ms ?? 0,
-        forwarded[i]?.airtime_ms ?? 0
-      );
-      const txUtil = (txAirtimeMs / maxAirtimePerRawBucketMs) * 100;
+      // TX utilization: AVG airtime (shows organic patterns)
+      // Sum transmitted + forwarded, then divide by display bucket duration
+      // since TX was downsampled with AVG mode
+      const txAirtimeMs = (transmitted?.[i]?.airtime_ms ?? 0) + (forwarded[i]?.airtime_ms ?? 0);
+      const txUtil = (txAirtimeMs / (displayBucketDurationSeconds * 1000)) * 100;
       
       return {
         time,
