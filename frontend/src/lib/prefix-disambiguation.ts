@@ -4,10 +4,30 @@
  * Resolves 2-character hex prefix collisions in MeshCore packet paths.
  * With 180+ neighbors and only 256 possible prefixes, collisions are inevitable.
  * 
- * This module provides a centralized disambiguation service using three factors:
- * 1. Path Position Consistency - Where does this node typically appear in paths?
- * 2. Co-occurrence Frequency - How often does this prefix appear alongside others?
- * 3. Geographic Path Coherence - Does the candidate's location make sense?
+ * This module provides a centralized disambiguation service using four weighted factors:
+ * 
+ * 1. Path Position Consistency (15%) - Where does this node typically appear in paths?
+ *    Shared across all candidates matching the same prefix.
+ * 
+ * 2. Co-occurrence Frequency (15%) - How often does this prefix appear alongside others?
+ *    Shared across all candidates matching the same prefix.
+ * 
+ * 3. Geographic Scoring (40%) - Distance-based scoring with dual-hop anchor correlation.
+ *    Candidate-specific evidence from:
+ *    - Distance to local node (closer = higher score)
+ *    - Source-geographic correlation (position-1 proximity to packet source)
+ *    - Previous-hop anchor (proximity to resolved upstream node)
+ *    - Next-hop anchor (proximity to resolved downstream node)
+ *    - Zero-hop boost for known direct RF contacts
+ * 
+ * 4. Recency Scoring (30%) - When was this node last seen? (meshcore-bot inspired)
+ *    Uses exponential decay: score = e^(-hours/12)
+ *    Nodes not seen in 14 days are filtered out entirely.
+ * 
+ * Additional confidence boosts:
+ * - Dominant forwarder boost: 80%+ of position-1 appearances → +0.3 to +0.6
+ * - Score-weighted redistribution: Reallocates shared counts by combined score
+ * - Source-geographic evidence boost: 50%+ more geo evidence → up to +0.3
  * 
  * Usage:
  *   const lookup = buildPrefixLookup(packets, neighbors, localHash, localLat, localLon);
