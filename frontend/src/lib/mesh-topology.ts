@@ -96,8 +96,10 @@ export interface TopologyEdge {
   packetCount: number;
   /** Average confidence across all observations */
   avgConfidence: number;
-  /** Strength score (0-1) combining count and confidence */
+  /** Strength score (0-1) combining count, confidence, and recency */
   strength: number;
+  /** Average recency of observations (0-1, higher = more recent). Uses 12-hour half-life decay. */
+  avgRecency: number;
   /** Minimum hop distance from local node (0 = directly connected to local, 1 = one hop away, etc.) */
   hopDistanceFromLocal: number;
   /** Whether this edge connects to a hub node (high centrality) */
@@ -350,6 +352,10 @@ interface EdgeAccumulator {
   floodCount: number;
   /** Observations from direct-routed packets (route_type 1) */
   directCount: number;
+  
+  // === RECENCY TRACKING ===
+  /** Sum of recency scores for all observations (for averaging) */
+  recencySum: number;
 }
 
 // Re-export from path-utils for backward compatibility
@@ -1614,16 +1620,36 @@ export function buildMeshTopology(
   const nodePathCounts = new Map<string, number>(); // How many paths include this node
   const nodeBridgeCounts = new Map<string, number>(); // How many times node is in middle of path
   
+  // Current time for recency calculations (compute once per topology build)
+  const nowTimestamp = Math.floor(Date.now() / 1000);
+  
+  // Recency decay constant (12-hour half-life, consistent with prefix-disambiguation.ts)
+  const RECENCY_DECAY_HOURS = 12;
+  
+  /**
+   * Calculate recency score for a packet timestamp.
+   * Uses exponential decay: score = e^(-hours/12)
+   * Returns 0.1 for missing/invalid timestamps.
+   */
+  const calculateRecencyScore = (timestamp: number | undefined): number => {
+    if (!timestamp || timestamp <= 0) return 0.1;
+    const hoursAgo = (nowTimestamp - timestamp) / 3600;
+    if (hoursAgo < 0) return 1.0; // Future timestamp (clock skew)
+    return Math.exp(-hoursAgo / RECENCY_DECAY_HOURS);
+  };
+  
   // Helper to add/update edge accumulator
   // actualFrom/actualTo represent the real direction of traffic flow (for directional tracking)
   // routeType: 0=flood, 1=direct, 2=transport, undefined=unknown
+  // packetTimestamp: unix timestamp (seconds) of the packet for recency scoring
   const addEdgeObservation = (
     actualFrom: string,
     actualTo: string,
     hopConfidence: number,
     isCertain: boolean,
     hopDistanceFromLocal: number,
-    routeType?: number
+    routeType?: number,
+    packetTimestamp?: number
   ) => {
     // Edge key is always sorted for consistent lookup (bidirectional edge)
     const key = makeEdgeKey(actualFrom, actualTo);
@@ -1640,9 +1666,13 @@ export function buildMeshTopology(
     const isFlood = routeType === 0 || routeType === undefined; // Default to flood if unknown
     const isDirect = routeType === 1;
     
+    // Calculate recency score for this observation
+    const recencyScore = calculateRecencyScore(packetTimestamp);
+    
     if (existing) {
       existing.count++;
       existing.confidenceSum += hopConfidence;
+      existing.recencySum += recencyScore;
       existing.minHopDistance = Math.min(existing.minHopDistance, hopDistanceFromLocal);
       if (hopDistanceFromLocal < existing.hopDistanceCounts.length) {
         existing.hopDistanceCounts[hopDistanceFromLocal]++;
@@ -1683,6 +1713,7 @@ export function buildMeshTopology(
         reverseCount: isForward ? 0 : 1,
         floodCount: isFlood ? 1 : 0,
         directCount: isDirect ? 1 : 0,
+        recencySum: recencyScore,
       });
     }
   };
@@ -1726,7 +1757,7 @@ export function buildMeshTopology(
         
         // Get route type: prefer 'route' (SQLite API), fallback to 'route_type'
         const routeType = packet.route ?? packet.route_type;
-        addEdgeObservation(srcHash, firstHopResult.hash, confidence, isCertain, hopDistance, routeType);
+        addEdgeObservation(srcHash, firstHopResult.hash, confidence, isCertain, hopDistance, routeType, packet.timestamp);
         
         // Track for centrality
         nodesInPath.add(srcHash);
@@ -1761,7 +1792,7 @@ export function buildMeshTopology(
         
         // Get route type: prefer 'route' (SQLite API), fallback to 'route_type'
         const routeType = packet.route ?? packet.route_type;
-        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0, routeType);
+        addEdgeObservation(lastHopResult.hash, localHash, confidence, isCertain, 0, routeType, packet.timestamp);
         
         // Track for centrality
         nodesInPath.add(lastHopResult.hash);
@@ -1853,7 +1884,8 @@ export function buildMeshTopology(
         hopConfidence,
         isCertainObservation,
         hopDistanceFromLocal,
-        routeType
+        routeType,
+        packet.timestamp
       );
     }
     
@@ -1938,6 +1970,9 @@ export function buildMeshTopology(
     const totalRouteCounts = acc.floodCount + acc.directCount;
     const isDirectPathEdge = totalRouteCounts > 0 && acc.directCount > acc.floodCount;
     
+    // Calculate average recency for this edge (0-1, higher = more recent observations)
+    const avgRecency = acc.count > 0 ? acc.recencySum / acc.count : 0;
+    
     const edge: TopologyEdge = {
       fromHash: acc.fromHash,
       toHash: acc.toHash,
@@ -1945,6 +1980,7 @@ export function buildMeshTopology(
       packetCount: acc.count,
       avgConfidence,
       strength: 0, // Will be calculated below
+      avgRecency,
       hopDistanceFromLocal: acc.minHopDistance,
       isHubConnection,
       isCertain: meetsThreshold, // Now means "meets validation threshold"
@@ -1976,10 +2012,13 @@ export function buildMeshTopology(
     }
   }
   
-  // Calculate strength scores (normalized count × confidence)
+  // Calculate strength scores: count (40%) × confidence (40%) × recency (20%)
+  // Recency factor prevents stale edges from dominating the topology view
   for (const edge of edges) {
     const normalizedCount = maxPacketCount > 0 ? edge.packetCount / maxPacketCount : 0;
-    edge.strength = normalizedCount * edge.avgConfidence;
+    // strength = count (40%) + confidence (40%) + recency (20%)
+    // This weights recent activity so edges with only old data score lower
+    edge.strength = normalizedCount * 0.4 + edge.avgConfidence * 0.4 + edge.avgRecency * 0.2;
   }
   
   // Sort by validation count (most validated = strongest topology signal)
