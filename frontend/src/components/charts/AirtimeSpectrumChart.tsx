@@ -176,14 +176,15 @@ function AirtimeSpectrumChartComponent({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Draw true spectrogram with bilinear splat, blur, log compression
+      // Draw true spectrogram with Gaussian splat, blur, log compression
       // Pass DPR so spectrogram renders at native resolution
       drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
         yMax,
-        gain: 10,
-        gamma: 0.5,
-        blurX: 8,   // Strong horizontal blur for persistence/ridges
-        blurY: 4,   // Moderate vertical blur for smooth bands
+        gain: 12,
+        gamma: 0.45,
+        blurX: 12,      // Strong horizontal blur for persistence
+        blurY: 6,       // Vertical blur for smooth bands
+        splatRadius: 5, // Gaussian splat radius for smooth points
         dpr,
       });
     };
