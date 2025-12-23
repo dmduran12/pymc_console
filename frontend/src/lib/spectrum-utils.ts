@@ -422,15 +422,15 @@ export function drawSpectrogram(
   const img = ctx.createImageData(chartWidth, chartHeight);
   const data = img.data;
 
-  // Threshold below which we consider "no signal" (transparent)
-  const threshold = 0.005;
+  // Soft threshold with smooth falloff
+  const softThreshold = 0.003;  // Below this = transparent
+  const fadeZone = 0.02;        // Fade from softThreshold to softThreshold + fadeZone
 
   for (let i = 0; i < blurredGrid.length; i++) {
-    // Log-ish compression for dynamic range
     const raw = blurredGrid[i] / p99;
     
-    // Below threshold = fully transparent
-    if (raw < threshold) {
+    // Below soft threshold = fully transparent
+    if (raw < softThreshold) {
       const o = i * 4;
       data[o + 0] = 0;
       data[o + 1] = 0;
@@ -439,8 +439,16 @@ export function drawSpectrogram(
       continue;
     }
 
-    // Map (threshold, 1) to (0, 1) for color
-    const normalized = (raw - threshold) / (1 - threshold);
+    // Smooth fade-in for values in the fade zone
+    let alphaMultiplier = 1.0;
+    if (raw < softThreshold + fadeZone) {
+      // Smooth cubic ease-in from 0 to 1
+      const fadeT = (raw - softThreshold) / fadeZone;
+      alphaMultiplier = fadeT * fadeT * (3 - 2 * fadeT); // smoothstep
+    }
+
+    // Map to color (log compression)
+    const normalized = raw; // Use full range for color mapping
     const v = Math.log1p(gain * (normalized + floor)) / Math.log1p(gain * 1);
     const t = Math.pow(clamp(v, 0, 1), gamma);
 
@@ -449,8 +457,9 @@ export function drawSpectrogram(
     data[o + 0] = r;
     data[o + 1] = g;
     data[o + 2] = b;
-    // Alpha: high base opacity, fully opaque at high intensity
-    data[o + 3] = Math.round(255 * (0.75 + 0.25 * t));
+    // Alpha: base 0.7, ramps to 1.0, with smooth fade-in near threshold
+    const baseAlpha = 0.7 + 0.3 * t;
+    data[o + 3] = Math.round(255 * baseAlpha * alphaMultiplier);
   }
 
   // Draw the spectrogram image directly at native resolution
