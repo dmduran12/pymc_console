@@ -2275,7 +2275,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           {/* Node types legend */}
           <div className="text-text-secondary font-medium mb-1.5 flex items-center gap-1">
             Nodes
-            <LegendTooltip text="All nodes shown in network accent color. Hubs are filled; others are rings." />
+            <LegendTooltip text="Green = MeshCore neighbor (direct RF contact). Yellow = hub. All others are rings." />
           </div>
           <div className="flex flex-col gap-1">
             {/* Ring node indicator - thick ring like actual markers */}
@@ -2325,6 +2325,20 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 <span className="text-text-muted">Room</span>
               </div>
             )}
+            {/* Neighbor indicator - green ring (MeshCore definition: direct RF contact) */}
+            {zeroHopNeighbors.size > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div 
+                  className="w-3 h-3 rounded-full flex-shrink-0" 
+                  style={{ 
+                    background: 'transparent',
+                    border: `3px solid ${DESIGN.neighborColor}`,
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span className="text-text-muted">Neighbor</span>
+              </div>
+            )}
             {/* Mobile node indicator - orange ring */}
             {meshTopology.mobileNodes.length > 0 && (
               <div className="flex items-center gap-1.5">
@@ -2340,6 +2354,25 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               </div>
             )}
           </div>
+          
+          {/* Neighbor links - always visible, not gated by topology */}
+          {zeroHopNeighbors.size > 0 && (
+            <div className="mt-1.5 pt-1.5 border-t border-white/10">
+              <div className="flex items-center gap-1.5">
+                <div 
+                  className="flex-shrink-0" 
+                  style={{ 
+                    width: '14px',
+                    height: '3px',
+                    backgroundColor: DESIGN.edges.neighbor,
+                    borderRadius: '1px',
+                  }}
+                />
+                <span className="text-text-muted">Neighbor link</span>
+                <LegendTooltip text="Green lines to MeshCore neighbors (direct RF contact with local)." />
+              </div>
+            </div>
+          )}
           
           {/* Topology stats - compact summary */}
           {showTopology && validatedPolylines.length > 0 && (
