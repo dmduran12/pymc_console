@@ -171,8 +171,8 @@ function clamp(v: number, lo: number, hi: number): number {
 /**
  * Build a 2D spectrogram grid from fixed-window utilization samples.
  * 
- * Each sample places energy at its (time, util%) position using bilinear
- * splatting. Horizontal blur creates the "persistence" effect.
+ * Each sample places energy at its (time, util%) position using a
+ * Gaussian-like splat kernel. This creates smooth "glow" even with sparse data.
  * 
  * @param samples - Fixed-window util samples
  * @param startTs - Range start (seconds)
@@ -181,6 +181,7 @@ function clamp(v: number, lo: number, hi: number): number {
  * @param height - Grid height (pixels)
  * @param yMax - Max Y value (e.g., 30%)
  * @param mode - Which utilization to use: rx, tx, max, or sum
+ * @param splatRadius - Radius of the splat kernel (default 3)
  */
 export function buildSpectrogramGrid(
   samples: UtilSample[],
@@ -189,11 +190,30 @@ export function buildSpectrogramGrid(
   width: number,
   height: number,
   yMax: number,
-  mode: 'rx' | 'tx' | 'max' | 'sum' = 'max'
+  mode: 'rx' | 'tx' | 'max' | 'sum' = 'max',
+  splatRadius: number = 3
 ): Float32Array {
   const grid = new Float32Array(width * height);
   const range = endTs - startTs;
   if (range <= 0 || width <= 0 || height <= 0) return grid;
+
+  // Pre-compute Gaussian-like kernel weights
+  const kernelSize = splatRadius * 2 + 1;
+  const sigma = splatRadius / 2;
+  const kernel: number[] = [];
+  let kernelSum = 0;
+  for (let ky = -splatRadius; ky <= splatRadius; ky++) {
+    for (let kx = -splatRadius; kx <= splatRadius; kx++) {
+      const d2 = kx * kx + ky * ky;
+      const w = Math.exp(-d2 / (2 * sigma * sigma));
+      kernel.push(w);
+      kernelSum += w;
+    }
+  }
+  // Normalize kernel
+  for (let i = 0; i < kernel.length; i++) {
+    kernel[i] /= kernelSum;
+  }
 
   for (const s of samples) {
     if (s.timestamp < startTs || s.timestamp > endTs) continue;
@@ -208,26 +228,29 @@ export function buildSpectrogramGrid(
 
     const u = clamp(util, 0, yMax);
 
-    // X position with sub-pixel interpolation
-    const xf = ((s.timestamp - startTs) / range) * (width - 1);
-    const x0 = Math.floor(xf);
-    const x1 = Math.min(width - 1, x0 + 1);
-    const tx = xf - x0;
+    // Center position
+    const xc = ((s.timestamp - startTs) / range) * (width - 1);
+    const yc = (1 - (u / yMax)) * (height - 1);
 
-    // Y position: y=0 is top (yMax%), y=height-1 is bottom (0%)
-    const yf = (1 - (u / yMax)) * (height - 1);
-    const y0 = Math.floor(yf);
-    const y1 = Math.min(height - 1, y0 + 1);
-    const ty = yf - y0;
+    // Energy weighted by utilization
+    const energy = Math.sqrt(u / yMax);
 
-    // Energy weighted by utilization for intensity
-    const energy = Math.sqrt(u / yMax); // sqrt to boost low values visibility
-
-    // Bilinear splat - places energy at the exact position
-    grid[y0 * width + x0] += energy * (1 - tx) * (1 - ty);
-    grid[y0 * width + x1] += energy * tx * (1 - ty);
-    grid[y1 * width + x0] += energy * (1 - tx) * ty;
-    grid[y1 * width + x1] += energy * tx * ty;
+    // Apply Gaussian splat kernel
+    let ki = 0;
+    for (let ky = -splatRadius; ky <= splatRadius; ky++) {
+      const y = Math.round(yc) + ky;
+      if (y < 0 || y >= height) {
+        ki += kernelSize;
+        continue;
+      }
+      for (let kx = -splatRadius; kx <= splatRadius; kx++) {
+        const x = Math.round(xc) + kx;
+        if (x >= 0 && x < width) {
+          grid[y * width + x] += energy * kernel[ki];
+        }
+        ki++;
+      }
+    }
   }
 
   return grid;
@@ -349,6 +372,7 @@ export interface SpectrogramOptions {
   floor?: number;     // Small floor for glow (default 0)
   blurX?: number;     // Horizontal blur radius (default 4)
   blurY?: number;     // Vertical blur radius (default 2)
+  splatRadius?: number; // Gaussian splat kernel radius (default 4)
   dpr?: number;       // Device pixel ratio (default 1)
 }
 
@@ -377,6 +401,7 @@ export function drawSpectrogram(
     floor = 0,
     blurX = 4,
     blurY = 2,
+    splatRadius = 4,
     dpr = 1,
   } = options;
 
@@ -398,7 +423,9 @@ export function drawSpectrogram(
 
   if (chartWidth <= 0 || chartHeight <= 0 || samples.length === 0) return;
 
-  // Step 1: Build density grid with bilinear splatting (at full DPR resolution)
+  // Step 1: Build density grid with Gaussian splatting (at full DPR resolution)
+  // Scale splat radius by DPR for consistent visual appearance
+  const scaledSplatRadius = Math.max(2, Math.round(splatRadius * dpr));
   const baseGrid = buildSpectrogramGrid(
     samples,
     startTs,
@@ -406,7 +433,8 @@ export function drawSpectrogram(
     chartWidth,
     chartHeight,
     yMax,
-    'max'
+    'max',
+    scaledSplatRadius
   );
 
   // Step 2: Apply box blur for smooth, "alive" appearance
