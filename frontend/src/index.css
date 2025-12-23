@@ -2519,21 +2519,14 @@ body {
   margin-bottom: 1.5rem;
 }
 
-/* Desktop: 8 columns */
-@media (min-width: 1280px) {
-  .widget-row {
-    grid-template-columns: repeat(8, 1fr);
-  }
-}
-
-/* Large tablet: 4 columns */
-@media (min-width: 768px) and (max-width: 1279px) {
+/* Desktop & Tablet: 4 columns (2 rows of 4) */
+@media (min-width: 768px) {
   .widget-row {
     grid-template-columns: repeat(4, 1fr);
   }
 }
 
-/* Mobile: 2 columns */
+/* Mobile: 2 columns (4 rows of 2) */
 @media (max-width: 767px) {
   .widget-row {
     grid-template-columns: repeat(2, 1fr);
