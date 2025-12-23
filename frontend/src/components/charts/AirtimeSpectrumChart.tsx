@@ -181,9 +181,9 @@ function AirtimeSpectrumChartComponent({
       drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
         yMax,
         gain: 8,
-        gamma: 0.6,
-        blurX: 4,
-        blurY: 2,
+        gamma: 0.55,
+        blurX: 6,   // Increased for softer horizontal spread
+        blurY: 3,   // Increased for softer vertical spread
         dpr,
       });
     };
