@@ -1,49 +1,96 @@
 /**
  * LBTDataContext - Shared data context for LBT Insights widgets
  *
- * Consolidates API calls to prevent redundant fetching across widgets.
- * Fetches at highest frequency (15s for channel_health), then provides
- * data to all widgets from a single source.
+ * Computes LBT (Listen Before Talk) statistics client-side from packet data.
+ * This approach uses existing /api/recent_packets or /api/filtered_packets
+ * endpoints rather than requiring new backend endpoints.
  *
- * Data structure:
- * - lbtStats: 24h LBT statistics (retry rate, busy events, backoff)
- * - noiseFloor: 24h noise floor with trend
- * - linkQuality: Link quality scores for all neighbors
- * - channelHealth: 1h composite health (real-time)
+ * LBT fields in packet records:
+ * - lbt_attempts: number of CAD checks before TX (1 = clean channel)
+ * - lbt_backoff_delays_ms: JSON array of backoff delays "[192.0, 314.0]"
+ * - lbt_channel_busy: boolean (true if TX failed due to channel busy)
+ *
+ * Data structure computed:
+ * - lbtStats: retry rate, busy events, backoff times from packet LBT fields
+ * - noiseFloor: current noise floor from /api/stats (already available)
+ * - linkQuality: computed from neighbor SNR/RSSI in /api/stats
+ * - channelHealth: composite score computed from all above
  */
 
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
-import {
-  getLBTStats,
-  getNoiseFloorStatsExtended,
-  getLinkQualityScores,
-  getChannelHealth,
-} from '@/lib/api';
-import type {
-  LBTStats,
-  NoiseFloorStatsExtended,
-  LinkQualityResponse,
-  ChannelHealthResponse,
-} from '@/types/api';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { getStats, getFilteredPackets } from '@/lib/api';
+import type { Packet, Stats, NeighborInfo } from '@/types/api';
 
-/** Refresh intervals */
-const REFRESH_INTERVAL_FAST = 15000; // 15s for real-time health
-const REFRESH_INTERVAL_SLOW = 60000; // 60s for 24h trend data
+/** Refresh interval - 30s for all data (balance between freshness and load) */
+const REFRESH_INTERVAL = 30000;
+
+/** Time window - 24 hours in seconds */
+const HOURS_24 = 24 * 60 * 60;
+
+/** LBT Statistics computed from packets */
+export interface ComputedLBTStats {
+  // Retry metrics
+  totalPacketsWithLBT: number;
+  packetsWithRetries: number; // lbt_attempts > 1
+  retryRate: number; // % of packets that needed CAD retries
+  avgRetries: number; // average lbt_attempts when > 1
+
+  // Channel busy metrics
+  channelBusyCount: number; // packets where lbt_channel_busy = true
+  channelBusyRate: number; // % of packets that failed due to busy
+
+  // Backoff timing
+  avgBackoffMs: number; // average backoff delay
+  maxBackoffMs: number; // maximum observed backoff
+  totalBackoffMs: number; // sum of all backoffs
+
+  // Hourly breakdown for sparklines
+  hourlyRetryRates: number[]; // 24 values, one per hour
+
+  // Time window
+  windowHours: number;
+  packetCount: number;
+}
+
+/** Link quality computed from neighbors */
+export interface ComputedLinkQuality {
+  neighbors: Array<{
+    name: string;
+    hash: string;
+    rssi: number;
+    snr: number;
+    score: number; // 0-100 composite quality
+  }>;
+  networkScore: number; // average of all neighbor scores
+  bestLink: { name: string; score: number } | null;
+  worstLink: { name: string; score: number } | null;
+}
+
+/** Composite channel health */
+export interface ComputedChannelHealth {
+  score: number; // 0-100 composite health
+  status: 'excellent' | 'good' | 'fair' | 'congested' | 'critical';
+  components: {
+    lbtHealth: number; // based on retry rate (lower is better)
+    noiseHealth: number; // based on noise floor
+    linkHealth: number; // based on network score
+  };
+}
 
 /** Context data shape */
 export interface LBTData {
-  // 24h trend data (refreshed every 60s)
-  lbtStats: LBTStats | null;
-  noiseFloor: NoiseFloorStatsExtended | null;
-  linkQuality: LinkQualityResponse | null;
+  // Computed stats
+  lbtStats: ComputedLBTStats | null;
+  noiseFloor: number | null; // dBm from stats
+  linkQuality: ComputedLinkQuality | null;
+  channelHealth: ComputedChannelHealth | null;
 
-  // Real-time health (refreshed every 15s)
-  channelHealth: ChannelHealthResponse | null;
+  // Raw data references
+  stats: Stats | null;
+  recentPackets: Packet[];
 
   // Loading states
   isLoading: boolean;
-  isTrendLoading: boolean;
-  isHealthLoading: boolean;
 
   // Error state
   error: string | null;
@@ -57,122 +104,281 @@ const defaultData: LBTData = {
   noiseFloor: null,
   linkQuality: null,
   channelHealth: null,
+  stats: null,
+  recentPackets: [],
   isLoading: true,
-  isTrendLoading: true,
-  isHealthLoading: true,
   error: null,
   refresh: async () => {},
 };
 
 const LBTDataContext = createContext<LBTData>(defaultData);
 
+/**
+ * Parse lbt_backoff_delays_ms JSON string to array of numbers
+ */
+function parseBackoffDelays(delaysStr: string | undefined): number[] {
+  if (!delaysStr) return [];
+  try {
+    const parsed = JSON.parse(delaysStr);
+    if (Array.isArray(parsed)) {
+      return parsed.map(Number).filter(n => !isNaN(n));
+    }
+  } catch {
+    // Invalid JSON, ignore
+  }
+  return [];
+}
+
+/**
+ * Compute link quality score from SNR and RSSI
+ * Score 0-100 where 100 is excellent
+ */
+function computeLinkScore(snr: number | undefined, rssi: number | undefined): number {
+  // SNR scoring (typically -20 to +15 dB for LoRa)
+  // >10 = excellent, 5-10 = good, 0-5 = fair, -5-0 = poor, <-5 = critical
+  let snrScore = 50;
+  if (snr !== undefined) {
+    if (snr >= 10) snrScore = 100;
+    else if (snr >= 5) snrScore = 80;
+    else if (snr >= 0) snrScore = 60;
+    else if (snr >= -5) snrScore = 40;
+    else snrScore = 20;
+  }
+
+  // RSSI scoring (typically -120 to -50 dBm)
+  // >-70 = excellent, -80 to -70 = good, -90 to -80 = fair, -100 to -90 = poor, <-100 = critical
+  let rssiScore = 50;
+  if (rssi !== undefined) {
+    if (rssi >= -70) rssiScore = 100;
+    else if (rssi >= -80) rssiScore = 80;
+    else if (rssi >= -90) rssiScore = 60;
+    else if (rssi >= -100) rssiScore = 40;
+    else rssiScore = 20;
+  }
+
+  // Weight SNR more heavily (60/40) as it's more indicative of link quality
+  return Math.round(snrScore * 0.6 + rssiScore * 0.4);
+}
+
+/**
+ * Compute LBT stats from packet array
+ */
+function computeLBTStats(packets: Packet[], windowHours: number): ComputedLBTStats {
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - (windowHours * 3600);
+
+  // Filter to packets within window that have LBT data (transmitted packets)
+  const lbtPackets = packets.filter(p => 
+    p.timestamp >= cutoff && 
+    p.lbt_attempts !== undefined && 
+    p.lbt_attempts > 0
+  );
+
+  const totalPacketsWithLBT = lbtPackets.length;
+  const packetsWithRetries = lbtPackets.filter(p => (p.lbt_attempts ?? 0) > 1).length;
+  const retryRate = totalPacketsWithLBT > 0 ? (packetsWithRetries / totalPacketsWithLBT) * 100 : 0;
+
+  // Average retries (only counting packets that had retries)
+  const retriedPackets = lbtPackets.filter(p => (p.lbt_attempts ?? 0) > 1);
+  const avgRetries = retriedPackets.length > 0
+    ? retriedPackets.reduce((sum, p) => sum + (p.lbt_attempts ?? 0), 0) / retriedPackets.length
+    : 0;
+
+  // Channel busy count
+  const channelBusyCount = lbtPackets.filter(p => 
+    p.lbt_channel_busy === true || p.lbt_channel_busy === 1
+  ).length;
+  const channelBusyRate = totalPacketsWithLBT > 0 ? (channelBusyCount / totalPacketsWithLBT) * 100 : 0;
+
+  // Backoff timing
+  const allBackoffs: number[] = [];
+  for (const p of lbtPackets) {
+    const delays = parseBackoffDelays(p.lbt_backoff_delays_ms);
+    allBackoffs.push(...delays);
+  }
+  const totalBackoffMs = allBackoffs.reduce((sum, d) => sum + d, 0);
+  const avgBackoffMs = allBackoffs.length > 0 ? totalBackoffMs / allBackoffs.length : 0;
+  const maxBackoffMs = allBackoffs.length > 0 ? Math.max(...allBackoffs) : 0;
+
+  // Hourly breakdown for sparklines
+  const hourlyRetryRates: number[] = [];
+  for (let h = 0; h < 24; h++) {
+    const hourStart = now - ((24 - h) * 3600);
+    const hourEnd = hourStart + 3600;
+    const hourPackets = lbtPackets.filter(p => p.timestamp >= hourStart && p.timestamp < hourEnd);
+    const hourRetried = hourPackets.filter(p => (p.lbt_attempts ?? 0) > 1).length;
+    const rate = hourPackets.length > 0 ? (hourRetried / hourPackets.length) * 100 : 0;
+    hourlyRetryRates.push(rate);
+  }
+
+  return {
+    totalPacketsWithLBT,
+    packetsWithRetries,
+    retryRate,
+    avgRetries,
+    channelBusyCount,
+    channelBusyRate,
+    avgBackoffMs,
+    maxBackoffMs,
+    totalBackoffMs,
+    hourlyRetryRates,
+    windowHours,
+    packetCount: packets.length,
+  };
+}
+
+/**
+ * Compute link quality from neighbors
+ */
+function computeLinkQuality(neighbors: Record<string, NeighborInfo>): ComputedLinkQuality {
+  const neighborList = Object.entries(neighbors).map(([hash, info]) => {
+    const score = computeLinkScore(info.snr, info.rssi);
+    return {
+      name: info.name || info.node_name || hash.slice(0, 8),
+      hash,
+      rssi: info.rssi ?? -100,
+      snr: info.snr ?? -10,
+      score,
+    };
+  });
+
+  // Sort by score descending
+  neighborList.sort((a, b) => b.score - a.score);
+
+  const networkScore = neighborList.length > 0
+    ? neighborList.reduce((sum, n) => sum + n.score, 0) / neighborList.length
+    : 0;
+
+  return {
+    neighbors: neighborList,
+    networkScore: Math.round(networkScore),
+    bestLink: neighborList.length > 0 ? { name: neighborList[0].name, score: neighborList[0].score } : null,
+    worstLink: neighborList.length > 0 ? { name: neighborList[neighborList.length - 1].name, score: neighborList[neighborList.length - 1].score } : null,
+  };
+}
+
+/**
+ * Compute composite channel health
+ */
+function computeChannelHealth(
+  lbtStats: ComputedLBTStats | null,
+  noiseFloor: number | null,
+  linkQuality: ComputedLinkQuality | null
+): ComputedChannelHealth {
+  // LBT health: 100 = 0% retries, 0 = >20% retries
+  const lbtHealth = lbtStats
+    ? Math.max(0, Math.min(100, 100 - (lbtStats.retryRate * 5)))
+    : 50;
+
+  // Noise health: based on noise floor dBm
+  // -120 dBm = excellent (100), -90 dBm = poor (0)
+  let noiseHealth = 50;
+  if (noiseFloor !== null) {
+    noiseHealth = Math.max(0, Math.min(100, ((noiseFloor + 120) / 30) * 100));
+  }
+
+  // Link health: network score directly
+  const linkHealth = linkQuality?.networkScore ?? 50;
+
+  // Composite: weight LBT and link more heavily
+  const score = Math.round(lbtHealth * 0.35 + noiseHealth * 0.25 + linkHealth * 0.40);
+
+  // Status thresholds
+  let status: ComputedChannelHealth['status'];
+  if (score >= 85) status = 'excellent';
+  else if (score >= 70) status = 'good';
+  else if (score >= 50) status = 'fair';
+  else if (score >= 30) status = 'congested';
+  else status = 'critical';
+
+  return {
+    score,
+    status,
+    components: {
+      lbtHealth: Math.round(lbtHealth),
+      noiseHealth: Math.round(noiseHealth),
+      linkHealth: Math.round(linkHealth),
+    },
+  };
+}
+
 export interface LBTDataProviderProps {
   children: ReactNode;
 }
 
 export function LBTDataProvider({ children }: LBTDataProviderProps) {
-  // 24h trend data
-  const [lbtStats, setLbtStats] = useState<LBTStats | null>(null);
-  const [noiseFloor, setNoiseFloor] = useState<NoiseFloorStatsExtended | null>(null);
-  const [linkQuality, setLinkQuality] = useState<LinkQualityResponse | null>(null);
-
-  // Real-time health
-  const [channelHealth, setChannelHealth] = useState<ChannelHealthResponse | null>(null);
-
-  // Loading states
-  const [isTrendLoading, setIsTrendLoading] = useState(true);
-  const [isHealthLoading, setIsHealthLoading] = useState(true);
-
-  // Error
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [packets, setPackets] = useState<Packet[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Fetch 24h trend data (LBT stats, noise floor, link quality)
-   * Called every 60s - these metrics don't need real-time updates
+   * Fetch stats and recent packets
    */
-  const fetchTrendData = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const [lbtRes, noiseRes, linkRes] = await Promise.all([
-        getLBTStats(24),
-        getNoiseFloorStatsExtended(24),
-        getLinkQualityScores(),
+      const now = Math.floor(Date.now() / 1000);
+
+      // Fetch stats and 24h packets in parallel
+      const [statsRes, packetsRes] = await Promise.all([
+        getStats(),
+        getFilteredPackets({
+          start_timestamp: now - HOURS_24,
+          limit: 10000, // Should be enough for 24h
+        }),
       ]);
 
-      if (lbtRes.success && lbtRes.data) {
-        setLbtStats(lbtRes.data);
-      }
-      if (noiseRes.success && noiseRes.data) {
-        setNoiseFloor(noiseRes.data);
-      }
-      if (linkRes.success && linkRes.data) {
-        setLinkQuality(linkRes.data);
+      if (statsRes) {
+        setStats(statsRes);
       }
 
-      // Clear error on success
-      if (lbtRes.success || noiseRes.success || linkRes.success) {
-        setError(null);
+      if (packetsRes.success && packetsRes.data) {
+        setPackets(packetsRes.data);
       }
+
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch trend data');
+      setError(err instanceof Error ? err.message : 'Failed to fetch data');
     } finally {
-      setIsTrendLoading(false);
+      setIsLoading(false);
     }
   }, []);
 
   /**
-   * Fetch real-time channel health (1h window)
-   * Called every 15s for responsive health indicator
-   */
-  const fetchHealthData = useCallback(async () => {
-    try {
-      const res = await getChannelHealth();
-      if (res.success && res.data) {
-        setChannelHealth(res.data);
-        setError(null);
-      }
-    } catch (err) {
-      // Don't override trend data errors
-      if (!lbtStats && !noiseFloor && !linkQuality) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch health data');
-      }
-    } finally {
-      setIsHealthLoading(false);
-    }
-  }, [lbtStats, noiseFloor, linkQuality]);
-
-  /**
-   * Manual refresh - fetches all data
+   * Manual refresh
    */
   const refresh = useCallback(async () => {
-    setIsTrendLoading(true);
-    setIsHealthLoading(true);
-    await Promise.all([fetchTrendData(), fetchHealthData()]);
-  }, [fetchTrendData, fetchHealthData]);
+    setIsLoading(true);
+    await fetchData();
+  }, [fetchData]);
 
-  // Initial fetch and intervals
+  // Initial fetch and interval
   useEffect(() => {
-    // Initial fetch
-    void fetchTrendData();
-    void fetchHealthData();
+    void fetchData();
+    const interval = setInterval(() => void fetchData(), REFRESH_INTERVAL);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
-    // Set up intervals
-    const trendInterval = setInterval(() => void fetchTrendData(), REFRESH_INTERVAL_SLOW);
-    const healthInterval = setInterval(() => void fetchHealthData(), REFRESH_INTERVAL_FAST);
-
-    return () => {
-      clearInterval(trendInterval);
-      clearInterval(healthInterval);
-    };
-  }, [fetchTrendData, fetchHealthData]);
+  // Compute derived stats
+  const lbtStats = useMemo(() => computeLBTStats(packets, 24), [packets]);
+  const noiseFloor = stats?.noise_floor_dbm ?? null;
+  const linkQuality = useMemo(
+    () => stats?.neighbors ? computeLinkQuality(stats.neighbors) : null,
+    [stats?.neighbors]
+  );
+  const channelHealth = useMemo(
+    () => computeChannelHealth(lbtStats, noiseFloor, linkQuality),
+    [lbtStats, noiseFloor, linkQuality]
+  );
 
   const value: LBTData = {
     lbtStats,
     noiseFloor,
     linkQuality,
     channelHealth,
-    isLoading: isTrendLoading && isHealthLoading,
-    isTrendLoading,
-    isHealthLoading,
+    stats,
+    recentPackets: packets,
+    isLoading,
     error,
     refresh,
   };

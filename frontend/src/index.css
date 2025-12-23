@@ -2307,24 +2307,22 @@ body {
    Designed for the top row of the dashboard, responsive grid layout
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Base mini-widget card */
+/* Base mini-widget card - inherits glass-card for frosted glass effect */
 .mini-widget {
-  position: relative;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.75rem;
+  /* Override glass-card radius for smaller widgets */
+  border-radius: 0.875rem !important; /* 14px */
   padding: 0.75rem;
   min-height: 6rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  transition: all 0.2s ease;
-  overflow: hidden;
 }
 
+/* Hover state enhances the glass effect */
 .mini-widget:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elevated);
+  box-shadow:
+    inset 4px 4px 8px -4px rgba(180, 157, 255, 0.25),
+    inset -4px -4px 8px -4px rgba(100, 140, 180, 0.15);
 }
 
 /* Widget header row */

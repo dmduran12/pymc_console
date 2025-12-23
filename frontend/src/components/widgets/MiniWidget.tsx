@@ -16,7 +16,9 @@
  */
 
 import type { ReactNode } from 'react';
-import type { ChannelHealthStatus } from '@/types/api';
+
+/** Widget status types for color coding */
+export type WidgetStatus = 'excellent' | 'good' | 'fair' | 'congested' | 'critical' | 'unknown';
 
 export interface MiniWidgetProps {
   /** Widget title (displays in header) */
@@ -30,7 +32,7 @@ export interface MiniWidgetProps {
   /** Value size variant */
   valueSize?: 'sm' | 'md' | 'lg';
   /** Color status for the value */
-  status?: ChannelHealthStatus | 'unknown';
+  status?: WidgetStatus;
   /** Subtitle text below the value */
   subtitle?: string;
   /** Trend indicator: up (worse), down (better), or stable */
@@ -50,7 +52,7 @@ export interface MiniWidgetProps {
 /**
  * Get CSS class for value based on status
  */
-function getValueStatusClass(status?: ChannelHealthStatus | 'unknown'): string {
+function getValueStatusClass(status?: WidgetStatus): string {
   if (!status || status === 'unknown') return '';
   return status;
 }
@@ -134,7 +136,7 @@ export function MiniWidget({
     .filter(Boolean)
     .join(' ');
 
-  const widgetClasses = ['mini-widget', onClick && 'cursor-pointer', className]
+  const widgetClasses = ['mini-widget glass-card', onClick && 'cursor-pointer', className]
     .filter(Boolean)
     .join(' ');
 

@@ -7,11 +7,10 @@
 
 import { ArrowUpDown } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
-import { useLBTData } from './LBTDataContext';
-import type { ChannelHealthStatus } from '@/types/api';
+import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
 
 /** Get status based on worst link score */
-function getWorstLinkStatus(score: number): ChannelHealthStatus {
+function getWorstLinkStatus(score: number): ComputedChannelHealth['status'] {
   if (score >= 60) return 'excellent';
   if (score >= 40) return 'good';
   if (score >= 25) return 'fair';
@@ -26,10 +25,10 @@ function truncateName(name: string, maxLen: number = 8): string {
 }
 
 export function BestWorstLinkWidget() {
-  const { linkQuality, isTrendLoading, error } = useLBTData();
+  const { linkQuality, isLoading, error } = useLBTData();
 
-  const best = linkQuality?.best_link;
-  const worst = linkQuality?.worst_link;
+  const best = linkQuality?.bestLink;
+  const worst = linkQuality?.worstLink;
   const status = worst ? getWorstLinkStatus(worst.score) : 'unknown';
 
   // Custom content showing both links
@@ -55,7 +54,7 @@ export function BestWorstLinkWidget() {
       title="Link Range"
       icon={<ArrowUpDown className="mini-widget-icon" />}
       status={status}
-      isLoading={isTrendLoading}
+      isLoading={isLoading}
       error={error}
     >
       {linkDisplay}
