@@ -59,11 +59,11 @@ export interface UtilizationPoint {
  * Rollup buckets with proper time-weighted utilization.
  * 
  * For each output bucket:
- *   - Sum all airtime_ms from input buckets with data
- *   - Sum the duration of those buckets (not empty ones)
- *   - util% = (total_airtime / total_valid_duration) × 100
+ *   - Sum all airtime_ms from PRESENT buckets (0 is valid, absence is gap)
+ *   - Use SAME denominator for RX and TX (slice duration)
+ *   - util% = (total_airtime / slice_duration) × 100
  * 
- * Buckets with no data emit null (gaps in chart).
+ * Only emit null if NO buckets are present in the slice (true gap).
  */
 function rollupToUtilization(
   rxBuckets: BucketData[],
@@ -88,33 +88,34 @@ function rollupToUtilization(
     
     if (rxSlice.length === 0) continue;
     
-    // Sum airtime and count valid buckets (those with any packets)
+    // Sum airtime from all PRESENT buckets (0 airtime is valid data, not a gap)
+    // A bucket exists = device was online during that interval
     let rxAirtimeMs = 0;
     let txAirtimeMs = 0;
-    let rxValidBuckets = 0;
-    let txValidBuckets = 0;
+    let presentBuckets = 0;
     
     for (let j = 0; j < rxSlice.length; j++) {
-      if (rxSlice[j].count > 0) {
-        rxAirtimeMs += rxSlice[j].airtime_ms;
-        rxValidBuckets++;
+      const r = rxSlice[j];
+      if (r) {  // bucket exists = device was online
+        rxAirtimeMs += r.airtime_ms;  // includes 0 naturally
+        presentBuckets++;
       }
-      if (txSlice[j]?.count > 0) {
-        txAirtimeMs += txSlice[j].airtime_ms;
-        txValidBuckets++;
+      
+      const t = txSlice[j];
+      if (t) {
+        txAirtimeMs += t.airtime_ms;
       }
     }
     
-    // Time-weighted utilization: airtime / valid_duration
-    // null if no valid buckets (gap in data)
-    const rxValidDurationMs = rxValidBuckets * rawBucketDurationMs;
-    const txValidDurationMs = txValidBuckets * rawBucketDurationMs;
+    // Use SAME denominator for both RX and TX (makes comparison meaningful)
+    // null only if no buckets present at all (true data gap)
+    const sliceDurationMs = presentBuckets * rawBucketDurationMs;
     
-    const rxUtil = rxValidDurationMs > 0 
-      ? (rxAirtimeMs / rxValidDurationMs) * 100 
+    const rxUtil = sliceDurationMs > 0 
+      ? (rxAirtimeMs / sliceDurationMs) * 100 
       : null;
-    const txUtil = txValidDurationMs > 0 
-      ? (txAirtimeMs / txValidDurationMs) * 100 
+    const txUtil = sliceDurationMs > 0 
+      ? (txAirtimeMs / sliceDurationMs) * 100 
       : null;
     
     // Format timestamp
