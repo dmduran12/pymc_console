@@ -175,15 +175,16 @@ function AirtimeSpectrumChartComponent({
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       // Draw true spectrogram with bilinear splat, blur, log compression
+      // Pass DPR so spectrogram renders at native resolution
       drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
         yMax,
         gain: 8,
         gamma: 0.6,
         blurX: 4,
         blurY: 2,
+        dpr,
       });
     };
 
