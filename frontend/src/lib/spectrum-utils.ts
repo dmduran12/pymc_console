@@ -304,14 +304,15 @@ interface ColorStop {
   b: number;
 }
 
-// Inferno-inspired gradient: black → deep purple → orange → yellow → white
+// Inferno-inspired gradient: deep purple → magenta → orange → yellow → white
+// Note: Alpha handled separately - colormap is just RGB
 const INFERNO_STOPS: ColorStop[] = [
-  { t: 0.00, r:   0, g:   0, b:   0 },
-  { t: 0.20, r:  30, g:   0, b:  60 },
-  { t: 0.45, r: 120, g:  30, b: 140 },
-  { t: 0.70, r: 230, g:  90, b:  40 },
-  { t: 0.88, r: 255, g: 190, b:  60 },
-  { t: 1.00, r: 255, g: 255, b: 255 },
+  { t: 0.00, r:  40, g:   0, b:  80 },  // Deep purple (at threshold)
+  { t: 0.25, r: 120, g:  30, b: 140 },  // Purple-magenta
+  { t: 0.50, r: 200, g:  60, b:  80 },  // Magenta-red
+  { t: 0.70, r: 230, g:  90, b:  40 },  // Orange
+  { t: 0.88, r: 255, g: 190, b:  60 },  // Yellow
+  { t: 1.00, r: 255, g: 255, b: 255 },  // White
 ];
 
 function lerp(a: number, b: number, t: number): number {
@@ -408,12 +409,30 @@ export function drawSpectrogram(
   const p99 = values[Math.floor(values.length * 0.99)] || 1;
 
   // Step 4: Create image with log compression and inferno colormap
+  // Use alpha channel for intensity - fully transparent where no energy
   const img = ctx.createImageData(chartWidth, chartHeight);
   const data = img.data;
 
+  // Threshold below which we consider "no signal" (transparent)
+  const threshold = 0.02;
+
   for (let i = 0; i < blurredGrid.length; i++) {
     // Log-ish compression for dynamic range
-    const v = Math.log1p(gain * (blurredGrid[i] + floor)) / Math.log1p(gain * p99);
+    const raw = blurredGrid[i] / p99;
+    
+    // Below threshold = fully transparent
+    if (raw < threshold) {
+      const o = i * 4;
+      data[o + 0] = 0;
+      data[o + 1] = 0;
+      data[o + 2] = 0;
+      data[o + 3] = 0;
+      continue;
+    }
+
+    // Map (threshold, 1) to (0, 1) for color
+    const normalized = (raw - threshold) / (1 - threshold);
+    const v = Math.log1p(gain * (normalized + floor)) / Math.log1p(gain * 1);
     const t = Math.pow(clamp(v, 0, 1), gamma);
 
     const { r, g, b } = colorInferno(t);
@@ -421,7 +440,8 @@ export function drawSpectrogram(
     data[o + 0] = r;
     data[o + 1] = g;
     data[o + 2] = b;
-    data[o + 3] = Math.round(255 * 0.92); // Slight transparency
+    // Alpha ramps with intensity: dim at low energy, solid at high
+    data[o + 3] = Math.round(255 * (0.4 + 0.55 * t));
   }
 
   // Draw the spectrogram image in the chart area
