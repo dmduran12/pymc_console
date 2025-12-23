@@ -181,11 +181,11 @@ function AirtimeSpectrumChartComponent({
       const xBins = width;
       const cols = aggregateToColumns(samples, startTs, endTs, xBins);
 
-      // Draw spectrum analyzer
+      // Draw LED-style spectrum analyzer
       drawSpectrum(ctx, cols, width, height, {
         yMax,
-        tailPx: 24,
-        showDensity: true,
+        ledSteps: 24,
+        ledGap: 1,
       });
     };
 

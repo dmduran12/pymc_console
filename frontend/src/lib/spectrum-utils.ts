@@ -162,20 +162,23 @@ export function aggregateToColumns(
 
 export interface DrawSpectrumOptions {
   yMax: number;        // Max Y value (e.g., 30%)
-  tailPx: number;      // Peak tail length in pixels
-  showDensity: boolean; // Show density bed at bottom
+  ledSteps?: number;   // Number of LED segments (default 24)
+  ledGap?: number;     // Gap between LEDs in pixels (default 1)
 }
 
 const RX_COLOR = { r: 57, g: 217, b: 138 };   // #39D98A green
 const TX_COLOR = { r: 176, g: 176, b: 195 };  // #B0B0C3 gray
 
 /**
- * Draw spectrum analyzer visualization on canvas.
+ * Draw LED-style spectrum analyzer visualization on canvas.
  * 
- * Draws:
- * - Bright "peak" pixel at rxMax/txMax
- * - Fading tail below peak (peak-hold vibe)
- * - Optional density bed near bottom
+ * Each x-pixel column draws vertical LED bars from baseline up to the peak (max util over W).
+ * LEDs are quantized into discrete segments with small gaps for classic analyzer look.
+ * 
+ * Visual hierarchy:
+ * - Peak LED: brightest (alpha 0.9)
+ * - Upper LEDs: high alpha with slight fade toward bottom
+ * - Creates vertical columns that "pop" at a distance
  */
 export function drawSpectrum(
   ctx: CanvasRenderingContext2D,
@@ -184,7 +187,7 @@ export function drawSpectrum(
   height: number,
   options: DrawSpectrumOptions
 ): void {
-  const { yMax, tailPx, showDensity } = options;
+  const { yMax, ledSteps = 24, ledGap = 1 } = options;
   
   // Clear canvas
   ctx.clearRect(0, 0, width, height);
@@ -200,78 +203,64 @@ export function drawSpectrum(
   
   if (chartWidth <= 0 || chartHeight <= 0) return;
   
-  const colWidth = chartWidth / cols.length;
+  // Column width: 2px for visibility, or 1px if many columns
+  const idealColWidth = cols.length > chartWidth / 2 ? 1 : 2;
+  const colWidth = Math.max(1, Math.min(idealColWidth, chartWidth / cols.length));
   
-  // Helper: Y position from util% (0 at bottom, yMax at top)
-  const yFromUtil = (util: number): number => {
-    const clamped = Math.min(util, yMax);
-    return topMargin + chartHeight * (1 - clamped / yMax);
-  };
+  // LED dimensions
+  const totalLedHeight = chartHeight / ledSteps;
+  const ledHeight = Math.max(1, totalLedHeight - ledGap);
   
-  // Helper: Draw a gradient tail from peak down
-  const drawPeakWithTail = (
+  // Baseline Y (bottom of chart area)
+  const baseY = topMargin + chartHeight;
+  
+  /**
+   * Draw LED column from baseline up to the peak value.
+   * Uses quantized LED steps with gaps for classic analyzer look.
+   */
+  const drawLedColumn = (
     x: number,
     peakUtil: number,
     color: { r: number; g: number; b: number },
-    alpha: number
+    peakAlpha: number,
+    baseAlpha: number
   ): void => {
     if (peakUtil <= 0) return;
     
-    const peakY = yFromUtil(peakUtil);
-    const baseY = yFromUtil(0);
-    const tailLen = Math.min(tailPx, baseY - peakY);
+    // How many LED segments to light up (0 to ledSteps)
+    const normalizedPeak = Math.min(peakUtil / yMax, 1);
+    const litLeds = Math.ceil(normalizedPeak * ledSteps);
     
-    // Draw peak pixel (bright)
-    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
-    ctx.fillRect(x, peakY, Math.max(1, colWidth - 0.5), 2);
+    if (litLeds === 0) return;
     
-    // Draw fading tail below peak
-    if (tailLen > 2) {
-      const gradient = ctx.createLinearGradient(0, peakY + 2, 0, peakY + tailLen);
-      gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.6})`);
-      gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x, peakY + 2, Math.max(1, colWidth - 0.5), tailLen - 2);
+    // Draw LEDs from bottom to top
+    for (let led = 0; led < litLeds; led++) {
+      // Y position: bottom-up
+      const y = baseY - (led + 1) * totalLedHeight + ledGap;
+      
+      // Alpha gradient: base alpha at bottom, peak alpha at top
+      // Creates visual emphasis on the peak
+      const t = led / Math.max(1, litLeds - 1); // 0 at bottom, 1 at top
+      const alpha = baseAlpha + t * (peakAlpha - baseAlpha);
+      
+      ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+      ctx.fillRect(x, y, colWidth, ledHeight);
     }
   };
-  
-  // Helper: Draw density bed (faint activity indicator at bottom)
-  const drawDensityBed = (
-    x: number,
-    hits: number,
-    maxHits: number,
-    color: { r: number; g: number; b: number }
-  ): void => {
-    if (hits <= 0 || maxHits <= 0) return;
-    
-    const density = hits / maxHits;
-    const bedHeight = 3;
-    const y = topMargin + chartHeight - bedHeight;
-    
-    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${density * 0.25})`;
-    ctx.fillRect(x, y, Math.max(1, colWidth - 0.5), bedHeight);
-  };
-  
-  // Find max hits for density normalization
-  const maxRxHits = Math.max(...cols.map(c => c.rxHits), 1);
-  const maxTxHits = Math.max(...cols.map(c => c.txHits), 1);
   
   // Draw each column
   for (let i = 0; i < cols.length; i++) {
     const col = cols[i];
     const x = leftMargin + i * colWidth;
     
-    // Draw TX first (behind RX)
-    drawPeakWithTail(x, col.txMax, TX_COLOR, 0.5);
+    // Skip if x is beyond chart width
+    if (x > leftMargin + chartWidth) break;
     
-    // Draw RX on top
-    drawPeakWithTail(x, col.rxMax, RX_COLOR, 0.7);
+    // Draw TX first (behind RX) - lower alpha, more subtle
+    drawLedColumn(x, col.txMax, TX_COLOR, 0.65, 0.25);
     
-    // Draw density beds if enabled
-    if (showDensity) {
-      drawDensityBed(x, col.txHits, maxTxHits, TX_COLOR);
-      drawDensityBed(x, col.rxHits, maxRxHits, RX_COLOR);
-    }
+    // Draw RX on top - higher alpha, more prominent
+    drawLedColumn(x, col.rxMax, RX_COLOR, 0.90, 0.35);
   }
 }
 
