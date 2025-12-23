@@ -1,12 +1,12 @@
 /**
  * Airtime Utilization Chart
  * 
- * Displays TX/RX airtime utilization as clean line charts.
+ * Uses ComposedChart with:
+ * - Bars for Peak (spike intensity at fixed W=10s window)
+ * - Lines for Avg (trend over display bucket)
  * 
- * Accepts pre-computed UtilizationPoint[] data with proper time-weighted
- * utilization calculation: util% = Σairtime / Σinterval_duration × 100
- * 
- * null values represent gaps (no data) - shown as breaks in line.
+ * This separation ensures spikes are visible regardless of zoom level.
+ * A "17% spike" means the same thing whether viewing 1H or 7D.
  * 
  * Colors:
  * - RX Airtime: Green (#39D98A) - time spent receiving
@@ -17,7 +17,8 @@
 
 import { memo, useMemo } from 'react';
 import {
-  LineChart,
+  ComposedChart,
+  Bar,
   Line,
   XAxis,
   YAxis,
@@ -101,13 +102,12 @@ function UtilLegend({ payload }: { payload?: Array<{ value: string; color: strin
 }
 
 /**
- * Airtime Utilization Line Chart
+ * Airtime Utilization ComposedChart
  * 
  * Displays utilization with:
- * - Pre-computed time-weighted values (no internal calculation)
- * - null gaps shown as line breaks (connectNulls=false)
+ * - Bars for Peak values (spike intensity at fixed W=10s window)
+ * - Lines for Avg values (trend over display bucket)
  * - Fixed Y-axis (0-30%) for consistent feel across zoom levels
- * - Monotone interpolation for smooth curves
  */
 function TrafficStackedChartComponent({
   data,
@@ -130,7 +130,7 @@ function TrafficStackedChartComponent({
   return (
     <div className="h-80">
       <ResponsiveContainer width="100%" height={320}>
-        <LineChart data={data}>
+        <ComposedChart data={data}>
           <CartesianGrid
             strokeDasharray="3 3"
             stroke="rgba(255,255,255,0.06)"
@@ -157,56 +157,48 @@ function TrafficStackedChartComponent({
           <Tooltip content={<UtilTooltip />} />
           <Legend content={<UtilLegend />} />
           
-          {/* RX Average - main trend line */}
+          {/* RX Peak bars - spike intensity (behind lines) */}
+          <Bar
+            dataKey="rxPeak"
+            name="RX Peak"
+            fill={RX_COLOR}
+            fillOpacity={0.25}
+            isAnimationActive={false}
+          />
+          
+          {/* TX Peak bars - spike intensity (behind lines) */}
+          <Bar
+            dataKey="txPeak"
+            name="TX Peak"
+            fill={TX_COLOR}
+            fillOpacity={0.20}
+            isAnimationActive={false}
+          />
+          
+          {/* RX Average - main trend line (on top) */}
           <Line
             type="linear"
             dataKey="rxAvg"
             name="RX Avg"
             stroke={RX_COLOR}
-            strokeWidth={1.5}
+            strokeWidth={2}
             dot={false}
             connectNulls={false}
             isAnimationActive={false}
           />
           
-          {/* RX Peak - spike indicator (thin, semi-transparent) */}
-          <Line
-            type="linear"
-            dataKey="rxPeak"
-            name="RX Peak"
-            stroke={RX_COLOR}
-            strokeWidth={0.75}
-            strokeOpacity={0.4}
-            dot={false}
-            connectNulls={false}
-            isAnimationActive={false}
-          />
-          
-          {/* TX Average - main trend line */}
+          {/* TX Average - main trend line (on top) */}
           <Line
             type="linear"
             dataKey="txAvg"
             name="TX Avg"
             stroke={TX_COLOR}
-            strokeWidth={1.5}
+            strokeWidth={2}
             dot={false}
             connectNulls={false}
             isAnimationActive={false}
           />
-          
-          {/* TX Peak - spike indicator (thin, semi-transparent) */}
-          <Line
-            type="linear"
-            dataKey="txPeak"
-            name="TX Peak"
-            stroke={TX_COLOR}
-            strokeWidth={0.75}
-            strokeOpacity={0.4}
-            dot={false}
-            connectNulls={false}
-            isAnimationActive={false}
-          />
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

@@ -19,107 +19,101 @@ import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 // ============================================================================
 
 /**
- * CANONICAL UTILIZATION DEFINITION:
+ * FIXED SPIKE WINDOW (W)
  * 
- *   util% = (Σ airtime_ms in interval) / (interval_duration_ms) × 100
+ * Peak utilization is always measured over this fixed window, regardless of
+ * time range. This ensures "17% spike" means the same thing in 1H and 7D views.
  * 
- * This is a time-weighted average that stays consistent across zoom levels.
- * 
- * Key principles:
- * 1. Sum airtime over the interval (not average of per-point percentages)
- * 2. Missing data = null (not 0) - prevents dragging down mean
- * 3. Weighted rollup: bucket_util = Σairtime / Σvalid_duration
+ * W = 10s is good for spikey networks (captures short bursts)
  */
+const SPIKE_WINDOW_SECONDS = 10;
 
-/** Max display points - rollup to this count */
+/** Max display points for chart */
 const MAX_DISPLAY_POINTS = 720;
-
-/** Bucket duration targets by time range for consistent feel */
-const BUCKET_DURATIONS: Record<number, number> = {
-  1: 5,      // 1H: 5s buckets (720 points)
-  3: 15,    // 3H: 15s buckets (720 points)
-  12: 60,   // 12H: 1m buckets (720 points)
-  24: 120,  // 24H: 2m buckets (720 points)
-  72: 360,  // 3D: 6m buckets (720 points)
-  168: 840, // 7D: 14m buckets (720 points)
-};
 
 /**
  * Utilization point for chart display.
- * Includes both avg (main trend) and peak (spike indicator).
- * null values represent gaps (no data) - chart will break the line.
+ * - avg: time-weighted average over display bin (trend)
+ * - peak: max instantaneous util from any W-second window (spike intensity)
  */
 export interface UtilizationPoint {
   time: string;
   timestamp: number;
-  rxAvg: number | null;   // Average util over the display bucket
-  rxPeak: number | null;  // Max util from any raw bucket in the slice
+  rxAvg: number | null;
+  rxPeak: number | null;
   txAvg: number | null;
   txPeak: number | null;
 }
 
 /**
- * Rollup buckets with avg + peak utilization.
+ * Time-based rollup with spike preservation.
  * 
- * For each output bucket:
- *   - avg: total airtime / total duration (time-weighted average)
- *   - peak: max utilization from any single raw bucket (spike indicator)
- * 
- * Buckets are DENSE (pre-initialized with zeros), so 0 = idle, not gap.
+ * Key insight: peak is computed from individual W-second buckets,
+ * so a 17% spike in a 10s window stays 17% regardless of display bin size.
  */
-function rollupToUtilization(
-  rxBuckets: BucketData[],
-  txBuckets: BucketData[],  // transmitted + forwarded combined
-  rawBucketDurationMs: number,
-  targetCount: number
+function rollupSpikePreserving(
+  rx: BucketData[],
+  tx: BucketData[],
+  baseBucketMs: number,  // W in milliseconds
+  startTs: number,
+  endTs: number,
+  targetPoints: number
 ): UtilizationPoint[] {
-  if (rxBuckets.length === 0) return [];
+  if (endTs <= startTs || targetPoints <= 0 || rx.length === 0) return [];
   
-  const ratio = Math.max(1, rxBuckets.length / targetCount);
-  const result: UtilizationPoint[] = [];
+  const rangeMs = (endTs - startTs) * 1000; // convert to ms
+  
+  // Choose display bin size (multiple of base bucket)
+  const approxBinMs = rangeMs / targetPoints;
+  const binSizeMs = Math.max(baseBucketMs, Math.ceil(approxBinMs / baseBucketMs) * baseBucketMs);
+  const binSizeSec = binSizeMs / 1000;
   
   // Determine time format based on span
-  const totalHours = (rxBuckets.length * rawBucketDurationMs) / (1000 * 60 * 60);
+  const totalHours = rangeMs / (1000 * 60 * 60);
   const showDate = totalHours > 24;
   
-  for (let i = 0; i < targetCount && i * ratio < rxBuckets.length; i++) {
-    const startIdx = Math.floor(i * ratio);
-    const endIdx = Math.min(Math.floor((i + 1) * ratio), rxBuckets.length);
-    const rxSlice = rxBuckets.slice(startIdx, endIdx);
-    const txSlice = txBuckets.slice(startIdx, endIdx);
+  const result: UtilizationPoint[] = [];
+  
+  let rxIdx = 0;
+  let txIdx = 0;
+  
+  for (let t0 = startTs; t0 < endTs; t0 += binSizeSec) {
+    const t1 = Math.min(endTs, t0 + binSizeSec);
     
-    if (rxSlice.length === 0) continue;
+    let rxSum = 0, txSum = 0;
+    let rxPeak = 0, txPeak = 0;
+    let rxCount = 0, txCount = 0;
     
-    let rxAirtimeMs = 0;
-    let txAirtimeMs = 0;
-    let rxPeak = 0;
-    let txPeak = 0;
-    
-    const sliceLen = rxSlice.length;
-    const durationMs = sliceLen * rawBucketDurationMs;
-    
-    for (let j = 0; j < sliceLen; j++) {
-      const r = rxSlice[j];
-      const t = txSlice[j];
-      
-      // Sum airtime (buckets are dense, so always present)
-      rxAirtimeMs += r?.airtime_ms ?? 0;
-      txAirtimeMs += t?.airtime_ms ?? 0;
-      
-      // Track peak util from individual raw buckets
-      const rUtil = r ? (r.airtime_ms / rawBucketDurationMs) * 100 : 0;
-      const tUtil = t ? (t.airtime_ms / rawBucketDurationMs) * 100 : 0;
-      
-      if (rUtil > rxPeak) rxPeak = rUtil;
-      if (tUtil > txPeak) txPeak = tUtil;
+    // Advance rx pointer and collect buckets in [t0, t1)
+    while (rxIdx < rx.length && rx[rxIdx].start < t0) rxIdx++;
+    let k = rxIdx;
+    while (k < rx.length && rx[k].start < t1) {
+      const util = (rx[k].airtime_ms / baseBucketMs) * 100;
+      if (util > rxPeak) rxPeak = util;
+      rxSum += rx[k].airtime_ms;
+      rxCount++;
+      k++;
     }
     
-    // Avg = total airtime / total duration
-    const rxAvg = durationMs > 0 ? (rxAirtimeMs / durationMs) * 100 : null;
-    const txAvg = durationMs > 0 ? (txAirtimeMs / durationMs) * 100 : null;
+    // Advance tx pointer and collect buckets in [t0, t1)
+    while (txIdx < tx.length && tx[txIdx].start < t0) txIdx++;
+    let m = txIdx;
+    while (m < tx.length && tx[m].start < t1) {
+      const util = (tx[m].airtime_ms / baseBucketMs) * 100;
+      if (util > txPeak) txPeak = util;
+      txSum += tx[m].airtime_ms;
+      txCount++;
+      m++;
+    }
+    
+    // Avg = total airtime / bin duration
+    const durMs = (t1 - t0) * 1000;
+    const rxAvg = rxCount > 0 ? (rxSum / durMs) * 100 : null;
+    const txAvg = txCount > 0 ? (txSum / durMs) * 100 : null;
     
     // Format timestamp
-    const date = new Date(rxSlice[0].start * 1000);
+    const midTs = Math.floor((t0 + t1) / 2);
+    const date = new Date(midTs * 1000);
     let time: string;
     if (showDate) {
       time = date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
@@ -130,12 +124,15 @@ function rollupToUtilization(
     
     result.push({
       time,
-      timestamp: rxSlice[0].start,
+      timestamp: midTs,
       rxAvg,
-      rxPeak: durationMs > 0 ? rxPeak : null,
+      rxPeak: rxCount > 0 ? rxPeak : null,
       txAvg,
-      txPeak: durationMs > 0 ? txPeak : null,
+      txPeak: txCount > 0 ? txPeak : null,
     });
+    
+    rxIdx = k;
+    txIdx = m;
   }
   
   return result;
@@ -150,13 +147,6 @@ function combineTxBuckets(transmitted: BucketData[], forwarded: BucketData[]): B
     count: tx.count + (forwarded[i]?.count ?? 0),
     airtime_ms: tx.airtime_ms + (forwarded[i]?.airtime_ms ?? 0),
   }));
-}
-
-/**
- * Get optimal bucket duration for a time range.
- */
-function getBucketDuration(hours: number): number {
-  return BUCKET_DURATIONS[hours] ?? Math.ceil((hours * 3600) / MAX_DISPLAY_POINTS);
 }
 
 // ============================================================================
@@ -177,9 +167,9 @@ export default function Statistics() {
   const timeRange = STATISTICS_TIME_RANGES[debouncedRange].hours;
   const timeRangeMinutes = timeRange * 60;
   
-  // Get bucket duration for this time range
-  const bucketDurationSeconds = getBucketDuration(timeRange);
-  const bucketCount = Math.ceil((timeRangeMinutes * 60) / bucketDurationSeconds);
+  // Always fetch at fixed spike window resolution (W = 10s)
+  // This ensures "17% spike" means the same thing in 1H and 7D views
+  const bucketCount = Math.ceil((timeRangeMinutes * 60) / SPIKE_WINDOW_SECONDS);
 
   useEffect(() => {
     async function fetchData() {
@@ -210,18 +200,25 @@ export default function Statistics() {
     fetchData();
   }, [timeRange, timeRangeMinutes, bucketCount]);
   
-  // Compute utilization points with proper time-weighted rollup
+  // Compute utilization points with spike-preserving rollup
   const utilizationData = useMemo((): UtilizationPoint[] => {
     if (!rawBucketedStats) return [];
     
-    const { received, transmitted, forwarded, bucket_duration_seconds } = rawBucketedStats;
-    const rawBucketDurationMs = bucket_duration_seconds * 1000;
+    const { received, transmitted, forwarded, bucket_duration_seconds, start_time, end_time } = rawBucketedStats;
+    const baseBucketMs = bucket_duration_seconds * 1000;
     
     // Combine TX sources
     const txBuckets = combineTxBuckets(transmitted, forwarded);
     
-    // Rollup to display points with proper weighted utilization
-    return rollupToUtilization(received, txBuckets, rawBucketDurationMs, MAX_DISPLAY_POINTS);
+    // Time-based rollup preserving spikes
+    return rollupSpikePreserving(
+      received, 
+      txBuckets, 
+      baseBucketMs, 
+      start_time, 
+      end_time, 
+      MAX_DISPLAY_POINTS
+    );
   }, [rawBucketedStats]);
 
   // Poll utilization only, with intervals by range:
