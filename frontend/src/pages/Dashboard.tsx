@@ -11,6 +11,7 @@ import { getBucketedStats, type BucketedStats, type BucketData } from '@/lib/api
 import { Home, Radio, TrendingUp, ArrowUpRight, XCircle, Clock } from 'lucide-react';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { TxDelayCard } from '@/components/stats/TxDelayCard';
+import { WidgetRow } from '@/components/widgets';
 import {
   AreaChart,
   Area,
@@ -237,6 +238,9 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* LBT Insights Widget Row */}
+      <WidgetRow />
 
       {/* Stats Grid - Secondary Row (4 cards) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
