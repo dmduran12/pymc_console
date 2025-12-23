@@ -46,24 +46,26 @@ const BUCKET_DURATIONS: Record<number, number> = {
 
 /**
  * Utilization point for chart display.
+ * Includes both avg (main trend) and peak (spike indicator).
  * null values represent gaps (no data) - chart will break the line.
  */
 export interface UtilizationPoint {
   time: string;
   timestamp: number;
-  rxUtil: number | null;  // null = no data (gap)
-  txUtil: number | null;
+  rxAvg: number | null;   // Average util over the display bucket
+  rxPeak: number | null;  // Max util from any raw bucket in the slice
+  txAvg: number | null;
+  txPeak: number | null;
 }
 
 /**
- * Rollup buckets with proper time-weighted utilization.
+ * Rollup buckets with avg + peak utilization.
  * 
  * For each output bucket:
- *   - Sum all airtime_ms from PRESENT buckets (0 is valid, absence is gap)
- *   - Use SAME denominator for RX and TX (slice duration)
- *   - util% = (total_airtime / slice_duration) × 100
+ *   - avg: total airtime / total duration (time-weighted average)
+ *   - peak: max utilization from any single raw bucket (spike indicator)
  * 
- * Only emit null if NO buckets are present in the slice (true gap).
+ * Buckets are DENSE (pre-initialized with zeros), so 0 = idle, not gap.
  */
 function rollupToUtilization(
   rxBuckets: BucketData[],
@@ -88,35 +90,33 @@ function rollupToUtilization(
     
     if (rxSlice.length === 0) continue;
     
-    // Sum airtime from all PRESENT buckets (0 airtime is valid data, not a gap)
-    // A bucket exists = device was online during that interval
     let rxAirtimeMs = 0;
     let txAirtimeMs = 0;
-    let presentBuckets = 0;
+    let rxPeak = 0;
+    let txPeak = 0;
     
-    for (let j = 0; j < rxSlice.length; j++) {
+    const sliceLen = rxSlice.length;
+    const durationMs = sliceLen * rawBucketDurationMs;
+    
+    for (let j = 0; j < sliceLen; j++) {
       const r = rxSlice[j];
-      if (r) {  // bucket exists = device was online
-        rxAirtimeMs += r.airtime_ms;  // includes 0 naturally
-        presentBuckets++;
-      }
-      
       const t = txSlice[j];
-      if (t) {
-        txAirtimeMs += t.airtime_ms;
-      }
+      
+      // Sum airtime (buckets are dense, so always present)
+      rxAirtimeMs += r?.airtime_ms ?? 0;
+      txAirtimeMs += t?.airtime_ms ?? 0;
+      
+      // Track peak util from individual raw buckets
+      const rUtil = r ? (r.airtime_ms / rawBucketDurationMs) * 100 : 0;
+      const tUtil = t ? (t.airtime_ms / rawBucketDurationMs) * 100 : 0;
+      
+      if (rUtil > rxPeak) rxPeak = rUtil;
+      if (tUtil > txPeak) txPeak = tUtil;
     }
     
-    // Use SAME denominator for both RX and TX (makes comparison meaningful)
-    // null only if no buckets present at all (true data gap)
-    const sliceDurationMs = presentBuckets * rawBucketDurationMs;
-    
-    const rxUtil = sliceDurationMs > 0 
-      ? (rxAirtimeMs / sliceDurationMs) * 100 
-      : null;
-    const txUtil = sliceDurationMs > 0 
-      ? (txAirtimeMs / sliceDurationMs) * 100 
-      : null;
+    // Avg = total airtime / total duration
+    const rxAvg = durationMs > 0 ? (rxAirtimeMs / durationMs) * 100 : null;
+    const txAvg = durationMs > 0 ? (txAirtimeMs / durationMs) * 100 : null;
     
     // Format timestamp
     const date = new Date(rxSlice[0].start * 1000);
@@ -131,8 +131,10 @@ function rollupToUtilization(
     result.push({
       time,
       timestamp: rxSlice[0].start,
-      rxUtil,
-      txUtil,
+      rxAvg,
+      rxPeak: durationMs > 0 ? rxPeak : null,
+      txAvg,
+      txPeak: durationMs > 0 ? txPeak : null,
     });
   }
   
@@ -296,14 +298,14 @@ export default function Statistics() {
   const currentRange = STATISTICS_TIME_RANGES[selectedRange];
   
   // Calculate RX utilization stats from the utilization data
-  // Uses proper time-weighted calculation
   const rxUtilStats = useMemo(() => {
-    const validPoints = utilizationData.filter(p => p.rxUtil !== null);
+    const validPoints = utilizationData.filter(p => p.rxAvg !== null);
     if (validPoints.length === 0) return { peak: 0, mean: 0 };
     
-    const rxValues = validPoints.map(p => p.rxUtil!);
-    const peak = Math.max(...rxValues);
-    const mean = rxValues.reduce((a, b) => a + b, 0) / rxValues.length;
+    // Peak = max of all rxPeak values (highest spike in any raw bucket)
+    const peak = Math.max(...validPoints.map(p => p.rxPeak ?? 0));
+    // Mean = average of rxAvg values (overall trend)
+    const mean = validPoints.reduce((sum, p) => sum + (p.rxAvg ?? 0), 0) / validPoints.length;
     
     return { peak, mean };
   }, [utilizationData]);

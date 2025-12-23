@@ -157,11 +157,11 @@ function TrafficStackedChartComponent({
           <Tooltip content={<UtilTooltip />} />
           <Legend content={<UtilLegend />} />
           
-          {/* RX Utilization - Green */}
+          {/* RX Average - main trend line */}
           <Line
             type="linear"
-            dataKey="rxUtil"
-            name="RX Airtime"
+            dataKey="rxAvg"
+            name="RX Avg"
             stroke={RX_COLOR}
             strokeWidth={1.5}
             dot={false}
@@ -169,13 +169,39 @@ function TrafficStackedChartComponent({
             isAnimationActive={false}
           />
           
-          {/* TX Utilization - Gray */}
+          {/* RX Peak - spike indicator (thin, semi-transparent) */}
           <Line
             type="linear"
-            dataKey="txUtil"
-            name="TX Airtime"
+            dataKey="rxPeak"
+            name="RX Peak"
+            stroke={RX_COLOR}
+            strokeWidth={0.75}
+            strokeOpacity={0.4}
+            dot={false}
+            connectNulls={false}
+            isAnimationActive={false}
+          />
+          
+          {/* TX Average - main trend line */}
+          <Line
+            type="linear"
+            dataKey="txAvg"
+            name="TX Avg"
             stroke={TX_COLOR}
             strokeWidth={1.5}
+            dot={false}
+            connectNulls={false}
+            isAnimationActive={false}
+          />
+          
+          {/* TX Peak - spike indicator (thin, semi-transparent) */}
+          <Line
+            type="linear"
+            dataKey="txPeak"
+            name="TX Peak"
+            stroke={TX_COLOR}
+            strokeWidth={0.75}
+            strokeOpacity={0.4}
             dot={false}
             connectNulls={false}
             isAnimationActive={false}
