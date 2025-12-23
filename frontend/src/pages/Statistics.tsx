@@ -25,9 +25,18 @@ import { combineTxBuckets, toUtilSamples, type UtilSample } from '@/lib/spectrum
  * Peak utilization is always measured over this fixed window, regardless of
  * time range. This ensures "17% spike" means the same thing in 1H and 7D views.
  * 
- * W = 10s is good for spikey networks (captures short bursts)
+ * W = 5s for good resolution on short timeframes while capturing bursts
  */
-const SPIKE_WINDOW_SECONDS = 10;
+const SPIKE_WINDOW_SECONDS = 5;
+
+/**
+ * MAX BUCKETS TO FETCH
+ * 
+ * Limit bucket count for long timeframes to prevent frontend overload.
+ * 7D at 5s = 120,960 buckets → way too many
+ * Cap at ~15,000 which is reasonable for rendering
+ */
+const MAX_BUCKETS = 15000;
 
 // ============================================================================
 // Statistics Page Component
@@ -47,9 +56,10 @@ export default function Statistics() {
   const timeRange = STATISTICS_TIME_RANGES[debouncedRange].hours;
   const timeRangeMinutes = timeRange * 60;
   
-  // Always fetch at fixed spike window resolution (W = 10s)
-  // This ensures "17% spike" means the same thing in 1H and 7D views
-  const bucketCount = Math.ceil((timeRangeMinutes * 60) / SPIKE_WINDOW_SECONDS);
+  // Fetch at fixed spike window resolution (W = 5s)
+  // Cap bucket count for long timeframes to prevent frontend overload
+  const rawBucketCount = Math.ceil((timeRangeMinutes * 60) / SPIKE_WINDOW_SECONDS);
+  const bucketCount = Math.min(rawBucketCount, MAX_BUCKETS);
 
   useEffect(() => {
     async function fetchData() {
