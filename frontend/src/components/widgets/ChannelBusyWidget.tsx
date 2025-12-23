@@ -5,7 +5,7 @@
  * indicating serious congestion issues.
  */
 
-import { Ban } from 'lucide-react';
+import { EarOff } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
 
@@ -29,7 +29,7 @@ export function ChannelBusyWidget() {
   return (
     <MiniWidget
       title="Ch. Busy"
-      icon={<Ban className="mini-widget-icon" />}
+      icon={<EarOff className="mini-widget-icon" />}
       value={busyEvents}
       status={status}
       subtitle={lbtStats ? `${busyRate.toFixed(2)}% of ${totalTx} TX` : undefined}

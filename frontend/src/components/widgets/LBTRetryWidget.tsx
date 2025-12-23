@@ -6,7 +6,7 @@
  */
 
 import { useMemo } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCwOff } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line } from 'recharts';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
@@ -49,7 +49,7 @@ export function LBTRetryWidget() {
   return (
     <MiniWidget
       title="LBT Retries"
-      icon={<RefreshCw className="mini-widget-icon" />}
+      icon={<RefreshCwOff className="mini-widget-icon" />}
       value={retryRate.toFixed(1)}
       unit="%"
       status={status}
@@ -57,22 +57,24 @@ export function LBTRetryWidget() {
       isLoading={isLoading}
       error={error}
     >
-      {chartData.length > 0 && (
-        <div className="mini-widget-sparkline">
+      <div className="mini-widget-sparkline">
+        {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
               <Line
                 type="monotone"
                 dataKey="value"
                 stroke={strokeColor}
-                strokeWidth={1.5}
+                strokeWidth={1}
                 dot={false}
                 isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
-        </div>
-      )}
+        ) : (
+          <div className="h-full" />
+        )}
+      </div>
     </MiniWidget>
   );
 }
