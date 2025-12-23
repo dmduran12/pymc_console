@@ -180,10 +180,10 @@ function AirtimeSpectrumChartComponent({
       // Pass DPR so spectrogram renders at native resolution
       drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
         yMax,
-        gain: 6,
+        gain: 10,
         gamma: 0.5,
-        blurX: 3,   // Tight horizontal blur
-        blurY: 2,   // Tight vertical blur
+        blurX: 8,   // Strong horizontal blur for persistence/ridges
+        blurY: 4,   // Moderate vertical blur for smooth bands
         dpr,
       });
     };
