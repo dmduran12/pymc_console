@@ -54,15 +54,19 @@ function UtilTooltip({
   label 
 }: { 
   active?: boolean; 
-  payload?: Array<{ name: string; value: number; color: string }>; 
+  payload?: Array<{ name: string; value: number | null; color: string }>; 
   label?: string 
 }) {
   if (!active || !payload || payload.length === 0) return null;
   
+  // Filter out null values (gaps)
+  const validPayload = payload.filter(entry => entry.value !== null);
+  if (validPayload.length === 0) return null;
+  
   return (
     <div className="bg-bg-surface/95 backdrop-blur-sm border border-border-subtle rounded-lg px-3 py-2 text-sm">
       <div className="font-medium text-text-primary mb-1 font-mono">{label}</div>
-      {payload.map((entry, i) => (
+      {validPayload.map((entry, i) => (
         <div key={i} className="flex items-center gap-2">
           <div
             className="w-3 h-0.5"
@@ -70,7 +74,7 @@ function UtilTooltip({
           />
           <span className="text-text-muted">{entry.name}:</span>
           <span className="text-text-primary tabular-nums font-mono">
-            {entry.value.toFixed(3)}%
+            {entry.value!.toFixed(3)}%
           </span>
         </div>
       ))}
@@ -100,11 +104,42 @@ function UtilLegend({ payload }: { payload?: Array<{ value: string; color: strin
 }
 
 /**
+ * Apply Exponential Moving Average (EMA) smoothing to a series.
+ * Returns null for gaps (where input is 0 or null).
+ * 
+ * @param values - Raw values (0 treated as gap)
+ * @param alpha - Smoothing factor (0.2 = slow/smooth, 0.5 = responsive)
+ */
+function applyEMA(values: number[], alpha = 0.2): (number | null)[] {
+  const result: (number | null)[] = [];
+  let ema: number | null = null;
+  
+  for (const val of values) {
+    // Treat 0 as a gap (no data)
+    if (val === 0) {
+      result.push(null);
+      // Don't reset EMA - continue from last value when data resumes
+      continue;
+    }
+    
+    if (ema === null) {
+      // First non-zero value initializes EMA
+      ema = val;
+    } else {
+      // EMA formula: new = alpha * current + (1 - alpha) * previous
+      ema = alpha * val + (1 - alpha) * ema;
+    }
+    result.push(ema);
+  }
+  
+  return result;
+}
+
+/**
  * Airtime Utilization Line Chart
  * 
- * Displays peak utilization from downsampled bucket data.
- * airtime_ms in each bucket represents the MAX from the underlying raw buckets,
- * so utilization is calculated against the RAW bucket duration (typically 5 seconds).
+ * Displays smoothed utilization trends using EMA.
+ * Gaps (no traffic) shown as breaks in the line.
  * 
  * Y-axis dynamically scales based on max value in dataset.
  */
@@ -115,6 +150,9 @@ function TrafficStackedChartComponent({
   rawBucketDurationSeconds = 5,
   displayBucketDurationSeconds = 60,
 }: TrafficStackedChartProps) {
+  // EMA smoothing factor - 0.2 gives smooth trend lines
+  const EMA_ALPHA = 0.2;
+  
   // Utilization is calculated against the RAW bucket duration
   // because airtime_ms represents the MAX from any raw bucket, not a sum
   const maxAirtimePerRawBucketMs = rawBucketDurationSeconds * 1000;
@@ -129,38 +167,46 @@ function TrafficStackedChartComponent({
     const totalMinutes = (received.length * displayBucketDurationSeconds) / 60;
     const showDate = totalMinutes > 1440; // More than 24 hours
     
-    return received.map((bucket, i) => {
+    // Calculate raw utilization values first
+    const rawRxUtils: number[] = [];
+    const rawTxUtils: number[] = [];
+    const times: string[] = [];
+    
+    for (let i = 0; i < received.length; i++) {
+      const bucket = received[i];
       const date = new Date(bucket.start * 1000);
-      let time: string;
       
       if (showDate) {
-        // For multi-day ranges, show date + time
-        time = date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
-               ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        times.push(
+          date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
+          ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+        );
       } else {
-        time = date.toLocaleTimeString([], {
+        times.push(date.toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
           hour12: false,
-        });
+        }));
       }
       
-      // RX utilization: MAX airtime from any raw bucket / raw bucket duration
-      // This shows peak channel congestion (capacity planning)
-      const rxUtil = (bucket.airtime_ms / maxAirtimePerRawBucketMs) * 100;
+      // RX utilization
+      rawRxUtils.push((bucket.airtime_ms / maxAirtimePerRawBucketMs) * 100);
       
-      // TX utilization: AVG airtime (shows organic patterns)
-      // Sum transmitted + forwarded, then divide by display bucket duration
-      // since TX was downsampled with AVG mode
+      // TX utilization
       const txAirtimeMs = (transmitted?.[i]?.airtime_ms ?? 0) + (forwarded[i]?.airtime_ms ?? 0);
-      const txUtil = (txAirtimeMs / (displayBucketDurationSeconds * 1000)) * 100;
-      
-      return {
-        time,
-        rxUtil,
-        txUtil,
-      };
-    });
+      rawTxUtils.push((txAirtimeMs / (displayBucketDurationSeconds * 1000)) * 100);
+    }
+    
+    // Apply EMA smoothing (gaps become null)
+    const smoothedRx = applyEMA(rawRxUtils, EMA_ALPHA);
+    const smoothedTx = applyEMA(rawTxUtils, EMA_ALPHA);
+    
+    // Build final chart data
+    return times.map((time, i) => ({
+      time,
+      rxUtil: smoothedRx[i],
+      txUtil: smoothedTx[i],
+    }));
   }, [received, forwarded, transmitted, maxAirtimePerRawBucketMs, displayBucketDurationSeconds]);
 
   if (chartData.length === 0) {
@@ -205,25 +251,27 @@ function TrafficStackedChartComponent({
           <Tooltip content={<UtilTooltip />} />
           <Legend content={<UtilLegend />} />
           
-          {/* RX Utilization - Green */}
+          {/* RX Utilization - Green, EMA smoothed */}
           <Line
-            type="linear"
+            type="monotone"
             dataKey="rxUtil"
             name="RX Airtime"
             stroke={RX_COLOR}
             strokeWidth={1.5}
             dot={false}
+            connectNulls={false}
             isAnimationActive={false}
           />
           
-          {/* TX Utilization - Gray */}
+          {/* TX Utilization - Gray, EMA smoothed */}
           <Line
-            type="linear"
+            type="monotone"
             dataKey="txUtil"
             name="TX Airtime"
             stroke={TX_COLOR}
             strokeWidth={1.5}
             dot={false}
+            connectNulls={false}
             isAnimationActive={false}
           />
         </LineChart>
