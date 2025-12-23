@@ -2312,7 +2312,6 @@ body {
   /* Override glass-card radius for smaller widgets */
   border-radius: 0.875rem !important; /* 14px */
   padding: 0.75rem;
-  min-height: 6rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -2512,17 +2511,33 @@ body {
   left: calc(100% - 0.875rem);
 }
 
+/* Mesh Health container */
+.mesh-health-container {
+  margin-bottom: 1.5rem;
+}
+
+.mesh-health-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 /* Widget row container - responsive grid */
 .widget-row {
   display: grid;
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
 }
 
 /* Desktop & Tablet: 4 columns (2 rows of 4) */
 @media (min-width: 768px) {
   .widget-row {
     grid-template-columns: repeat(4, 1fr);
+  }
+  
+  /* Standardized widget height for desktop/tablet */
+  .mini-widget {
+    height: 7.5rem; /* Fixed height for uniformity */
   }
 }
 
@@ -2533,7 +2548,7 @@ body {
   }
   
   .mini-widget {
-    min-height: 5.5rem;
+    height: 7rem;
     padding: 0.625rem;
   }
   

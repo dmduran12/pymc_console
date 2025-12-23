@@ -5,7 +5,7 @@
  * useful for identifying network weak points.
  */
 
-import { ArrowUpDown } from 'lucide-react';
+import { Route } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
 
@@ -33,7 +33,7 @@ export function BestWorstLinkWidget() {
 
   // Custom content showing both links
   const linkDisplay = linkQuality && best && worst ? (
-    <div className="flex flex-col gap-0.5 mt-1">
+    <div className="flex flex-col gap-0.5 mt-auto">
       <div className="flex items-center justify-between text-xs">
         <span className="text-text-muted">Best:</span>
         <span className="font-mono text-signal-excellent">
@@ -52,7 +52,7 @@ export function BestWorstLinkWidget() {
   return (
     <MiniWidget
       title="Link Range"
-      icon={<ArrowUpDown className="mini-widget-icon" />}
+      icon={<Route className="mini-widget-icon" />}
       status={status}
       isLoading={isLoading}
       error={error}

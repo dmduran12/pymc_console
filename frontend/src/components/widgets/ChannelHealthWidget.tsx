@@ -5,7 +5,7 @@
  * with color-coded status and progress bar visualization.
  */
 
-import { HeartPulse } from 'lucide-react';
+import { Cross } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
 
@@ -35,7 +35,7 @@ export function ChannelHealthWidget() {
 
   // Progress bar showing health score
   const progressBar = channelHealth ? (
-    <div className="mini-widget-progress">
+    <div className="mini-widget-progress mt-auto">
       <div
         className={`mini-widget-progress-bar ${status}`}
         style={{ width: `${healthScore}%` }}
@@ -46,7 +46,7 @@ export function ChannelHealthWidget() {
   return (
     <MiniWidget
       title="Channel Health"
-      icon={<HeartPulse className="mini-widget-icon" />}
+      icon={<Cross className="mini-widget-icon" />}
       value={Math.round(healthScore)}
       unit="/100"
       status={status}

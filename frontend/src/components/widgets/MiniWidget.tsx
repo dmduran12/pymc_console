@@ -51,10 +51,11 @@ export interface MiniWidgetProps {
 
 /**
  * Get CSS class for value based on status
+ * Note: Value coloring disabled - status indicated by dot only
  */
-function getValueStatusClass(status?: WidgetStatus): string {
-  if (!status || status === 'unknown') return '';
-  return status;
+function getValueStatusClass(_status?: WidgetStatus): string {
+  // Status coloring removed - rely on status dot instead
+  return '';
 }
 
 /**

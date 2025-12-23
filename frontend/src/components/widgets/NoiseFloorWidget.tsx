@@ -4,7 +4,7 @@
  * Shows the current noise floor reading in dBm from the /api/stats endpoint.
  */
 
-import { Radio } from 'lucide-react';
+import { AudioWaveform } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
 
@@ -26,7 +26,7 @@ export function NoiseFloorWidget() {
   return (
     <MiniWidget
       title="Noise Floor"
-      icon={<Radio className="mini-widget-icon" />}
+      icon={<AudioWaveform className="mini-widget-icon" />}
       value={noiseFloor !== null ? Math.round(noiseFloor) : '—'}
       unit={noiseFloor !== null ? 'dBm' : undefined}
       status={status}

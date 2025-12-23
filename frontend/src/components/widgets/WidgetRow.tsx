@@ -1,24 +1,14 @@
 /**
- * WidgetRow - Container component for LBT Insights widget suite
+ * WidgetRow - Container component for Mesh Health widget suite
  *
  * Arranges all 8 mini-widgets in a responsive grid:
- * - Desktop (≥1280px): 8 columns
- * - Tablet (768-1279px): 4 columns
- * - Mobile (<768px): 2 columns
- *
- * Widget order (left to right):
- * 1. Channel Health - composite score (1h window, 15s refresh)
- * 2. LBT Retries - retry rate % (24h window, 60s refresh)
- * 3. Ch. Busy - busy event count (24h window, 60s refresh)
- * 4. Collision Risk - estimated interference (24h window, 60s refresh)
- * 5. Noise Floor - current dBm with trend (24h window, 60s refresh)
- * 6. Network Score - avg link quality (24h window, 60s refresh)
- * 7. Link Range - best/worst neighbors (24h window, 60s refresh)
- * 8. CAD Tuner - auto-tuner toggle (local state only)
+ * - Desktop & Tablet (≥768px): 4 columns (2 rows)
+ * - Mobile (<768px): 2 columns (4 rows)
  *
  * Uses LBTDataProvider to consolidate API calls - all widgets share data.
  */
 
+import { SquareActivity } from 'lucide-react';
 import { LBTDataProvider } from './LBTDataContext';
 import { ChannelHealthWidget } from './ChannelHealthWidget';
 import { LBTRetryWidget } from './LBTRetryWidget';
@@ -37,26 +27,24 @@ export interface WidgetRowProps {
 export function WidgetRow({ className = '' }: WidgetRowProps) {
   return (
     <LBTDataProvider>
-      <div className={`widget-row ${className}`}>
-        {/* Health overview first for quick status check */}
-        <ChannelHealthWidget />
-
-        {/* Congestion metrics (2 widgets) */}
-        <LBTRetryWidget />
-        <ChannelBusyWidget />
-
-        {/* Collision analysis */}
-        <CollisionWidget />
-
-        {/* Noise floor (1 widget) */}
-        <NoiseFloorWidget />
-
-        {/* Link quality (2 widgets) */}
-        <NetworkScoreWidget />
-        <BestWorstLinkWidget />
-
-        {/* CAD auto-tuner toggle */}
-        <CADTunerWidget />
+      <div className={`mesh-health-container ${className}`}>
+        {/* Section Header */}
+        <div className="mesh-health-header">
+          <SquareActivity className="w-4 h-4 text-accent-primary" />
+          <span className="type-label text-text-muted">MESH HEALTH</span>
+        </div>
+        
+        {/* Widget Grid */}
+        <div className="widget-row">
+          <ChannelHealthWidget />
+          <LBTRetryWidget />
+          <ChannelBusyWidget />
+          <CollisionWidget />
+          <NoiseFloorWidget />
+          <NetworkScoreWidget />
+          <BestWorstLinkWidget />
+          <CADTunerWidget />
+        </div>
       </div>
     </LBTDataProvider>
   );

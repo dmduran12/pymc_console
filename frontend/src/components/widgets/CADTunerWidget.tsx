@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Settings2 } from 'lucide-react';
+import { CircleGauge } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 
 export function CADTunerWidget() {
@@ -63,7 +63,7 @@ export function CADTunerWidget() {
   return (
     <MiniWidget
       title="CAD Tuner"
-      icon={<Settings2 className="mini-widget-icon" />}
+      icon={<CircleGauge className="mini-widget-icon" />}
       subtitle={enabled ? 'Adjusting thresholds…' : 'Tap to enable'}
     >
       {activityDisplay}
