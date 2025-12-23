@@ -171,8 +171,8 @@ function clamp(v: number, lo: number, hi: number): number {
 /**
  * Build a 2D spectrogram grid from fixed-window utilization samples.
  * 
- * For each sample, fills energy from the baseline (y=0%) up to the sample's
- * utilization value, creating a filled area effect that matches line charts.
+ * Each sample places energy at its (time, util%) position using bilinear
+ * splatting. Horizontal blur creates the "persistence" effect.
  * 
  * @param samples - Fixed-window util samples
  * @param startTs - Range start (seconds)
@@ -214,29 +214,20 @@ export function buildSpectrogramGrid(
     const x1 = Math.min(width - 1, x0 + 1);
     const tx = xf - x0;
 
-    // Y position of the peak (top of fill)
-    // In grid coords: y=0 is top (high util), y=height-1 is bottom (0%)
-    const peakYf = (1 - (u / yMax)) * (height - 1);
-    const peakY = Math.floor(peakYf);
-    
-    // Fill from baseline (bottom) up to peak
-    // Energy decreases as we go up (intensity gradient)
-    const baselineY = height - 1;
-    const fillHeight = baselineY - peakY;
-    
-    if (fillHeight <= 0) continue;
+    // Y position: y=0 is top (yMax%), y=height-1 is bottom (0%)
+    const yf = (1 - (u / yMax)) * (height - 1);
+    const y0 = Math.floor(yf);
+    const y1 = Math.min(height - 1, y0 + 1);
+    const ty = yf - y0;
 
-    for (let y = peakY; y <= baselineY; y++) {
-      // Intensity: strongest at peak, fading toward baseline
-      const distFromPeak = y - peakY;
-      const intensity = 1.0 - (distFromPeak / fillHeight) * 0.7; // 1.0 at peak, 0.3 at baseline
-      
-      // Distribute across x0 and x1 based on sub-pixel position
-      grid[y * width + x0] += intensity * (1 - tx);
-      if (x1 < width) {
-        grid[y * width + x1] += intensity * tx;
-      }
-    }
+    // Energy weighted by utilization for intensity
+    const energy = Math.sqrt(u / yMax); // sqrt to boost low values visibility
+
+    // Bilinear splat - places energy at the exact position
+    grid[y0 * width + x0] += energy * (1 - tx) * (1 - ty);
+    grid[y0 * width + x1] += energy * tx * (1 - ty);
+    grid[y1 * width + x0] += energy * (1 - tx) * ty;
+    grid[y1 * width + x1] += energy * tx * ty;
   }
 
   return grid;
@@ -395,11 +386,12 @@ export function drawSpectrogram(
 
   ctx.clearRect(0, 0, scaledWidth, scaledHeight);
 
-  // Reserve space for axis labels (match Recharts) - scaled by DPR
-  const leftMargin = Math.floor(44 * dpr);
-  const rightMargin = Math.floor(8 * dpr);
-  const topMargin = Math.floor(8 * dpr);
-  const bottomMargin = Math.floor(40 * dpr);
+  // Match Recharts chart area margins (empirically determined)
+  // Recharts LineChart with YAxis width=44, Legend, and default padding
+  const leftMargin = Math.floor(52 * dpr);   // YAxis width + internal padding
+  const rightMargin = Math.floor(5 * dpr);   // Right edge padding
+  const topMargin = Math.floor(5 * dpr);     // Top edge padding  
+  const bottomMargin = Math.floor(50 * dpr); // XAxis + Legend height
 
   const chartWidth = scaledWidth - leftMargin - rightMargin;
   const chartHeight = scaledHeight - topMargin - bottomMargin;
