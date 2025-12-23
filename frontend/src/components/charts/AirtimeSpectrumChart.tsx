@@ -180,10 +180,10 @@ function AirtimeSpectrumChartComponent({
       // Pass DPR so spectrogram renders at native resolution
       drawSpectrogram(ctx, samples, startTs, endTs, width, height, {
         yMax,
-        gain: 12,
-        gamma: 0.45,
-        blurX: 12,      // Strong horizontal blur for persistence
-        blurY: 6,       // Vertical blur for smooth bands
+        gain: 6,        // Lower gain - adaptive normalization handles dynamic range
+        gamma: 0.5,
+        blurX: 10,      // Strong horizontal blur for persistence
+        blurY: 5,       // Vertical blur for smooth bands
         splatRadius: 5, // Gaussian splat radius for smooth points
         dpr,
       });

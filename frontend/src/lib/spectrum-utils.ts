@@ -443,10 +443,18 @@ export function drawSpectrogram(
   const scaledBlurY = Math.max(1, Math.floor(blurY * dpr));
   const blurredGrid = boxBlur2D(baseGrid, chartWidth, chartHeight, scaledBlurX, scaledBlurY);
 
-  // Step 3: Find robust max (p99) so outliers don't crush everything
+  // Step 3: Adaptive normalization based on data density
+  // Sparse data needs lower percentile to avoid hot spots crushing everything
   const values = Array.from(blurredGrid).filter(v => v > 0);
   values.sort((a, b) => a - b);
-  const p99 = values[Math.floor(values.length * 0.99)] || 1;
+  
+  // Use lower percentile for sparse data, higher for dense
+  const density = values.length / (chartWidth * chartHeight);
+  const percentile = density > 0.3 ? 0.97 : density > 0.1 ? 0.90 : 0.80;
+  const pMax = values[Math.floor(values.length * percentile)] || 1;
+  
+  // Also compute median for floor calculation
+  const median = values[Math.floor(values.length * 0.5)] || 0;
 
   // Step 4: Create image with log compression and inferno colormap
   // Use alpha channel for intensity - fully transparent where no energy
@@ -454,11 +462,14 @@ export function drawSpectrogram(
   const data = img.data;
 
   // Soft threshold with smooth falloff
-  const softThreshold = 0.003;  // Below this = transparent
-  const fadeZone = 0.02;        // Fade from softThreshold to softThreshold + fadeZone
+  const softThreshold = 0.002;  // Below this = transparent
+  const fadeZone = 0.03;        // Fade from softThreshold to softThreshold + fadeZone
+  
+  // Add floor based on median to boost low-level detail
+  const adaptiveFloor = floor + (median / pMax) * 0.15;
 
   for (let i = 0; i < blurredGrid.length; i++) {
-    const raw = blurredGrid[i] / p99;
+    const raw = blurredGrid[i] / pMax;
     
     // Below soft threshold = fully transparent
     if (raw < softThreshold) {
@@ -478,9 +489,9 @@ export function drawSpectrogram(
       alphaMultiplier = fadeT * fadeT * (3 - 2 * fadeT); // smoothstep
     }
 
-    // Map to color (log compression)
-    const normalized = raw; // Use full range for color mapping
-    const v = Math.log1p(gain * (normalized + floor)) / Math.log1p(gain * 1);
+    // Map to color (log compression with adaptive floor)
+    const boosted = raw + adaptiveFloor;
+    const v = Math.log1p(gain * boosted) / Math.log1p(gain * (1 + adaptiveFloor));
     const t = Math.pow(clamp(v, 0, 1), gamma);
 
     const { r, g, b } = colorInferno(t);
@@ -488,8 +499,8 @@ export function drawSpectrogram(
     data[o + 0] = r;
     data[o + 1] = g;
     data[o + 2] = b;
-    // Alpha: base 0.7, ramps to 1.0, with smooth fade-in near threshold
-    const baseAlpha = 0.7 + 0.3 * t;
+    // Alpha: base 0.65, ramps to 1.0, with smooth fade-in near threshold
+    const baseAlpha = 0.65 + 0.35 * t;
     data[o + 3] = Math.round(255 * baseAlpha * alphaMultiplier);
   }
 
