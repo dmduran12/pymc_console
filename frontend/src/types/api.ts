@@ -496,3 +496,140 @@ export interface AdvertsByContactTypeResponse {
     hours: number | null;
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LBT (Listen Before Talk) & Channel Health Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Hourly breakdown of LBT statistics for sparkline charts */
+export interface LBTHourlyStats {
+  hour: number;
+  timestamp: number;
+  retry_rate: number;
+  avg_backoff_ms: number;
+  tx_count: number;
+}
+
+/** LBT statistics response from /api/lbt_stats */
+export interface LBTStats {
+  /** Number of transmitted packets in time range */
+  total_tx_packets: number;
+  /** Packets that required CAD backoff */
+  lbt_triggered_count: number;
+  /** Percentage of TX requiring retries (0-100) */
+  lbt_retry_rate: number;
+  /** Average backoff delay in milliseconds */
+  avg_backoff_ms: number;
+  /** Maximum backoff delay seen */
+  max_backoff_ms: number;
+  /** Times channel stayed busy after max attempts */
+  channel_busy_events: number;
+  /** Time range in hours */
+  hours: number;
+  /** Hourly breakdown for sparklines */
+  by_hour: LBTHourlyStats[];
+}
+
+/** Extended noise floor statistics with trend analysis */
+export interface NoiseFloorStatsExtended {
+  /** Number of measurements in time range */
+  measurement_count: number;
+  /** Average noise floor in dBm */
+  avg_noise_floor: number;
+  /** Minimum (quietest) noise floor */
+  min_noise_floor: number;
+  /** Maximum (loudest) noise floor */
+  max_noise_floor: number;
+  /** Most recent reading */
+  current: number | null;
+  /** Trend direction: rising (worse), falling (better), stable */
+  trend: 'rising' | 'falling' | 'stable';
+  /** Time range in hours */
+  hours: number;
+}
+
+/** Individual component scores for link quality */
+export interface LinkQualityComponents {
+  /** SNR-based score (0-100) */
+  snr_score: number;
+  /** RSSI-based score (0-100) */
+  rssi_score: number;
+  /** Reliability score based on advert count and zero-hop status */
+  reliability_score: number;
+}
+
+/** Raw signal values for a neighbor */
+export interface LinkQualityRaw {
+  snr: number;
+  rssi: number;
+  advert_count: number;
+}
+
+/** Link quality score for a single neighbor */
+export interface LinkQualityScore {
+  /** Truncated public key */
+  pubkey: string;
+  /** Full public key */
+  pubkey_full: string;
+  /** Node name or "Unknown" */
+  name: string;
+  /** Composite score (0-100) */
+  score: number;
+  /** Whether this is a zero-hop (direct) link */
+  zero_hop: boolean;
+  /** Component score breakdown */
+  components: LinkQualityComponents;
+  /** Raw signal values */
+  raw: LinkQualityRaw;
+}
+
+/** Response from /api/link_quality_scores */
+export interface LinkQualityResponse {
+  /** Per-neighbor quality scores, sorted by score descending */
+  scores: LinkQualityScore[];
+  /** Number of neighbors scored */
+  count: number;
+  /** Average score across all neighbors */
+  avg_network_score: number;
+  /** Highest quality link */
+  best_link: { name: string; score: number };
+  /** Lowest quality link */
+  worst_link: { name: string; score: number };
+}
+
+/** Health status levels */
+export type ChannelHealthStatus = 'excellent' | 'good' | 'fair' | 'congested' | 'critical';
+
+/** Component scores for channel health */
+export interface ChannelHealthComponents {
+  /** LBT-based score (0-100) - low retry rate = high score */
+  lbt_score: number;
+  /** Noise-based score (0-100) - low noise = high score */
+  noise_score: number;
+  /** Link quality score (0-100) */
+  link_score: number;
+}
+
+/** Real-time metrics for channel health */
+export interface ChannelHealthMetrics {
+  lbt_retry_rate: number;
+  channel_busy_events: number;
+  noise_floor_current: number | null;
+  noise_trend: 'rising' | 'falling' | 'stable';
+  neighbor_count: number;
+  avg_link_score: number;
+}
+
+/** Response from /api/channel_health */
+export interface ChannelHealthResponse {
+  /** Composite health score (0-100) */
+  health_score: number;
+  /** Status level */
+  status: ChannelHealthStatus;
+  /** Component score breakdown */
+  components: ChannelHealthComponents;
+  /** Real-time metrics */
+  metrics: ChannelHealthMetrics;
+  /** Actionable recommendations if health is poor */
+  recommendations: string[];
+}

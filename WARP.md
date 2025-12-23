@@ -141,7 +141,8 @@ src/
 │   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization
 │   ├── shared/            # TimeRangeSelector, BackgroundSelector
 │   ├── stats/             # StatsCard
-│   └── ui/                # HashBadge, ConfirmModal, DeepAnalysisModal
+│   ├── ui/                # HashBadge, ConfirmModal, DeepAnalysisModal
+│   └── widgets/           # LBT Insights mini-widgets (MiniWidget, WidgetRow)
 ├── lib/
 │   ├── api.ts             # All API client functions (typed fetch wrappers)
 │   ├── constants.ts       # App constants
@@ -178,6 +179,52 @@ const { stats } = useStore();       // Avoid
 ```
 
 **Polling**: Use `usePolling` hook from `src/lib/hooks/` for live data updates.
+
+### LBT Insights Widget Suite (`components/widgets/`)
+
+Compact dashboard widgets displaying channel health, LBT metrics, and link quality. Located in the top row of the Dashboard, below the hero card.
+
+**Widget Layout:**
+- Desktop (≥1280px): 8 columns in single row
+- Tablet (768-1279px): 4 columns, 2 rows
+- Mobile (<768px): 2 columns, 4 rows
+
+**Widgets (left to right):**
+1. **ChannelHealthWidget** - Composite health score (0-100) combining LBT, noise, link quality
+2. **LBTRetryWidget** - % of TX requiring CAD backoff retries
+3. **ChannelBusyWidget** - Count of channel busy events (max CAD attempts exceeded)
+4. **CollisionWidget** - Estimated collision risk from LBT patterns
+5. **NoiseFloorWidget** - Current noise floor (dBm) with trend indicator
+6. **NetworkScoreWidget** - Average link quality across all neighbors
+7. **BestWorstLinkWidget** - Shows best and worst neighbor links
+8. **CADTunerWidget** - Auto-tuner toggle (placeholder for future feature)
+
+**Base Component** (`MiniWidget.tsx`):
+```typescript
+<MiniWidget
+  title="LBT Retries"
+  icon={<RefreshCw className="mini-widget-icon" />}
+  value="2.4"
+  unit="%"
+  status="good"         // excellent|good|fair|congested|critical
+  trend="down"          // up (worse)|down (better)|stable
+  subtitle="Avg 45ms backoff"
+  isLoading={loading}
+  error={error}
+/>
+```
+
+**CSS Classes** (`index.css`):
+- `.mini-widget` - Base card styling
+- `.mini-widget-value` + `.excellent|good|fair|congested|critical` - Colored value text
+- `.mini-widget-progress` + `.mini-widget-progress-bar` - Health bar visualization
+- `.widget-row` - Responsive grid container
+
+**Backend Endpoints** (added to pyMC_Repeater `api_endpoints.py`):
+- `GET /api/lbt_stats?hours=24` - LBT retry rate, channel busy events, backoff times
+- `GET /api/noise_floor_stats_extended?hours=24` - Noise floor with trend analysis
+- `GET /api/link_quality_scores?hours=24` - Per-neighbor quality scores
+- `GET /api/channel_health` - Composite health combining all metrics
 
 **Theme System** (`src/lib/theme/`): Centralized theme management via React Context:
 - `ThemeContext.tsx` - Single source of truth for color scheme, background image, brightness
