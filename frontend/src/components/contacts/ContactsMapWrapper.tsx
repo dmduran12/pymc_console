@@ -50,8 +50,8 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
   }
 }
 
-// Lazy import - requires window object
-const ContactsMap = lazy(() => import('./ContactsMap'));
+// Lazy import - MapLibre version (no window object requirement)
+const ContactsMap = lazy(() => import('./ContactsMapMapLibre'));
 
 export default function ContactsMapWrapper({ neighbors, localNode, localHash, onRemoveNode, selectedNodeHash, onNodeSelected, highlightedEdgeKey }: ContactsMapWrapperProps) {
   return (
