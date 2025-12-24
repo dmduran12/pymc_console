@@ -3,7 +3,7 @@ import type { Stats, Packet, LogEntry, NeighborInfo } from '@/types/api';
 import * as api from '@/lib/api';
 import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
 import { topologyService } from '@/lib/topology-service';
-import { parsePacketPath, prefixMatches, getHashPrefix } from '@/lib/path-utils';
+import { parsePacketPath, getHashPrefix } from '@/lib/path-utils';
 
 /** Data point for system resource history */
 export interface ResourceDataPoint {
@@ -61,20 +61,64 @@ function detectQuickNeighbors(
   localHash: string | undefined
 ): QuickNeighbor[] {
   if (!localHash || packets.length === 0 || Object.keys(neighbors).length === 0) {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[quickNeighbors] Early return:', { localHash, packetCount: packets.length, neighborCount: Object.keys(neighbors).length });
+    }
     return [];
   }
   
   // Build prefix → hash lookup from known neighbors
+  // For collisions, prefer the neighbor with valid coordinates (more likely to be real)
   const prefixToHash = new Map<string, string>();
+  const prefixCollisions = new Map<string, string[]>(); // Track all hashes per prefix
+  
   for (const hash of Object.keys(neighbors)) {
     const prefix = getHashPrefix(hash);
-    // Only use unambiguous prefixes (skip if collision)
-    if (!prefixToHash.has(prefix)) {
-      prefixToHash.set(prefix, hash);
+    if (!prefixCollisions.has(prefix)) {
+      prefixCollisions.set(prefix, [hash]);
     } else {
-      // Mark as ambiguous by setting to empty string
-      prefixToHash.set(prefix, '');
+      prefixCollisions.get(prefix)!.push(hash);
     }
+  }
+  
+  // For each prefix, pick the best hash (prefer one with coordinates)
+  for (const [prefix, hashes] of prefixCollisions) {
+    if (hashes.length === 1) {
+      // No collision - use directly
+      prefixToHash.set(prefix, hashes[0]);
+    } else {
+      // Collision - try to disambiguate by picking the one with valid coordinates
+      const withCoords = hashes.filter(h => {
+        const n = neighbors[h];
+        return n && n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0;
+      });
+      
+      if (withCoords.length === 1) {
+        // Only one has coords - use it
+        prefixToHash.set(prefix, withCoords[0]);
+      } else if (withCoords.length > 1) {
+        // Multiple have coords - pick most recently seen
+        const sorted = withCoords.sort((a, b) => {
+          const lastA = neighbors[a]?.last_seen ?? 0;
+          const lastB = neighbors[b]?.last_seen ?? 0;
+          return lastB - lastA;
+        });
+        prefixToHash.set(prefix, sorted[0]);
+      } else {
+        // None have coords - pick most recently seen
+        const sorted = hashes.sort((a, b) => {
+          const lastA = neighbors[a]?.last_seen ?? 0;
+          const lastB = neighbors[b]?.last_seen ?? 0;
+          return lastB - lastA;
+        });
+        prefixToHash.set(prefix, sorted[0]);
+      }
+    }
+  }
+  
+  if (process.env.NODE_ENV === 'development') {
+    const collisionCount = [...prefixCollisions.values()].filter(h => h.length > 1).length;
+    console.log('[quickNeighbors] Built prefix lookup:', prefixToHash.size, 'prefixes,', collisionCount, 'collisions resolved');
   }
   
   // Track last-hop prefix stats
@@ -88,32 +132,25 @@ function detectQuickNeighbors(
     lastSeen: number;
   }>();
   
+  let packetsWithPath = 0;
+  let packetsResolved = 0;
+  
   for (const packet of packets) {
     const parsed = parsePacketPath(packet, localHash);
     if (!parsed || parsed.effectiveLength === 0) continue;
+    
+    packetsWithPath++;
     
     // Last element in effective path is the last forwarder (forwarded directly to us)
     const lastHopPrefix = parsed.effective[parsed.effective.length - 1];
     
     // Try to resolve to a known hash
-    let resolvedHash = prefixToHash.get(lastHopPrefix);
+    const resolvedHash = prefixToHash.get(lastHopPrefix);
     
-    // If ambiguous or not found, try direct prefix matching
-    if (!resolvedHash) {
-      for (const hash of Object.keys(neighbors)) {
-        if (prefixMatches(lastHopPrefix, hash)) {
-          // If we already found one, it's ambiguous - skip
-          if (resolvedHash) {
-            resolvedHash = '';
-            break;
-          }
-          resolvedHash = hash;
-        }
-      }
-    }
-    
-    // Skip if couldn't resolve or ambiguous
+    // Skip if prefix not found in our neighbors
     if (!resolvedHash) continue;
+    
+    packetsResolved++;
     
     // Accumulate stats
     const existing = lastHopStats.get(resolvedHash) || {
@@ -161,6 +198,14 @@ function detectQuickNeighbors(
   
   // Sort by count descending
   result.sort((a, b) => b.count - a.count);
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[quickNeighbors] Detected:', result.length, 'neighbors from', packets.length, 'packets');
+    console.log('[quickNeighbors] Stats: packetsWithPath=', packetsWithPath, 'packetsResolved=', packetsResolved);
+    if (result.length > 0) {
+      console.log('[quickNeighbors] Top neighbors:', result.slice(0, 5).map(n => ({ hash: n.hash.slice(0, 8), prefix: n.prefix, count: n.count })));
+    }
+  }
   
   return result;
 }
