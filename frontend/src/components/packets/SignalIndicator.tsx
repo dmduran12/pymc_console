@@ -1,5 +1,12 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import clsx from 'clsx';
+import { Signal, SignalHigh, SignalMedium, SignalLow, SignalZero, type LucideProps } from 'lucide-react';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Signal Strength Types & Constants
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type SignalLevel = 'excellent' | 'good' | 'fair' | 'weak' | 'poor';
 
 interface SignalIndicatorProps {
   rssi: number;
@@ -10,11 +17,20 @@ interface SignalIndicatorProps {
   showValues?: boolean;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Signal Level & Color Functions
+// ═══════════════════════════════════════════════════════════════════════════════
+
 /**
  * Get signal quality level from RSSI
- * Based on typical LoRa sensitivity thresholds
+ * Based on typical LoRa sensitivity thresholds:
+ * - Excellent: ≥ -90 dBm (strong signal, close range or good conditions)
+ * - Good: -90 to -100 dBm (reliable communication)
+ * - Fair: -100 to -110 dBm (usable but may have some packet loss)
+ * - Weak: -110 to -120 dBm (marginal, expect retries)
+ * - Poor: < -120 dBm (at or near sensitivity limit)
  */
-function getSignalLevel(rssi: number): 'excellent' | 'good' | 'fair' | 'weak' | 'poor' {
+export function getSignalLevel(rssi: number): SignalLevel {
   if (rssi >= -90) return 'excellent';
   if (rssi >= -100) return 'good';
   if (rssi >= -110) return 'fair';
@@ -22,7 +38,16 @@ function getSignalLevel(rssi: number): 'excellent' | 'good' | 'fair' | 'weak' | 
   return 'poor';
 }
 
-function getSignalColor(level: string): string {
+/**
+ * Get text color class for signal level
+ * Semantic color mapping:
+ * - Excellent: Green (accent-success)
+ * - Good: Cyan/Mint (accent-tertiary)
+ * - Fair: Yellow (accent-secondary)
+ * - Weak: Orange
+ * - Poor: Red (accent-danger)
+ */
+function getSignalColor(level: SignalLevel): string {
   switch (level) {
     case 'excellent': return 'text-accent-success';
     case 'good': return 'text-[#71F8E5]';
@@ -33,7 +58,7 @@ function getSignalColor(level: string): string {
   }
 }
 
-function getBarColor(level: string, active: boolean): string {
+function getBarColor(level: SignalLevel, active: boolean): string {
   if (!active) return 'bg-white/10';
   switch (level) {
     case 'excellent': return 'bg-accent-success';
@@ -43,6 +68,45 @@ function getBarColor(level: string, active: boolean): string {
     case 'poor': return 'bg-accent-danger';
     default: return 'bg-white/20';
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Lucide Signal Icon Utilities
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get the appropriate Lucide signal icon component for an RSSI value.
+ * Uses Lucide's signal icon family:
+ * - Signal: Full signal (excellent)
+ * - SignalHigh: 3/4 bars (good)
+ * - SignalMedium: 2/4 bars (fair)
+ * - SignalLow: 1/4 bars (weak)
+ * - SignalZero: No bars (poor)
+ */
+export function getSignalIconComponent(rssi: number): React.ComponentType<LucideProps> {
+  const level = getSignalLevel(rssi);
+  switch (level) {
+    case 'excellent': return Signal;
+    case 'good': return SignalHigh;
+    case 'fair': return SignalMedium;
+    case 'weak': return SignalLow;
+    case 'poor': return SignalZero;
+    default: return SignalZero;
+  }
+}
+
+/**
+ * Render a Lucide signal icon with appropriate color based on RSSI.
+ * @param rssi - Signal strength in dBm
+ * @param className - Additional classes to apply (size, etc.)
+ * @returns ReactNode with the appropriate colored signal icon
+ */
+export function SignalIcon({ rssi, className = 'w-4 h-4' }: { rssi: number; className?: string }): ReactNode {
+  const level = getSignalLevel(rssi);
+  const colorClass = getSignalColor(level);
+  const IconComponent = getSignalIconComponent(rssi);
+  
+  return <IconComponent className={clsx(colorClass, className)} />;
 }
 
 /**

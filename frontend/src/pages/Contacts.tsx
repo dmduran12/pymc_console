@@ -1,8 +1,9 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
 import { useHubNodes, useCentrality, useLastHopNeighbors } from '@/lib/stores/useTopologyStore';
-import { Signal, Radio, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
+import { ChevronsLeftRightEllipsis, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
+import { SignalIcon } from '@/components/packets/SignalIndicator';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { PathHealthPanel } from '@/components/contacts/PathHealthPanel';
 import { HashBadge } from '@/components/ui/HashBadge';
@@ -264,7 +265,7 @@ export default function Contacts() {
                 }`}
                 title={showNeighborsOnly ? 'Show all contacts' : 'Show only MeshCore neighbors (direct RF contact)'}
               >
-                <Radio className="w-3.5 h-3.5" />
+                <ChevronsLeftRightEllipsis className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Neighbors</span>
                 <span className="sm:hidden">{lastHopNeighbors.length}</span>
                 {showNeighborsOnly && (
@@ -373,7 +374,7 @@ export default function Contacts() {
                         {contact.is_repeater ? (
                           <Repeat className="w-5 h-5 text-accent-primary" />
                         ) : (
-                          <Radio className="w-5 h-5 text-text-muted" />
+                          <ChevronsLeftRightEllipsis className="w-5 h-5 text-text-muted" />
                         )}
                       </div>
                       <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(contact.snr)} border-2 border-bg-surface`} />
@@ -405,7 +406,7 @@ export default function Contacts() {
                     <div className="roster-metrics">
                       {contact.rssi !== undefined && (
                         <div className="flex items-center gap-1.5">
-                          <Signal className="w-3.5 h-3.5" />
+                          <SignalIcon rssi={contact.rssi} className="w-3.5 h-3.5" />
                           <span className="type-data-xs tabular-nums">{contact.rssi}</span>
                         </div>
                       )}
