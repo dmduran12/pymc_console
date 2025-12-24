@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import '@/lib/leaflet-smooth-wheel-zoom'; // Google Maps-style smooth zoom
-import { Maximize2, Minimize2, Network, Radio, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2, MessagesSquare } from 'lucide-react';
+import { Maximize2, Minimize2, Network, ChevronsLeftRightEllipsis, GitBranch, EyeOff, Info, Copy, Check, BarChart2, RefreshCw, Home, ArrowRight, Zap, Trash2, MessagesSquare } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NeighborInfo, Packet } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -2238,7 +2238,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               }}
               title={soloDirect ? 'Show all nodes' : 'Solo direct (0-hop) nodes'}
             >
-              <Radio className={`w-4 h-4 ${soloDirect ? 'text-indigo-400' : 'text-text-secondary'}`} />
+              <ChevronsLeftRightEllipsis className={`w-4 h-4 ${soloDirect ? 'text-indigo-400' : 'text-text-secondary'}`} />
             </button>
           )}
           
