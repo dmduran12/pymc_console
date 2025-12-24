@@ -459,19 +459,17 @@ export function TopologyEdges({
     properties: EdgeFeatureProperties;
   } | null>(null);
   
-  // Don't render if topology is off and not in exit animation
-  if (!showTopology && !isExiting) {
-    return null;
-  }
+  // Whether we should render - computed before hooks to maintain hook order
+  const shouldRender = showTopology || isExiting;
   
-  // Build GeoJSON data
+  // Build GeoJSON data (always call hooks, even if not rendering)
   const weakEdgesData = useMemo(
-    () => buildWeakEdgesGeoJSON(weakPolylines, edgeAnimProgress),
-    [weakPolylines, edgeAnimProgress]
+    () => shouldRender ? buildWeakEdgesGeoJSON(weakPolylines, edgeAnimProgress) : { type: 'FeatureCollection' as const, features: [] },
+    [weakPolylines, edgeAnimProgress, shouldRender]
   );
   
   const validatedEdgesData = useMemo(
-    () => buildValidatedEdgesGeoJSON(
+    () => shouldRender ? buildValidatedEdgesGeoJSON(
       validatedPolylines,
       edgeAnimProgress,
       weightAnimProgress,
@@ -483,7 +481,7 @@ export function TopologyEdges({
       hoveredEdgeKey,
       highlightedEdgeKey,
       neighbors
-    ),
+    ) : { type: 'FeatureCollection' as const, features: [] },
     [
       validatedPolylines,
       edgeAnimProgress,
@@ -496,6 +494,7 @@ export function TopologyEdges({
       hoveredEdgeKey,
       highlightedEdgeKey,
       neighbors,
+      shouldRender,
     ]
   );
   
@@ -537,14 +536,19 @@ export function TopologyEdges({
       : 0
     : 0;
   
+  // Don't render content if topology is off and not exiting
+  if (!shouldRender) {
+    return null;
+  }
+  
   return (
     <>
-      {/* ─── WEAK EDGES (underneath) ─────────────────────────────────────────── */}
+      {/* ─── WEAK EDGES (underneath) ─────────────────────────────────────── */}
       <Source id="weak-edges" type="geojson" data={weakEdgesData}>
         <Layer {...weakEdgesLayerStyle} />
       </Source>
       
-      {/* ─── VALIDATED EDGES ─────────────────────────────────────────────────── */}
+      {/* ─── VALIDATED EDGES ───────────────────────────────────────────── */}
       <Source id="validated-edges" type="geojson" data={validatedEdgesData}>
         <Layer 
           {...validatedEdgesLayerStyle}
@@ -553,7 +557,7 @@ export function TopologyEdges({
         />
       </Source>
       
-      {/* ─── EDGE TOOLTIP ───────────────────────────────────────────────────── */}
+      {/* ─── EDGE TOOLTIP ─────────────────────────────────────────────── */}
       {tooltipInfo && (
         <Popup
           longitude={tooltipInfo.longitude}
