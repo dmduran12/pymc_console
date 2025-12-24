@@ -826,35 +826,25 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // fall back to topology's lastHopNeighbors (only after deep analysis), then inference
   // Build both a Set (for .has() checks) and a Map (for looking up RSSI/SNR data)
   //
-  // BIDIRECTIONALITY REQUIREMENT (v0.6.13+):
-  // Only BIDIRECTIONAL neighbors are considered true "zero-hop" neighbors.
-  // This ensures we only mark nodes as neighbors when we have CONFIRMED two-way RF link:
-  // - RX: They transmitted, we received (their TX → our RX)
-  // - TX: We transmitted, they forwarded (our TX → their RX)
-  const { zeroHopNeighbors, lastHopNeighborMap, unidirectionalNeighbors: _unidirectionalNeighbors } = useMemo(() => {
-    const neighborSet = new Set<string>();  // Confirmed bidirectional neighbors
-    const unidirectionalSet = new Set<string>();  // One-way only (for display purposes)
+  // Standard neighbor detection (letsme.sh / meshcoretomqtt style):
+  // A node is a "neighbor" when we've received zero-hop ADVERTs from them,
+  // meaning they were the LAST HOP in the packet path (direct RF contact).
+  const { zeroHopNeighbors, lastHopNeighborMap } = useMemo(() => {
+    const neighborSet = new Set<string>();
     const neighborMap = new Map<string, LastHopNeighbor>();
     
     // Primary source: quickNeighbors from main store (runs on every poll, persisted)
     // These are available immediately without deep analysis
     if (quickNeighbors.length > 0) {
       for (const qn of quickNeighbors) {
-        // Only add to zeroHopNeighbors if BIDIRECTIONAL (confirmed two-way RF link)
-        if (qn.isBidirectional) {
-          neighborSet.add(qn.hash);
-        } else {
-          // Track unidirectional neighbors separately (for potential future UI display)
-          unidirectionalSet.add(qn.hash);
-        }
+        neighborSet.add(qn.hash);
         
         // Convert QuickNeighbor to LastHopNeighbor-like format for compatibility
-        // Store all neighbors (including unidirectional) for RSSI/SNR data access
         neighborMap.set(qn.hash, {
           hash: qn.hash,
           prefix: qn.prefix,
           count: qn.count,
-          confidence: qn.isBidirectional ? 1.0 : 0.5, // Higher confidence for bidirectional
+          confidence: 1.0, // Direct RF contact
           avgRssi: qn.avgRssi,
           avgSnr: qn.avgSnr,
           lastSeen: qn.lastSeen,
@@ -864,36 +854,30 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     // Enhancement: merge in topology's lastHopNeighbors (may have more neighbors after deep analysis)
     // These may include neighbors that quickNeighbors missed due to prefix collisions
-    // Note: topology lastHopNeighbors don't have bidirectionality data, so we add them
-    // only if they're not already tracked (to avoid overwriting bidirectional status)
     for (const lastHop of meshTopology.lastHopNeighbors) {
-      if (!neighborSet.has(lastHop.hash) && !unidirectionalSet.has(lastHop.hash)) {
-        // Topology-based neighbors have high confidence due to disambiguation
-        // but we can't confirm bidirectionality, so treat as unidirectional
-        unidirectionalSet.add(lastHop.hash);
+      if (!neighborSet.has(lastHop.hash)) {
+        neighborSet.add(lastHop.hash);
         neighborMap.set(lastHop.hash, lastHop);
       }
     }
     
     // Fallback: if still no neighbors, use the old inference method
     // This handles edge cases where both quickNeighbors and topology are empty
-    if (neighborSet.size === 0 && unidirectionalSet.size === 0) {
+    if (neighborSet.size === 0) {
       const inferred = inferZeroHopNeighbors(
         packets, 
         neighbors, 
         meshTopology.validatedEdges,
         localHash
       );
-      // Add inferred neighbors to unidirectional set (no bidirectionality confirmation)
       for (const hash of inferred) {
-        unidirectionalSet.add(hash);
+        neighborSet.add(hash);
       }
     }
     
     return { 
       zeroHopNeighbors: neighborSet, 
       lastHopNeighborMap: neighborMap,
-      unidirectionalNeighbors: unidirectionalSet,
     };
   }, [quickNeighbors, meshTopology.lastHopNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
   
