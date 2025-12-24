@@ -21,6 +21,9 @@ import { parsePath, getHashPrefix } from '@/lib/path-utils';
 const MARKER_SIZE = 14;
 // Ring thickness - thick enough for small donut hole
 const RING_THICKNESS = 5;
+// Outer ring for neighbor indicator
+const NEIGHBOR_OUTER_RING_SIZE = 20;  // Larger than marker to show as outer glow/ring
+const NEIGHBOR_RING_THICKNESS = 2;    // Thin outer ring
 
 // Design palette - sophisticated, minimal, low contrast against dark map
 const DESIGN = {
@@ -37,21 +40,24 @@ const DESIGN = {
   // Zero-hop neighbor - success green (direct RF contact)
   neighborColor: '#39D98A',    // accent-success - matches forward button
   
-  // ─── EDGE COLOR HIERARCHY ───────────────────────────────────────────────────
-  // Designed for dark maps - subtle but distinguishable
+  // ─── EDGE COLOR SYSTEM ─────────────────────────────────────────────────────
+  // At rest: All edges are gray (calm, unified look)
+  // On hover: Color reveals edge type
   edges: {
-    // Backbone edges - slightly brighter to draw attention
-    backbone: '#6B7280',       // Gray-500 - prominent but not glaring
-    // Standard validated edges - neutral mid-gray
-    standard: '#4B5563',       // Gray-600 - recedes slightly
-    // Weak/emerging edges - darker, subtle
-    weak: '#374151',           // Gray-700 - background layer
-    // Direct path edges (ground-truth routing) - teal tint
-    direct: '#5EEAD4',         // Teal-300 - distinguishes verified routes
-    // Loop edges (redundant paths) - subtle purple
-    loop: '#6366F1',           // Indigo-500 - indicates redundancy
-    // Neighbor edges (direct RF contact) - success green
-    neighbor: '#39D98A',       // accent-success - matches neighbor markers
+    // Rest state - unified gray for all edges
+    rest: '#4B5563',           // Gray-600 - calm baseline
+    restBright: '#6B7280',     // Gray-500 - for backbone emphasis
+    restDim: '#374151',        // Gray-700 - for weak/uncertain
+    
+    // Hover state - colors reveal edge type
+    hoverDirect: '#5EEAD4',    // Teal-300 - direct path edges
+    hoverLoop: '#6366F1',      // Indigo-500 - loop/redundant edges
+    hoverStandard: '#9CA3AF',  // Gray-400 - standard edges brighten
+    hoverNeighbor: '#39D98A',  // accent-success - neighbor edges
+    
+    // Neighbor edges (always visible as dashed) - rest vs hover
+    neighborRest: '#6B7280',   // Gray-500 - subtle dashed gray
+    neighborHover: '#39D98A',  // accent-success - green on hover
   },
   
   // Base opacity for edges (increased from 0.7 for better visibility)
@@ -59,52 +65,100 @@ const DESIGN = {
 };
 
 /**
- * Get edge color based on confidence level.
- * Creates a subtle brightness gradient: low confidence = darker, high confidence = lighter.
- * Maintains the low-contrast aesthetic while providing visual differentiation.
+ * Get edge color based on state (rest vs hovered) and type.
  * 
- * @param confidence - Edge avgConfidence (0-1)
- * @param isBackbone - Whether this edge is a backbone (high-traffic) edge
+ * At rest: All edges are gray (unified, calm aesthetic)
+ * On hover: Color reveals the edge type (direct=teal, loop=indigo, standard=bright gray)
+ * 
+ * @param isHovered - Whether this specific edge is being hovered
  * @param isDirectPath - Whether this edge is a verified direct path
+ * @param isLoopEdge - Whether this edge is part of a loop (redundant path)
+ * @param isBackbone - Whether this edge is a backbone (high-traffic) edge  
+ * @param confidence - Edge avgConfidence (0-1) - affects rest brightness
  */
 function getEdgeColor(
-  confidence: number,
+  isHovered: boolean,
+  isDirectPath: boolean = false,
+  isLoopEdge: boolean = false,
   isBackbone: boolean = false,
-  isDirectPath: boolean = false
+  confidence: number = 0.7
 ): string {
-  // Direct path edges get teal tint (verified routes)
-  if (isDirectPath) {
-    // Brightness varies with confidence even for direct paths
-    if (confidence >= 0.9) return '#6EE7B7'; // Emerald-300 - high confidence direct
-    if (confidence >= 0.75) return '#5EEAD4'; // Teal-300 - standard direct
-    return '#2DD4BF'; // Teal-400 - lower confidence direct
+  // Hover state: reveal edge type via color
+  if (isHovered) {
+    if (isDirectPath) return DESIGN.edges.hoverDirect;  // Teal
+    if (isLoopEdge) return DESIGN.edges.hoverLoop;      // Indigo
+    return DESIGN.edges.hoverStandard;                  // Bright gray
   }
   
-  // Backbone edges get lighter gray (prominent)
+  // Rest state: unified gray, brightness varies with confidence/backbone
   if (isBackbone) {
-    if (confidence >= 0.9) return '#9CA3AF'; // Gray-400 - very high confidence backbone
-    if (confidence >= 0.75) return '#6B7280'; // Gray-500 - high confidence backbone
-    return '#4B5563'; // Gray-600 - standard backbone
+    return confidence >= 0.75 ? DESIGN.edges.restBright : DESIGN.edges.rest;
   }
   
-  // Standard edges: confidence-based brightness gradient
-  // Higher confidence = lighter (more visible)
-  if (confidence >= 0.95) return '#6B7280'; // Gray-500 - very high confidence
-  if (confidence >= 0.85) return '#4B5563'; // Gray-600 - high confidence  
-  if (confidence >= 0.70) return '#374151'; // Gray-700 - medium confidence
-  return '#1F2937'; // Gray-800 - low confidence (subtle)
+  // Standard edges: subtle brightness gradient based on confidence
+  if (confidence >= 0.85) return DESIGN.edges.rest;      // Gray-600
+  if (confidence >= 0.70) return DESIGN.edges.restDim;   // Gray-700
+  return '#1F2937';  // Gray-800 - very low confidence
 }
 
 /**
  * Create a ring (torus) icon for standard nodes.
  * Thick ring with small donut hole - no stroke, just the ring itself.
+ * Optionally includes a green outer ring for neighbor indication.
  * @param color - Ring color
  * @param opacity - Opacity 0-1 (for fade animations)
  * @param isHovered - Whether the node is currently hovered (adds brightness)
+ * @param isNeighbor - Whether this node is a zero-hop neighbor (adds green outer ring)
  */
-function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1, isHovered: boolean = false): L.DivIcon {
+function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1, isHovered: boolean = false, isNeighbor: boolean = false): L.DivIcon {
   // Hover: instant on, ease-out off (150ms)
   const brightness = isHovered ? 1.25 : 1;
+  
+  // Neighbor indicator: green outer ring wrapping the main marker
+  if (isNeighbor) {
+    const offset = (NEIGHBOR_OUTER_RING_SIZE - MARKER_SIZE) / 2;
+    return L.divIcon({
+      className: 'map-ring-marker-neighbor',
+      html: `<div style="
+        position: relative;
+        width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        opacity: ${opacity};
+        filter: brightness(${brightness});
+        transition: filter 0s ease-in, filter 150ms ease-out;
+      ">
+        <!-- Green outer ring -->
+        <div style="
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          background: transparent;
+          border-radius: 50%;
+          border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
+          box-sizing: border-box;
+          opacity: 0.7;
+        "></div>
+        <!-- Inner colored ring -->
+        <div style="
+          position: absolute;
+          top: ${offset}px;
+          left: ${offset}px;
+          width: ${MARKER_SIZE}px;
+          height: ${MARKER_SIZE}px;
+          background: transparent;
+          border-radius: 50%;
+          border: ${RING_THICKNESS}px solid ${color};
+          box-sizing: border-box;
+        "></div>
+      </div>`,
+      iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
+      iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
+      popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+    });
+  }
+  
   return L.divIcon({
     className: 'map-ring-marker',
     html: `<div style="
@@ -127,13 +181,60 @@ function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1, i
 /**
  * Create a filled dot icon for hub nodes.
  * Same outer dimension as ring - no border/stroke.
+ * Optionally includes a green outer ring for neighbor indication.
  * @param color - Fill color
  * @param opacity - Opacity 0-1 (for fade animations)
  * @param isHovered - Whether the node is currently hovered (adds brightness)
+ * @param isNeighbor - Whether this node is a zero-hop neighbor (adds green outer ring)
  */
-function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1, isHovered: boolean = false): L.DivIcon {
+function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1, isHovered: boolean = false, isNeighbor: boolean = false): L.DivIcon {
   // Hover: instant on, ease-out off (150ms)
   const brightness = isHovered ? 1.25 : 1;
+  
+  // Neighbor indicator: green outer ring wrapping the hub marker
+  if (isNeighbor) {
+    const offset = (NEIGHBOR_OUTER_RING_SIZE - MARKER_SIZE) / 2;
+    return L.divIcon({
+      className: 'map-filled-marker-neighbor',
+      html: `<div style="
+        position: relative;
+        width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        opacity: ${opacity};
+        filter: brightness(${brightness});
+        transition: filter 0s ease-in, filter 150ms ease-out;
+      ">
+        <!-- Green outer ring -->
+        <div style="
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          background: transparent;
+          border-radius: 50%;
+          border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
+          box-sizing: border-box;
+          opacity: 0.7;
+        "></div>
+        <!-- Inner filled dot -->
+        <div style="
+          position: absolute;
+          top: ${offset}px;
+          left: ${offset}px;
+          width: ${MARKER_SIZE}px;
+          height: ${MARKER_SIZE}px;
+          background-color: ${color};
+          border-radius: 50%;
+          box-sizing: border-box;
+        "></div>
+      </div>`,
+      iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
+      iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
+      popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+    });
+  }
+  
   return L.divIcon({
     className: 'map-filled-marker',
     html: `<div style="
@@ -191,10 +292,12 @@ function createLocalIcon(isHovered: boolean = false): L.DivIcon {
 /**
  * Create room server icon - amber chat bubble icon.
  * Uses lucide-react MessagesSquare icon rendered as static SVG.
+ * Optionally includes a green outer ring for neighbor indication.
  * @param opacity - Opacity 0-1 (for fade animations)
  * @param isHovered - Whether the node is currently hovered (adds brightness)
+ * @param isNeighbor - Whether this node is a zero-hop neighbor (adds green outer ring)
  */
-function createRoomServerIcon(opacity: number = 1, isHovered: boolean = false): L.DivIcon {
+function createRoomServerIcon(opacity: number = 1, isHovered: boolean = false, isNeighbor: boolean = false): L.DivIcon {
   // Render the MessagesSquare icon to static SVG markup
   const iconMarkup = renderToStaticMarkup(
     <MessagesSquare 
@@ -207,6 +310,51 @@ function createRoomServerIcon(opacity: number = 1, isHovered: boolean = false): 
   
   // Hover: instant on, ease-out off (150ms)
   const brightness = isHovered ? 1.25 : 1;
+  
+  // Neighbor indicator: green outer ring wrapping the icon
+  if (isNeighbor) {
+    const iconSize = MARKER_SIZE + 2;
+    const offset = (NEIGHBOR_OUTER_RING_SIZE - iconSize) / 2;
+    return L.divIcon({
+      className: 'map-room-server-marker-neighbor',
+      html: `<div style="
+        position: relative;
+        width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        opacity: ${opacity};
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
+        transition: filter 0s ease-in, filter 150ms ease-out;
+      ">
+        <!-- Green outer ring -->
+        <div style="
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          background: transparent;
+          border-radius: 50%;
+          border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
+          box-sizing: border-box;
+          opacity: 0.7;
+        "></div>
+        <!-- Icon -->
+        <div style="
+          position: absolute;
+          top: ${offset}px;
+          left: ${offset}px;
+          width: ${iconSize}px;
+          height: ${iconSize}px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">${iconMarkup}</div>
+      </div>`,
+      iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
+      iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
+      popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+    });
+  }
   
   return L.divIcon({
     className: 'map-room-server-marker',
@@ -1737,7 +1885,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               key={`weak-edge-${edge.key}`}
               positions={[from, animatedTo]}
               pathOptions={{
-                color: DESIGN.edges.weak,
+                color: DESIGN.edges.restDim,
                 weight: 1.5,
                 opacity: 0.5 * traceProgress,  // Subtle but visible
                 lineCap: 'round',
@@ -1796,11 +1944,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const isAnyHovered = hoveredEdgeKey !== null;
           const hoverOpacityMult = isAnyHovered ? (isHovered ? 1.25 : 0.4) : 1;
           
-          // Loop edges: render as parallel double-lines in loop color
+          // Loop edges: render as parallel double-lines
+          // At rest: gray (double-line still indicates redundancy)
+          // On hover: indigo color reveals loop type
           if (isLoopEdge) {
             const { line1, line2 } = getParallelOffsets(from, animatedTo, animatedWeight * 1.5);
-            const loopColor = DESIGN.edges.loop;
-            // Brighten hovered loop edge
+            // Gray at rest, indigo on hover
+            const loopColor = isHovered ? DESIGN.edges.hoverLoop : DESIGN.edges.rest;
             const loopOpacity = baseOpacity * 1.1 * hoverOpacityMult;
             const loopWeight = isHovered 
               ? Math.max(2.5, animatedWeight * 0.8) 
@@ -1857,7 +2007,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                       <div className="text-text-secondary">
                         {edge.certainCount} validations ({Math.round(linkQuality * 100)}%)
                       </div>
-                      <div style={{ color: loopColor }} className="flex items-center gap-1 mt-0.5">
+                      <div style={{ color: DESIGN.edges.hoverLoop }} className="flex items-center gap-1 mt-0.5">
                         <RefreshCw className="w-3 h-3" />
                         <span>Redundant path</span>
                       </div>
@@ -1874,9 +2024,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             );
           }
           
-          // Get confidence-based color for this edge
-          // Direct path edges get teal tint, backbone edges get lighter gray
-          const edgeColor = getEdgeColor(confidence, isBackbone, edge.isDirectPathEdge);
+          // Get color for this edge: gray at rest, colored on hover
+          const edgeColor = getEdgeColor(isHovered, edge.isDirectPathEdge, false, isBackbone, confidence);
           
           // Standard edge: single line with trace animation
           const isHighlighted = highlightedEdgeKey && edge.key === highlightedEdgeKey;
@@ -1954,7 +2103,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
-        {/* Draw neighbor edges (direct RF links to local) - dashed green, always visible */}
+        {/* Draw neighbor edges (direct RF links to local) - dashed, always visible */}
+        {/* At rest: gray dashed. On hover: green dashed (reveals neighbor type) */}
         {/* Uses topology-computed avgRssi/avgSnr when available (from lastHopNeighbors) */}
         {neighborPolylines.map(({ from, to, hash, neighbor, lastHopData }) => {
           const name = neighbor.node_name || neighbor.name || hash.slice(0, 8);
@@ -1965,17 +2115,28 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const packetCount = lastHopData?.count;
           const confidence = lastHopData?.confidence;
           
+          // Hover state: gray at rest, green on hover (matches new visual system)
+          const neighborEdgeKey = `neighbor-${hash}`;
+          const isNeighborHovered = hoveredEdgeKey === neighborEdgeKey;
+          const neighborColor = isNeighborHovered ? DESIGN.edges.neighborHover : DESIGN.edges.neighborRest;
+          const neighborWeight = isNeighborHovered ? 2.5 : 1.5;
+          const neighborOpacity = isNeighborHovered ? 1 : 0.75;
+          
           return (
             <Polyline
               key={`neighbor-edge-${hash}`}
               positions={[from, to]}
               pathOptions={{
-                color: DESIGN.edges.neighbor,
-                weight: 1.5,
-                opacity: 0.85,
+                color: neighborColor,
+                weight: neighborWeight,
+                opacity: neighborOpacity,
                 dashArray: '4, 4',
                 lineCap: 'round',
                 lineJoin: 'round',
+              }}
+              eventHandlers={{
+                mouseover: () => setHoveredEdgeKey(neighborEdgeKey),
+                mouseout: () => setHoveredEdgeKey(null),
               }}
             >
               <Tooltip
@@ -2070,25 +2231,24 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             || neighbor.contact_type?.toLowerCase() === 'room' 
             || neighbor.contact_type?.toLowerCase() === 'server';
           
-          // Icon selection with opacity and hover state:
-          // Priority: Room Server > Hub > Zero-hop Neighbor > Mobile > Standard
-          // - Room servers: amber chat bubble icon (service node)
-          // - Hubs: filled dot (indicates importance)
-          // - Zero-hop neighbors: green ring (direct RF contact)
-          // - Mobile nodes: orange ring (indicates volatile/moving)
-          // - All other nodes: ring/torus in standard color (elegant, minimal)
+          // Icon selection with opacity, hover state, and neighbor indicator:
+          // Base type priority: Room Server > Hub > Mobile > Standard
+          // Neighbor indicator: green outer ring added to ANY base type if node is zero-hop
+          // 
+          // - Room servers: amber chat bubble icon (+ green ring if neighbor)
+          // - Hubs: filled indigo dot (+ green ring if neighbor)
+          // - Mobile nodes: orange ring (+ green ring if neighbor)
+          // - Standard nodes: indigo ring (+ green ring if neighbor)
           // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
           const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
           const isNodeHovered = hoveredMarker === hash;
           const icon = isRoomServer
-            ? createRoomServerIcon(quantizedOpacity, isNodeHovered)
+            ? createRoomServerIcon(quantizedOpacity, isNodeHovered, isZeroHop)
             : isHub 
-              ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered)
-              : isZeroHop
-                ? createRingIcon(DESIGN.neighborColor, quantizedOpacity, isNodeHovered)
-                : isMobile
-                  ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered)
-                  : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered);
+              ? createFilledIcon(DESIGN.hubColor, quantizedOpacity, isNodeHovered, isZeroHop)
+              : isMobile
+                ? createRingIcon(DESIGN.mobileColor, quantizedOpacity, isNodeHovered, isZeroHop)
+                : createRingIcon(DESIGN.nodeColor, quantizedOpacity, isNodeHovered, isZeroHop);
           
           // Use quantized opacity and hover state in key to force icon update
           const opacityKey = Math.round(quantizedOpacity * 20);
@@ -2288,7 +2448,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           {/* Node types legend */}
           <div className="text-text-secondary font-medium mb-1.5 flex items-center gap-1">
             Nodes
-            <LegendTooltip text="Green = MeshCore neighbor (direct RF contact). Yellow = hub. All others are rings." />
+            <LegendTooltip text="Node type shown by shape/color. Green outer ring = direct RF neighbor." />
           </div>
           <div className="flex flex-col gap-1">
             {/* Ring node indicator - thick ring like actual markers */}
@@ -2338,20 +2498,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 <span className="text-text-muted">Room</span>
               </div>
             )}
-            {/* Neighbor indicator - green ring (MeshCore definition: direct RF contact) */}
-            {zeroHopNeighbors.size > 0 && (
-              <div className="flex items-center gap-1.5">
-                <div 
-                  className="w-3 h-3 rounded-full flex-shrink-0" 
-                  style={{ 
-                    background: 'transparent',
-                    border: `3px solid ${DESIGN.neighborColor}`,
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <span className="text-text-muted">Neighbor</span>
-              </div>
-            )}
             {/* Mobile node indicator - orange ring */}
             {meshTopology.mobileNodes.length > 0 && (
               <div className="flex items-center gap-1.5">
@@ -2366,6 +2512,39 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 <span className="text-text-muted">Mobile</span>
               </div>
             )}
+            {/* Neighbor indicator - green outer ring overlay (shown on any node type) */}
+            {zeroHopNeighbors.size > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div 
+                  className="relative w-4 h-4 flex-shrink-0"
+                >
+                  {/* Outer green ring */}
+                  <div 
+                    className="absolute inset-0 rounded-full"
+                    style={{ 
+                      background: 'transparent',
+                      border: `1.5px solid ${DESIGN.neighborColor}`,
+                      boxSizing: 'border-box',
+                      opacity: 0.7,
+                    }}
+                  />
+                  {/* Inner node indicator */}
+                  <div 
+                    className="absolute rounded-full"
+                    style={{ 
+                      top: '4px',
+                      left: '4px',
+                      width: '8px',
+                      height: '8px',
+                      background: 'transparent',
+                      border: `2px solid ${DESIGN.nodeColor}`,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <span className="text-text-muted">Neighbor</span>
+              </div>
+            )}
           </div>
           
           {/* Neighbor links - always visible, not gated by topology */}
@@ -2377,12 +2556,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   style={{ 
                     width: '14px',
                     height: '2px',
-                    backgroundImage: `repeating-linear-gradient(90deg, ${DESIGN.edges.neighbor} 0, ${DESIGN.edges.neighbor} 3px, transparent 3px, transparent 5px)`,
+                    backgroundImage: `repeating-linear-gradient(90deg, ${DESIGN.edges.neighborRest} 0, ${DESIGN.edges.neighborRest} 3px, transparent 3px, transparent 5px)`,
                     borderRadius: '1px',
                   }}
                 />
-                <span className="text-text-muted">Neighbor link</span>
-                <LegendTooltip text="Dashed green lines to MeshCore neighbors (direct RF contact with local)." />
+                <span className="text-text-muted">Neighbor</span>
+                <LegendTooltip text="Dashed gray → green on hover. Direct RF contact with local." />
               </div>
             </div>
           )}
@@ -2411,35 +2590,23 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 )}
               </div>
               
-              {/* Link types legend */}
+              {/* Link types legend - new hover-reveal system */}
               <div className="flex flex-col gap-1 mt-1.5 pt-1.5 border-t border-white/10">
-                {/* Standard link */}
+                {/* Standard link - gray at rest */}
                 <div className="flex items-center gap-1.5">
                   <div 
                     className="flex-shrink-0" 
                     style={{ 
                       width: '14px',
                       height: '3px',
-                      backgroundColor: DESIGN.edges.standard,
+                      backgroundColor: DESIGN.edges.rest,
                       borderRadius: '1px',
                     }}
                   />
                   <span className="text-text-muted">Link</span>
+                  <LegendTooltip text="Gray at rest. Hover to reveal type (teal=direct, indigo=loop)." />
                 </div>
-                {/* Direct path indicator */}
-                <div className="flex items-center gap-1.5">
-                  <div 
-                    className="flex-shrink-0" 
-                    style={{ 
-                      width: '14px',
-                      height: '3px',
-                      backgroundColor: DESIGN.edges.direct,
-                      borderRadius: '1px',
-                    }}
-                  />
-                  <span className="text-text-muted">Direct</span>
-                </div>
-                {/* Loop/redundant path indicator */}
+                {/* Loop/redundant path indicator - double line (gray at rest) */}
                 {meshTopology.loops.length > 0 && (
                   <div className="flex items-center gap-1.5">
                     <div 
@@ -2448,12 +2615,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                     >
                       <div style={{ 
                         height: '2px', 
-                        backgroundColor: DESIGN.edges.loop,
+                        backgroundColor: DESIGN.edges.rest,
                         borderRadius: '1px',
                       }} />
                       <div style={{ 
                         height: '2px', 
-                        backgroundColor: DESIGN.edges.loop,
+                        backgroundColor: DESIGN.edges.rest,
                         borderRadius: '1px',
                       }} />
                     </div>
@@ -2466,9 +2633,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               {meshTopology.loops.length > 0 && (
                 <div className="mt-1.5 pt-1.5 border-t border-white/10">
                   <div className="flex items-center gap-1.5">
-                    <RefreshCw className="w-3 h-3 flex-shrink-0" style={{ color: DESIGN.edges.loop }} />
+                    <RefreshCw className="w-3 h-3 flex-shrink-0" style={{ color: DESIGN.edges.hoverLoop }} />
                     <div className="flex flex-col">
-                      <span style={{ color: DESIGN.edges.loop }} className="font-medium">
+                      <span style={{ color: DESIGN.edges.hoverLoop }} className="font-medium">
                         {meshTopology.loops.length} {meshTopology.loops.length === 1 ? 'Loop' : 'Loops'}
                       </span>
                       <span className="text-text-muted text-[10px] leading-tight">
