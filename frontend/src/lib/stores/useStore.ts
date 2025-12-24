@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import type { Stats, Packet, LogEntry } from '@/types/api';
+import type { Stats, Packet, LogEntry, NeighborInfo } from '@/types/api';
 import * as api from '@/lib/api';
 import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
 import { topologyService } from '@/lib/topology-service';
+import { parsePacketPath, prefixMatches, getHashPrefix } from '@/lib/path-utils';
 
 /** Data point for system resource history */
 export interface ResourceDataPoint {
@@ -16,6 +17,177 @@ export interface ResourceDataPoint {
 const RESOURCE_HISTORY_KEY = 'pymc-resource-history';
 const RESOURCE_LAST_FETCH_KEY = 'pymc-resource-last-fetch';
 const HIDDEN_CONTACTS_KEY = 'pymc-hidden-contacts';
+const QUICK_NEIGHBORS_KEY = 'pymc-quick-neighbors';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Quick Neighbor Types (lightweight detection without deep analysis)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * A neighbor detected by appearing as the last hop in packet paths.
+ * This is ground truth: they forwarded packets directly to our local node.
+ * This is a lightweight version that doesn't require full topology computation.
+ */
+export interface QuickNeighbor {
+  /** Full hash of the neighbor (matched from known contacts) */
+  hash: string;
+  /** 2-char prefix as seen in packet paths */
+  prefix: string;
+  /** Number of times this node was the last hop */
+  count: number;
+  /** Average RSSI of packets received via this neighbor */
+  avgRssi: number | null;
+  /** Average SNR of packets received via this neighbor */
+  avgSnr: number | null;
+  /** Most recent packet timestamp from this neighbor */
+  lastSeen: number;
+}
+
+/**
+ * Lightweight last-hop neighbor detection.
+ * Runs on main thread with polled packets - no deep analysis needed.
+ * 
+ * This extracts nodes that appear as the last hop in packet paths,
+ * which is ground truth that they forwarded packets directly to us.
+ * 
+ * @param packets - Packet array (even small poll batches work)
+ * @param neighbors - Known contacts from stats.neighbors
+ * @param localHash - Local node's hash (e.g., "0x19")
+ * @returns Array of QuickNeighbor sorted by count descending
+ */
+function detectQuickNeighbors(
+  packets: Packet[],
+  neighbors: Record<string, NeighborInfo>,
+  localHash: string | undefined
+): QuickNeighbor[] {
+  if (!localHash || packets.length === 0 || Object.keys(neighbors).length === 0) {
+    return [];
+  }
+  
+  // Build prefix → hash lookup from known neighbors
+  const prefixToHash = new Map<string, string>();
+  for (const hash of Object.keys(neighbors)) {
+    const prefix = getHashPrefix(hash);
+    // Only use unambiguous prefixes (skip if collision)
+    if (!prefixToHash.has(prefix)) {
+      prefixToHash.set(prefix, hash);
+    } else {
+      // Mark as ambiguous by setting to empty string
+      prefixToHash.set(prefix, '');
+    }
+  }
+  
+  // Track last-hop prefix stats
+  const lastHopStats = new Map<string, {
+    hash: string;
+    count: number;
+    rssiSum: number;
+    rssiCount: number;
+    snrSum: number;
+    snrCount: number;
+    lastSeen: number;
+  }>();
+  
+  for (const packet of packets) {
+    const parsed = parsePacketPath(packet, localHash);
+    if (!parsed || parsed.effectiveLength === 0) continue;
+    
+    // Last element in effective path is the last forwarder (forwarded directly to us)
+    const lastHopPrefix = parsed.effective[parsed.effective.length - 1];
+    
+    // Try to resolve to a known hash
+    let resolvedHash = prefixToHash.get(lastHopPrefix);
+    
+    // If ambiguous or not found, try direct prefix matching
+    if (!resolvedHash) {
+      for (const hash of Object.keys(neighbors)) {
+        if (prefixMatches(lastHopPrefix, hash)) {
+          // If we already found one, it's ambiguous - skip
+          if (resolvedHash) {
+            resolvedHash = '';
+            break;
+          }
+          resolvedHash = hash;
+        }
+      }
+    }
+    
+    // Skip if couldn't resolve or ambiguous
+    if (!resolvedHash) continue;
+    
+    // Accumulate stats
+    const existing = lastHopStats.get(resolvedHash) || {
+      hash: resolvedHash,
+      count: 0,
+      rssiSum: 0,
+      rssiCount: 0,
+      snrSum: 0,
+      snrCount: 0,
+      lastSeen: 0,
+    };
+    
+    existing.count++;
+    
+    if (packet.rssi !== undefined && packet.rssi !== null) {
+      existing.rssiSum += packet.rssi;
+      existing.rssiCount++;
+    }
+    
+    if (packet.snr !== undefined && packet.snr !== null) {
+      existing.snrSum += packet.snr;
+      existing.snrCount++;
+    }
+    
+    const timestamp = packet.timestamp ?? 0;
+    if (timestamp > existing.lastSeen) {
+      existing.lastSeen = timestamp;
+    }
+    
+    lastHopStats.set(resolvedHash, existing);
+  }
+  
+  // Convert to QuickNeighbor array
+  const result: QuickNeighbor[] = [];
+  for (const [hash, stats] of lastHopStats) {
+    result.push({
+      hash,
+      prefix: getHashPrefix(hash),
+      count: stats.count,
+      avgRssi: stats.rssiCount > 0 ? stats.rssiSum / stats.rssiCount : null,
+      avgSnr: stats.snrCount > 0 ? stats.snrSum / stats.snrCount : null,
+      lastSeen: stats.lastSeen,
+    });
+  }
+  
+  // Sort by count descending
+  result.sort((a, b) => b.count - a.count);
+  
+  return result;
+}
+
+/** Load quick neighbors from localStorage */
+function loadQuickNeighbors(): QuickNeighbor[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem(QUICK_NEIGHBORS_KEY);
+    if (stored) {
+      return JSON.parse(stored) as QuickNeighbor[];
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+  return [];
+}
+
+/** Save quick neighbors to localStorage */
+function saveQuickNeighbors(neighbors: QuickNeighbor[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(QUICK_NEIGHBORS_KEY, JSON.stringify(neighbors));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 /** Load resource history from localStorage */
 function loadResourceHistory(): ResourceDataPoint[] {
@@ -110,6 +282,10 @@ interface StoreState {
   // Hidden contacts (user-removed nodes, persisted to localStorage)
   hiddenContacts: Set<string>;
 
+  // Quick neighbors (lightweight detection, persisted to localStorage)
+  // These are detected on every poll without requiring deep analysis
+  quickNeighbors: QuickNeighbor[];
+
   // Initialization flag
   initialized: boolean;
   
@@ -133,6 +309,7 @@ interface StoreState {
   clearPacketCache: () => void;
   triggerTopologyCompute: () => void;
   triggerDeepAnalysis: () => Promise<void>;
+  updateQuickNeighbors: () => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -157,6 +334,7 @@ const store = create<StoreState>((set, get) => ({
   resourceHistory: loadResourceHistory(),
   lastResourceFetch: loadLastResourceFetch(),
   hiddenContacts: loadHiddenContacts(),
+  quickNeighbors: loadQuickNeighbors(),
   initialized: false,
   packetCacheState: packetCache.getState(),
 
@@ -203,8 +381,9 @@ const store = create<StoreState>((set, get) => ({
           packetsLoading: false,
           lastPacketTimestamp: newestTimestamp,
         });
-        // Trigger initial topology computation
+        // Trigger initial topology computation and quick neighbor detection
         get().triggerTopologyCompute();
+        get().updateQuickNeighbors();
       } else {
         set({ packetsLoading: false });
       }
@@ -287,8 +466,9 @@ const store = create<StoreState>((set, get) => ({
         packetsLoading: false,
         lastPacketTimestamp: newestTimestamp || lastPacketTimestamp,
       });
-      // Trigger topology recompute on new packets
+      // Trigger topology recompute and quick neighbor update on new packets
       get().triggerTopologyCompute();
+      get().updateQuickNeighbors();
     } catch (error) {
       set({ 
         packetsError: error instanceof Error ? error.message : 'Failed to fetch packets',
@@ -437,6 +617,30 @@ const store = create<StoreState>((set, get) => ({
     // Packets will be updated by the subscription in initializeApp
     // Topology compute will be triggered when packets update
   },
+  
+  updateQuickNeighbors: () => {
+    const { packets, stats, hiddenContacts } = get();
+    if (packets.length === 0 || !stats) return;
+    
+    // Filter out hidden contacts from neighbors
+    const neighbors = stats.neighbors ?? {};
+    const visibleNeighbors = Object.fromEntries(
+      Object.entries(neighbors).filter(([hash]) => !hiddenContacts.has(hash))
+    );
+    
+    const localHash = stats.local_hash;
+    
+    // Run lightweight detection
+    const quickNeighbors = detectQuickNeighbors(packets, visibleNeighbors, localHash);
+    
+    // Only update if changed (avoid unnecessary re-renders)
+    const current = get().quickNeighbors;
+    if (quickNeighbors.length !== current.length || 
+        quickNeighbors.some((n, i) => n.hash !== current[i]?.hash || n.count !== current[i]?.count)) {
+      set({ quickNeighbors });
+      saveQuickNeighbors(quickNeighbors);
+    }
+  },
 }));
 
 // Main store hook (full access)
@@ -473,3 +677,4 @@ export const useHideContact = () => store((s) => s.hideContact);
 export const usePacketCacheState = () => store((s) => s.packetCacheState);
 export const useClearPacketCache = () => store((s) => s.clearPacketCache);
 export const useTriggerDeepAnalysis = () => store((s) => s.triggerDeepAnalysis);
+export const useQuickNeighbors = () => store((s) => s.quickNeighbors);

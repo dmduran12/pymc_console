@@ -10,7 +10,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { DeepAnalysisModal, type AnalysisStep } from '@/components/ui/DeepAnalysisModal';
 import { getLinkQualityWeight, type TopologyEdge, type LastHopNeighbor } from '@/lib/mesh-topology';
 import { useTopology, useIsComputingTopology } from '@/lib/stores/useTopologyStore';
-import { usePackets, usePacketCacheState, useTriggerDeepAnalysis } from '@/lib/stores/useStore';
+import { usePackets, usePacketCacheState, useTriggerDeepAnalysis, useQuickNeighbors } from '@/lib/stores/useStore';
 import { parsePath, getHashPrefix } from '@/lib/path-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -682,21 +682,45 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Get packets for SNR calculation (lightweight, still needed)
   const packets = usePackets();
   
-  // Get zero-hop neighbors from topology's lastHopNeighbors (ground truth from packet paths)
-  // These are nodes that appeared as the LAST hop in packet paths (i.e., forwarded directly to us)
+  // Get quick neighbors from main store (runs on every poll, persisted)
+  const quickNeighbors = useQuickNeighbors();
+  
+  // Get zero-hop neighbors - use quickNeighbors as primary source (always available),
+  // fall back to topology's lastHopNeighbors (only after deep analysis), then inference
   // Build both a Set (for .has() checks) and a Map (for looking up RSSI/SNR data)
   const { zeroHopNeighbors, lastHopNeighborMap } = useMemo(() => {
     const neighborSet = new Set<string>();
     const neighborMap = new Map<string, LastHopNeighbor>();
     
-    // Use topology's lastHopNeighbors if available
-    for (const lastHop of meshTopology.lastHopNeighbors) {
-      neighborSet.add(lastHop.hash);
-      neighborMap.set(lastHop.hash, lastHop);
+    // Primary source: quickNeighbors from main store (runs on every poll, persisted)
+    // These are available immediately without deep analysis
+    if (quickNeighbors.length > 0) {
+      for (const qn of quickNeighbors) {
+        neighborSet.add(qn.hash);
+        // Convert QuickNeighbor to LastHopNeighbor-like format for compatibility
+        neighborMap.set(qn.hash, {
+          hash: qn.hash,
+          prefix: qn.prefix,
+          count: qn.count,
+          confidence: 1.0, // Quick neighbors are resolved, so high confidence
+          avgRssi: qn.avgRssi,
+          avgSnr: qn.avgSnr,
+          lastSeen: qn.lastSeen,
+        });
+      }
     }
     
-    // Fallback: if no lastHopNeighbors yet, use the old inference method
-    // This handles the case before deep analysis has been run
+    // Enhancement: merge in topology's lastHopNeighbors (may have more neighbors after deep analysis)
+    // These may include neighbors that quickNeighbors missed due to prefix collisions
+    for (const lastHop of meshTopology.lastHopNeighbors) {
+      if (!neighborSet.has(lastHop.hash)) {
+        neighborSet.add(lastHop.hash);
+        neighborMap.set(lastHop.hash, lastHop);
+      }
+    }
+    
+    // Fallback: if still no neighbors, use the old inference method
+    // This handles edge cases where both quickNeighbors and topology are empty
     if (neighborSet.size === 0) {
       const inferred = inferZeroHopNeighbors(
         packets, 
@@ -711,7 +735,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     }
     
     return { zeroHopNeighbors: neighborSet, lastHopNeighborMap: neighborMap };
-  }, [meshTopology.lastHopNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
+  }, [quickNeighbors, meshTopology.lastHopNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {

@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react';
-import { useStore, useHiddenContacts, useHideContact } from '@/lib/stores/useStore';
+import { useStore, useHiddenContacts, useHideContact, useQuickNeighbors } from '@/lib/stores/useStore';
 import { useHubNodes, useCentrality, useLastHopNeighbors } from '@/lib/stores/useTopologyStore';
 import { ChevronsLeftRightEllipsis, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
@@ -49,6 +49,7 @@ export default function Contacts() {
   const hubNodes = useHubNodes();
   const centrality = useCentrality();
   const lastHopNeighbors = useLastHopNeighbors();
+  const quickNeighbors = useQuickNeighbors();
   
   // Confirmation modal state
   const [pendingRemove, setPendingRemove] = useState<{ hash: string; name: string } | null>(null);
@@ -105,10 +106,20 @@ export default function Contacts() {
     return distances;
   }, [visibleContacts, localNode]);
   
-  // Build set of neighbor hashes for efficient lookup
+  // Build set of neighbor hashes - use quickNeighbors as primary (always available),
+  // merge with lastHopNeighbors from topology (available after deep analysis)
   const neighborHashSet = useMemo(() => {
-    return new Set(lastHopNeighbors.map(n => n.hash));
-  }, [lastHopNeighbors]);
+    const set = new Set<string>();
+    // Primary: quickNeighbors from main store (runs on every poll, persisted)
+    for (const qn of quickNeighbors) {
+      set.add(qn.hash);
+    }
+    // Merge: lastHopNeighbors from topology (may have additional neighbors after deep analysis)
+    for (const n of lastHopNeighbors) {
+      set.add(n.hash);
+    }
+    return set;
+  }, [quickNeighbors, lastHopNeighbors]);
   
   // Filter contacts based on search query and neighbors toggle
   const filteredContacts = useMemo(() => {
@@ -255,7 +266,7 @@ export default function Contacts() {
           {/* Search and sort controls */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Neighbors filter toggle */}
-            {lastHopNeighbors.length > 0 && (
+            {neighborHashSet.size > 0 && (
               <button
                 onClick={() => setShowNeighborsOnly(!showNeighborsOnly)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors min-h-[32px] order-1 sm:order-1 ${
@@ -267,7 +278,7 @@ export default function Contacts() {
               >
                 <ChevronsLeftRightEllipsis className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Neighbors</span>
-                <span className="sm:hidden">{lastHopNeighbors.length}</span>
+                <span className="sm:hidden">{neighborHashSet.size}</span>
                 {showNeighborsOnly && (
                   <span className="text-[10px] font-semibold tabular-nums">{neighborHashSet.size}</span>
                 )}
