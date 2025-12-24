@@ -106,30 +106,26 @@ export default function Contacts() {
     return distances;
   }, [visibleContacts, localNode]);
   
-  // Build set of BIDIRECTIONAL neighbor hashes - only includes confirmed two-way RF links
+  // Build set of neighbor hashes - nodes we've received zero-hop ADVERTs from
+  // (letsme.sh / meshcoretomqtt standard: last hop = neighbor = direct RF contact)
   // Also build a map for signal data lookup
   const { neighborHashSet, neighborSignalMap } = useMemo(() => {
     const set = new Set<string>();
     const signalMap = new Map<string, { avgRssi: number | null; avgSnr: number | null }>();
     
     // Primary: quickNeighbors from main store (runs on every poll, persisted)
-    // Only include BIDIRECTIONAL neighbors - confirmed two-way RF communication
     for (const qn of quickNeighbors) {
-      if (qn.isBidirectional) {
-        set.add(qn.hash);
-        signalMap.set(qn.hash, { avgRssi: qn.avgRssi, avgSnr: qn.avgSnr });
-      }
+      set.add(qn.hash);
+      signalMap.set(qn.hash, { avgRssi: qn.avgRssi, avgSnr: qn.avgSnr });
     }
     
     // Merge: lastHopNeighbors from topology (may have additional neighbors after deep analysis)
-    // Note: topology lastHopNeighbors don't have bidirectionality data, so treat conservatively
     for (const n of lastHopNeighbors) {
       if (!set.has(n.hash)) {
-        // Only add if not already in set - preserve bidirectional status from quickNeighbors
-        // Topology neighbors are RX-only confirmed, not necessarily bidirectional
+        set.add(n.hash);
       }
-      // But if already a neighbor, update signal data if better
-      if (set.has(n.hash) && !signalMap.has(n.hash)) {
+      // Update signal data if not already present
+      if (!signalMap.has(n.hash)) {
         signalMap.set(n.hash, { avgRssi: n.avgRssi, avgSnr: n.avgSnr });
       }
     }

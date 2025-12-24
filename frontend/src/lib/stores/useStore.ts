@@ -19,47 +19,28 @@ const RESOURCE_LAST_FETCH_KEY = 'pymc-resource-last-fetch';
 const HIDDEN_CONTACTS_KEY = 'pymc-hidden-contacts';
 const QUICK_NEIGHBORS_KEY = 'pymc-quick-neighbors';
 
-/**
- * Minimum packets required in EACH direction to confirm bidirectional neighbor.
- * A node is a confirmed bidirectional neighbor when:
- * - We received >= MIN_BIDIRECTIONAL_THRESHOLD packets FROM them (they TX'd, we RX'd)
- * - We transmitted >= MIN_BIDIRECTIONAL_THRESHOLD packets TO them (we TX'd, they forwarded)
- * 
- * Using 2 as threshold to avoid false positives from single packet observations.
- */
-export const MIN_BIDIRECTIONAL_THRESHOLD = 2;
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Quick Neighbor Types (lightweight detection without deep analysis)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * A neighbor detected through bidirectional packet exchange.
+ * A neighbor detected by receiving ADVERT packets directly from them.
  * 
- * BIDIRECTIONALITY REQUIREMENT:
- * A true "neighbor" (point-to-point, zero-hop) must exhibit two-way communication:
- * - RX Direction: They transmitted, we received (their TX → our RX)
- * - TX Direction: We transmitted, they forwarded (our TX → their RX → they forward)
+ * Standard neighbor detection (letsme.sh / meshcoretomqtt style):
+ * A node is a "neighbor" when we've received zero-hop ADVERTs from them,
+ * meaning they were the LAST HOP in the packet path (direct RF contact).
  * 
  * Only ADVERT packets (type=4) are used for neighbor detection because:
  * - ADVERTs are periodic broadcasts representing the purest signal quality indicator
  * - Other packet types may be forwarded with different TX power/conditions
- * 
- * This ensures we only mark nodes as neighbors when we have CONFIRMED two-way RF link.
  */
 export interface QuickNeighbor {
   /** Full hash of the neighbor (matched from known contacts) */
   hash: string;
   /** 2-char prefix as seen in packet paths */
   prefix: string;
-  /** @deprecated Use rxCount instead. Total ADVERT count (legacy, equals rxCount) */
+  /** Number of ADVERT packets where this node was the last hop (direct RF) */
   count: number;
-  /** Number of ADVERT packets RECEIVED from this neighbor (they TX'd → we RX'd) */
-  rxCount: number;
-  /** Number of ADVERT packets TRANSMITTED where this neighbor forwarded (we TX'd → they forwarded) */
-  txCount: number;
-  /** True if bidirectional communication confirmed (both rxCount and txCount >= threshold) */
-  isBidirectional: boolean;
   /** Average RSSI of ADVERT packets received from this neighbor */
   avgRssi: number | null;
   /** Average SNR of ADVERT packets received from this neighbor */
@@ -69,13 +50,9 @@ export interface QuickNeighbor {
 }
 
 /**
- * Lightweight bidirectional neighbor detection from ADVERT packets.
- * Runs on main thread with polled packets - no deep analysis needed.
- * 
- * BIDIRECTIONALITY REQUIREMENT:
- * A neighbor is only confirmed when BOTH directions are observed:
- * - RX Direction: We received ADVERT packets where they were last hop (they TX'd → we RX'd)
- * - TX Direction: We transmitted ADVERT packets where they were first hop (we TX'd → they forwarded)
+ * Lightweight neighbor detection from ADVERT packets.
+ * Standard approach (letsme.sh / meshcoretomqtt style):
+ * A neighbor is a node where we received ADVERTs with them as the LAST HOP.
  * 
  * Only ADVERT packets (type=4) are used because they represent the purest
  * signal quality indicator - periodic broadcasts with consistent TX parameters.
@@ -83,7 +60,7 @@ export interface QuickNeighbor {
  * @param packets - Packet array (even small poll batches work)
  * @param neighbors - Known contacts from stats.neighbors
  * @param localHash - Local node's hash (e.g., "0x19")
- * @returns Array of QuickNeighbor sorted by total packet count (RX + TX) descending
+ * @returns Array of QuickNeighbor sorted by ADVERT count descending
  */
 function detectQuickNeighbors(
   packets: Packet[],
@@ -151,153 +128,102 @@ function detectQuickNeighbors(
     console.log('[quickNeighbors] Built prefix lookup:', prefixToHash.size, 'prefixes,', collisionCount, 'collisions resolved');
   }
   
-  // Track neighbor stats for BOTH directions
-  // RX = packets we received from them (they TX'd → we RX'd)
-  // TX = packets we transmitted that they forwarded (we TX'd → they forwarded)
-  const neighborStats = new Map<string, {
+  // Track last-hop stats (standard neighbor detection)
+  const lastHopStats = new Map<string, {
     hash: string;
-    rxCount: number;      // Packets received from them (last hop)
-    txCount: number;      // Packets transmitted where they were first hop
-    rssiSum: number;      // Only from RX packets (signal we actually received)
+    count: number;
+    rssiSum: number;
     rssiCount: number;
-    snrSum: number;       // Only from RX packets
+    snrSum: number;
     snrCount: number;
     lastSeen: number;
   }>();
   
-  let advertPacketsRx = 0;
-  let advertPacketsTx = 0;
-  let rxResolved = 0;
-  let txResolved = 0;
+  let packetsWithPath = 0;
+  let packetsResolved = 0;
+  let advertPackets = 0;
   
   for (const packet of packets) {
     // Only use ADVERT packets (type=4) for neighbor detection
-    // ADVERTs are periodic broadcasts that represent the purest signal quality indicator.
     const packetType = packet.type ?? packet.payload_type;
     if (packetType !== 4) continue;  // Skip non-ADVERT packets
+    
+    // Skip transmitted packets - we want received ADVERTs
+    if (packet.transmitted === true) continue;
+    
+    advertPackets++;
     
     const parsed = parsePacketPath(packet, localHash);
     if (!parsed || parsed.effectiveLength === 0) continue;
     
-    const isTransmitted = packet.transmitted === true;
+    packetsWithPath++;
     
-    if (isTransmitted) {
-      // TX DIRECTION: We transmitted this packet
-      // First element in path is the first forwarder (node that received our TX)
-      // This proves: our TX → their RX (they can hear us)
-      advertPacketsTx++;
-      
-      const firstHopPrefix = parsed.effective[0];
-      const resolvedHash = prefixToHash.get(firstHopPrefix);
-      
-      if (resolvedHash) {
-        txResolved++;
-        const existing = neighborStats.get(resolvedHash) || {
-          hash: resolvedHash,
-          rxCount: 0,
-          txCount: 0,
-          rssiSum: 0,
-          rssiCount: 0,
-          snrSum: 0,
-          snrCount: 0,
-          lastSeen: 0,
-        };
-        
-        existing.txCount++;
-        
-        const timestamp = packet.timestamp ?? 0;
-        if (timestamp > existing.lastSeen) {
-          existing.lastSeen = timestamp;
-        }
-        
-        neighborStats.set(resolvedHash, existing);
-      }
-    } else {
-      // RX DIRECTION: We received this packet
-      // Last element in path is the last forwarder (transmitted directly to us)
-      // This proves: their TX → our RX (we can hear them)
-      advertPacketsRx++;
-      
-      const lastHopPrefix = parsed.effective[parsed.effectiveLength - 1];
-      const resolvedHash = prefixToHash.get(lastHopPrefix);
-      
-      if (resolvedHash) {
-        rxResolved++;
-        const existing = neighborStats.get(resolvedHash) || {
-          hash: resolvedHash,
-          rxCount: 0,
-          txCount: 0,
-          rssiSum: 0,
-          rssiCount: 0,
-          snrSum: 0,
-          snrCount: 0,
-          lastSeen: 0,
-        };
-        
-        existing.rxCount++;
-        
-        // Only accumulate signal stats from RX packets (actual received signal)
-        if (packet.rssi !== undefined && packet.rssi !== null) {
-          existing.rssiSum += packet.rssi;
-          existing.rssiCount++;
-        }
-        
-        if (packet.snr !== undefined && packet.snr !== null) {
-          existing.snrSum += packet.snr;
-          existing.snrCount++;
-        }
-        
-        const timestamp = packet.timestamp ?? 0;
-        if (timestamp > existing.lastSeen) {
-          existing.lastSeen = timestamp;
-        }
-        
-        neighborStats.set(resolvedHash, existing);
-      }
+    // Last element in effective path is the last forwarder (transmitted directly to us)
+    const lastHopPrefix = parsed.effective[parsed.effectiveLength - 1];
+    
+    // Try to resolve to a known hash
+    const resolvedHash = prefixToHash.get(lastHopPrefix);
+    
+    // Skip if prefix not found in our neighbors
+    if (!resolvedHash) continue;
+    
+    packetsResolved++;
+    
+    // Accumulate stats
+    const existing = lastHopStats.get(resolvedHash) || {
+      hash: resolvedHash,
+      count: 0,
+      rssiSum: 0,
+      rssiCount: 0,
+      snrSum: 0,
+      snrCount: 0,
+      lastSeen: 0,
+    };
+    
+    existing.count++;
+    
+    if (packet.rssi !== undefined && packet.rssi !== null) {
+      existing.rssiSum += packet.rssi;
+      existing.rssiCount++;
     }
+    
+    if (packet.snr !== undefined && packet.snr !== null) {
+      existing.snrSum += packet.snr;
+      existing.snrCount++;
+    }
+    
+    const timestamp = packet.timestamp ?? 0;
+    if (timestamp > existing.lastSeen) {
+      existing.lastSeen = timestamp;
+    }
+    
+    lastHopStats.set(resolvedHash, existing);
   }
   
   // Convert to QuickNeighbor array
   const result: QuickNeighbor[] = [];
-  for (const [hash, stats] of neighborStats) {
-    const isBidirectional = 
-      stats.rxCount >= MIN_BIDIRECTIONAL_THRESHOLD && 
-      stats.txCount >= MIN_BIDIRECTIONAL_THRESHOLD;
-    
+  for (const [hash, stats] of lastHopStats) {
     result.push({
       hash,
       prefix: getHashPrefix(hash),
-      count: stats.rxCount,  // Legacy: equals rxCount for backward compat
-      rxCount: stats.rxCount,
-      txCount: stats.txCount,
-      isBidirectional,
+      count: stats.count,
       avgRssi: stats.rssiCount > 0 ? stats.rssiSum / stats.rssiCount : null,
       avgSnr: stats.snrCount > 0 ? stats.snrSum / stats.snrCount : null,
       lastSeen: stats.lastSeen,
     });
   }
   
-  // Sort by total packet count (RX + TX) descending, bidirectional first
-  result.sort((a, b) => {
-    // Bidirectional neighbors first
-    if (a.isBidirectional !== b.isBidirectional) {
-      return a.isBidirectional ? -1 : 1;
-    }
-    // Then by total count
-    return (b.rxCount + b.txCount) - (a.rxCount + a.txCount);
-  });
+  // Sort by count descending
+  result.sort((a, b) => b.count - a.count);
   
   if (process.env.NODE_ENV === 'development') {
-    const bidirectionalCount = result.filter(n => n.isBidirectional).length;
-    console.log('[quickNeighbors] Detected:', result.length, 'neighbors (' + bidirectionalCount + ' bidirectional)');
-    console.log('[quickNeighbors] ADVERTs: RX=' + advertPacketsRx + ' (resolved=' + rxResolved + '), TX=' + advertPacketsTx + ' (resolved=' + txResolved + ')');
+    console.log('[quickNeighbors] Detected:', result.length, 'neighbors from', advertPackets, 'ADVERT packets');
+    console.log('[quickNeighbors] Stats: withPath=', packetsWithPath, 'resolved=', packetsResolved);
     if (result.length > 0) {
       console.log('[quickNeighbors] Top neighbors:', result.slice(0, 5).map(n => ({
         hash: n.hash.slice(0, 8),
         prefix: n.prefix,
-        rx: n.rxCount,
-        tx: n.txCount,
-        bidir: n.isBidirectional,
+        count: n.count,
       })));
     }
   }
