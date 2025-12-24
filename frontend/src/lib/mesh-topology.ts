@@ -265,23 +265,27 @@ export interface PathHealth {
 }
 
 /**
- * A neighbor identified by appearing as the last hop in packet paths.
- * This is ground truth: they forwarded packets directly to our local node.
+ * A neighbor identified by forwarding ADVERT packets directly to our local node.
+ * 
+ * Only ADVERT packets (type=4) are used for neighbor detection because:
+ * - ADVERTs are periodic broadcasts representing the purest signal quality indicator
+ * - Other packet types may be forwarded with different TX power/conditions
+ * - This aligns with how the backend determines zero_hop status
  */
 export interface LastHopNeighbor {
   /** Full hash of the neighbor (resolved from prefix via disambiguation) */
   hash: string;
   /** 2-char prefix as seen in packet paths */
   prefix: string;
-  /** Number of times this node was the last hop */
+  /** Number of ADVERT packets where this node was the last hop */
   count: number;
   /** Disambiguation confidence (0-1) */
   confidence: number;
-  /** Average RSSI of packets received via this neighbor */
+  /** Average RSSI of ADVERT packets received from this neighbor */
   avgRssi: number | null;
-  /** Average SNR of packets received via this neighbor */
+  /** Average SNR of ADVERT packets received from this neighbor */
   avgSnr: number | null;
-  /** Most recent packet timestamp from this neighbor */
+  /** Most recent ADVERT timestamp from this neighbor */
   lastSeen: number;
 }
 
@@ -346,11 +350,12 @@ export interface MeshTopology {
   /** Health metrics for top observed paths */
   pathHealth: PathHealth[];
   
-  // === LAST-HOP NEIGHBORS (Ground Truth) ===
+  // === LAST-HOP NEIGHBORS (ADVERT packets only) ===
   /** 
-   * Neighbors identified by appearing as the last hop in packet paths.
-   * This is ground truth from actual traffic: these nodes forwarded packets directly to us.
-   * Sorted by count descending (most traffic first).
+   * Neighbors identified by forwarding ADVERT packets directly to us.
+   * Only ADVERT packets are used - this ensures SNR/RSSI values reflect
+   * the purest signal quality from periodic broadcasts.
+   * Sorted by ADVERT count descending.
    */
   lastHopNeighbors: LastHopNeighbor[];
 }
@@ -1651,15 +1656,18 @@ export function buildMeshTopology(
   const nodeGatewayCounts = new Map<string, number>(); // How many times node is at position 1 (last hop to local)
   
   // === LAST-HOP NEIGHBOR TRACKING ===
-  // Track all prefixes that appear as last hop with signal quality data
-  // This is ground truth: these are nodes that forwarded packets directly to us
+  // Track prefixes that appear as last hop in ADVERT packets (type=4) with signal quality data.
+  // We ONLY use ADVERT packets for neighbor detection because:
+  // - ADVERTs are periodic broadcasts that represent the purest signal quality indicator
+  // - Other packet types (TXT_MSG, ACK, etc.) may be forwarded with different TX conditions
+  // - The backend uses ADVERTs to determine zero_hop status (consistency)
   interface LastHopPrefixAccumulator {
     prefix: string;
-    count: number;
+    count: number;       // Count of ADVERT packets where this prefix was last hop
     rssiSum: number;
-    rssiCount: number;  // Count of valid RSSI values
+    rssiCount: number;   // Count of valid RSSI values
     snrSum: number;
-    snrCount: number;   // Count of valid SNR values
+    snrCount: number;    // Count of valid SNR values
     lastSeen: number;
     // Track which full hashes this prefix resolved to (with confidence)
     resolvedHashes: Map<string, { count: number; confidenceSum: number }>;
@@ -1811,39 +1819,44 @@ export function buildMeshTopology(
       }
     }
     
-    // === LAST HOP → LOCAL INFERENCE (ALL PACKET TYPES) ===
+    // === LAST HOP → LOCAL INFERENCE (ALL PACKET TYPES for edge building) ===
     // The last forwarder is the node that sent us the packet directly.
     // This is position 1 in the effective path (already has local stripped)
     if (localHash && effectiveLength >= 1) {
       const lastHopIndex = effectiveLength - 1;
       const lastHopPrefix = effectivePath[lastHopIndex];
       
-      // === TRACK LAST-HOP PREFIX DATA (before disambiguation) ===
-      // This captures ALL prefixes that appear as last hop, with signal quality
-      // The prefix is ground truth; disambiguation resolves which node it is
-      const existingPrefixData = lastHopPrefixData.get(lastHopPrefix);
-      if (existingPrefixData) {
-        existingPrefixData.count++;
-        if (typeof packet.rssi === 'number' && !isNaN(packet.rssi)) {
-          existingPrefixData.rssiSum += packet.rssi;
-          existingPrefixData.rssiCount++;
+      // === TRACK LAST-HOP PREFIX DATA (ADVERT packets only) ===
+      // Only ADVERT packets (type=4) are used for neighbor detection and signal quality.
+      // ADVERTs are periodic broadcasts that represent the purest signal quality indicator.
+      const packetType = packet.type ?? packet.payload_type;
+      const isAdvert = packetType === 4;
+      
+      if (isAdvert) {
+        const existingPrefixData = lastHopPrefixData.get(lastHopPrefix);
+        if (existingPrefixData) {
+          existingPrefixData.count++;
+          if (typeof packet.rssi === 'number' && !isNaN(packet.rssi)) {
+            existingPrefixData.rssiSum += packet.rssi;
+            existingPrefixData.rssiCount++;
+          }
+          if (typeof packet.snr === 'number' && !isNaN(packet.snr)) {
+            existingPrefixData.snrSum += packet.snr;
+            existingPrefixData.snrCount++;
+          }
+          existingPrefixData.lastSeen = Math.max(existingPrefixData.lastSeen, packet.timestamp ?? 0);
+        } else {
+          lastHopPrefixData.set(lastHopPrefix, {
+            prefix: lastHopPrefix,
+            count: 1,
+            rssiSum: typeof packet.rssi === 'number' && !isNaN(packet.rssi) ? packet.rssi : 0,
+            rssiCount: typeof packet.rssi === 'number' && !isNaN(packet.rssi) ? 1 : 0,
+            snrSum: typeof packet.snr === 'number' && !isNaN(packet.snr) ? packet.snr : 0,
+            snrCount: typeof packet.snr === 'number' && !isNaN(packet.snr) ? 1 : 0,
+            lastSeen: packet.timestamp ?? 0,
+            resolvedHashes: new Map(),
+          });
         }
-        if (typeof packet.snr === 'number' && !isNaN(packet.snr)) {
-          existingPrefixData.snrSum += packet.snr;
-          existingPrefixData.snrCount++;
-        }
-        existingPrefixData.lastSeen = Math.max(existingPrefixData.lastSeen, packet.timestamp ?? 0);
-      } else {
-        lastHopPrefixData.set(lastHopPrefix, {
-          prefix: lastHopPrefix,
-          count: 1,
-          rssiSum: typeof packet.rssi === 'number' && !isNaN(packet.rssi) ? packet.rssi : 0,
-          rssiCount: typeof packet.rssi === 'number' && !isNaN(packet.rssi) ? 1 : 0,
-          snrSum: typeof packet.snr === 'number' && !isNaN(packet.snr) ? packet.snr : 0,
-          snrCount: typeof packet.snr === 'number' && !isNaN(packet.snr) ? 1 : 0,
-          lastSeen: packet.timestamp ?? 0,
-          resolvedHashes: new Map(),
-        });
       }
       
       // Resolve the last hop using disambiguation system
@@ -1854,18 +1867,21 @@ export function buildMeshTopology(
         isLastHop: true,
       });
       
-      // Track which hash this prefix resolved to (for later aggregation)
-      if (lastHopResult.hash) {
-        const prefixData = lastHopPrefixData.get(lastHopPrefix)!;
-        const existingHashData = prefixData.resolvedHashes.get(lastHopResult.hash);
-        if (existingHashData) {
-          existingHashData.count++;
-          existingHashData.confidenceSum += lastHopResult.confidence;
-        } else {
-          prefixData.resolvedHashes.set(lastHopResult.hash, {
-            count: 1,
-            confidenceSum: lastHopResult.confidence,
-          });
+      // Track which hash this prefix resolved to (for ADVERT packets only)
+      // This is used to build the lastHopNeighbors array
+      if (isAdvert && lastHopResult.hash) {
+        const prefixData = lastHopPrefixData.get(lastHopPrefix);
+        if (prefixData) {
+          const existingHashData = prefixData.resolvedHashes.get(lastHopResult.hash);
+          if (existingHashData) {
+            existingHashData.count++;
+            existingHashData.confidenceSum += lastHopResult.confidence;
+          } else {
+            prefixData.resolvedHashes.set(lastHopResult.hash, {
+              count: 1,
+              confidenceSum: lastHopResult.confidence,
+            });
+          }
         }
       }
       
@@ -2267,10 +2283,10 @@ export function buildMeshTopology(
     })));
   }
   
-  // === BUILD LAST-HOP NEIGHBORS ARRAY ===
-  // Convert collected prefix data into LastHopNeighbor objects
-  // Each prefix that appeared as last hop becomes a neighbor entry
-  // Disambiguation resolves which full hash each prefix maps to
+  // === BUILD LAST-HOP NEIGHBORS ARRAY (ADVERT packets only) ===
+  // Convert collected ADVERT prefix data into LastHopNeighbor objects.
+  // Only ADVERT packets are used for neighbor detection - this ensures SNR/RSSI
+  // values reflect the purest signal quality from periodic broadcasts.
   const lastHopNeighbors: LastHopNeighbor[] = [];
   
   for (const data of lastHopPrefixData.values()) {
@@ -2312,10 +2328,10 @@ export function buildMeshTopology(
   
   // Log last-hop neighbors in development
   if (process.env.NODE_ENV === 'development' && lastHopNeighbors.length > 0) {
-    console.log(`[mesh-topology] Last-hop neighbors (${lastHopNeighbors.length}):`, lastHopNeighbors.map(n => ({
+    console.log(`[mesh-topology] Last-hop neighbors from ADVERTs (${lastHopNeighbors.length}):`, lastHopNeighbors.map(n => ({
       prefix: n.prefix,
       hash: n.hash.slice(0, 8),
-      count: n.count,
+      adverts: n.count,
       conf: n.confidence.toFixed(2),
       rssi: n.avgRssi?.toFixed(0),
       snr: n.avgSnr?.toFixed(1),
@@ -2349,7 +2365,7 @@ export function buildMeshTopology(
     mobileNodes,
     // Phase 7: Path health indicators
     pathHealth,
-    // Last-hop neighbors (ground truth from packet paths)
+    // Last-hop neighbors (from ADVERT packets only - purest signal quality)
     lastHopNeighbors,
   };
 }

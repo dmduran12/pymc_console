@@ -24,8 +24,10 @@ const QUICK_NEIGHBORS_KEY = 'pymc-quick-neighbors';
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * A neighbor detected by appearing as the last hop in packet paths.
- * This is ground truth: they forwarded packets directly to our local node.
+ * A neighbor detected by forwarding ADVERT packets directly to our local node.
+ * Only ADVERT packets (type=4) are used for neighbor detection because:
+ * - ADVERTs are periodic broadcasts representing the purest signal quality indicator
+ * - Other packet types may be forwarded with different TX power/conditions
  * This is a lightweight version that doesn't require full topology computation.
  */
 export interface QuickNeighbor {
@@ -33,27 +35,27 @@ export interface QuickNeighbor {
   hash: string;
   /** 2-char prefix as seen in packet paths */
   prefix: string;
-  /** Number of times this node was the last hop */
+  /** Number of ADVERT packets where this node was the last hop */
   count: number;
-  /** Average RSSI of packets received via this neighbor */
+  /** Average RSSI of ADVERT packets received from this neighbor */
   avgRssi: number | null;
-  /** Average SNR of packets received via this neighbor */
+  /** Average SNR of ADVERT packets received from this neighbor */
   avgSnr: number | null;
-  /** Most recent packet timestamp from this neighbor */
+  /** Most recent ADVERT timestamp from this neighbor */
   lastSeen: number;
 }
 
 /**
- * Lightweight last-hop neighbor detection.
+ * Lightweight last-hop neighbor detection from ADVERT packets.
  * Runs on main thread with polled packets - no deep analysis needed.
  * 
- * This extracts nodes that appear as the last hop in packet paths,
- * which is ground truth that they forwarded packets directly to us.
+ * Only ADVERT packets (type=4) are used because they represent the purest
+ * signal quality indicator - periodic broadcasts with consistent TX parameters.
  * 
  * @param packets - Packet array (even small poll batches work)
  * @param neighbors - Known contacts from stats.neighbors
  * @param localHash - Local node's hash (e.g., "0x19")
- * @returns Array of QuickNeighbor sorted by count descending
+ * @returns Array of QuickNeighbor sorted by ADVERT count descending
  */
 function detectQuickNeighbors(
   packets: Packet[],
@@ -134,8 +136,17 @@ function detectQuickNeighbors(
   
   let packetsWithPath = 0;
   let packetsResolved = 0;
+  let advertPackets = 0;
   
   for (const packet of packets) {
+    // Only use ADVERT packets (type=4) for neighbor detection
+    // ADVERTs are periodic broadcasts that represent the purest signal quality indicator.
+    // Other packet types (TXT_MSG, ACK, etc.) may be forwarded with different TX conditions.
+    const packetType = packet.type ?? packet.payload_type;
+    if (packetType !== 4) continue;  // Skip non-ADVERT packets
+    
+    advertPackets++;
+    
     const parsed = parsePacketPath(packet, localHash);
     if (!parsed || parsed.effectiveLength === 0) continue;
     
@@ -200,8 +211,8 @@ function detectQuickNeighbors(
   result.sort((a, b) => b.count - a.count);
   
   if (process.env.NODE_ENV === 'development') {
-    console.log('[quickNeighbors] Detected:', result.length, 'neighbors from', packets.length, 'packets');
-    console.log('[quickNeighbors] Stats: packetsWithPath=', packetsWithPath, 'packetsResolved=', packetsResolved);
+    console.log('[quickNeighbors] Detected:', result.length, 'neighbors from', advertPackets, 'ADVERT packets (of', packets.length, 'total)');
+    console.log('[quickNeighbors] Stats: advertPackets=', advertPackets, 'withPath=', packetsWithPath, 'resolved=', packetsResolved);
     if (result.length > 0) {
       console.log('[quickNeighbors] Top neighbors:', result.slice(0, 5).map(n => ({ hash: n.hash.slice(0, 8), prefix: n.prefix, count: n.count })));
     }
