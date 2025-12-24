@@ -285,6 +285,47 @@ Edges are marked "certain" when:
 - FAR (<10km) = 0.4
 - VERY_FAR (<20km) = 0.2
 
+### Bidirectional Neighbor Detection (v0.6.13+)
+
+A "neighbor" (zero-hop, point-to-point) is ONLY confirmed when **bidirectional RF communication** is observed. This prevents false positives from one-way reception.
+
+**Two-Way Link Requirement:**
+- **RX Direction**: They transmitted, we received (their TX → our RX)
+  - Detected: Node appears as **last hop** in received ADVERT packets
+- **TX Direction**: We transmitted, they forwarded (our TX → their RX)
+  - Detected: Node appears as **first hop** in transmitted ADVERT packets
+
+**Key Interface** (`QuickNeighbor` in `useStore.ts`):
+```typescript
+interface QuickNeighbor {
+  hash: string;           // Full node hash
+  prefix: string;         // 2-char prefix
+  rxCount: number;        // Packets received from them (last hop)
+  txCount: number;        // Packets transmitted where they forwarded (first hop)
+  isBidirectional: boolean;  // True if both counts >= threshold
+  avgRssi: number | null; // Signal strength (RX only)
+  avgSnr: number | null;  // Signal quality (RX only)
+  lastSeen: number;       // Most recent timestamp
+}
+```
+
+**Detection Logic** (`detectQuickNeighbors()`):
+1. Filter to ADVERT packets only (type=4) - purest signal quality indicator
+2. For each ADVERT packet:
+   - If `transmitted === true`: First hop = node that received our TX (TX direction)
+   - If `transmitted === false`: Last hop = node that transmitted to us (RX direction)
+3. A neighbor is `isBidirectional` when:
+   - `rxCount >= MIN_BIDIRECTIONAL_THRESHOLD` (default: 2), AND
+   - `txCount >= MIN_BIDIRECTIONAL_THRESHOLD` (default: 2)
+
+**Constants:**
+- `MIN_BIDIRECTIONAL_THRESHOLD = 2` - Minimum packets in each direction to confirm
+
+**UI Behavior:**
+- Only **bidirectional** neighbors display the "Direct" badge and yellow ring indicator
+- Unidirectional observations (one-way only) are tracked but not shown as "neighbors"
+- This aligns with MeshCore's concept of "zero-hop adverts" which imply direct RF contact
+
 ### Advanced Topology Analysis (7 Phases)
 
 The `mesh-topology.ts` module implements a comprehensive 7-phase analysis system:

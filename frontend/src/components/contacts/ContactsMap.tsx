@@ -825,21 +825,36 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Get zero-hop neighbors - use quickNeighbors as primary source (always available),
   // fall back to topology's lastHopNeighbors (only after deep analysis), then inference
   // Build both a Set (for .has() checks) and a Map (for looking up RSSI/SNR data)
-  const { zeroHopNeighbors, lastHopNeighborMap } = useMemo(() => {
-    const neighborSet = new Set<string>();
+  //
+  // BIDIRECTIONALITY REQUIREMENT (v0.6.13+):
+  // Only BIDIRECTIONAL neighbors are considered true "zero-hop" neighbors.
+  // This ensures we only mark nodes as neighbors when we have CONFIRMED two-way RF link:
+  // - RX: They transmitted, we received (their TX → our RX)
+  // - TX: We transmitted, they forwarded (our TX → their RX)
+  const { zeroHopNeighbors, lastHopNeighborMap, unidirectionalNeighbors: _unidirectionalNeighbors } = useMemo(() => {
+    const neighborSet = new Set<string>();  // Confirmed bidirectional neighbors
+    const unidirectionalSet = new Set<string>();  // One-way only (for display purposes)
     const neighborMap = new Map<string, LastHopNeighbor>();
     
     // Primary source: quickNeighbors from main store (runs on every poll, persisted)
     // These are available immediately without deep analysis
     if (quickNeighbors.length > 0) {
       for (const qn of quickNeighbors) {
-        neighborSet.add(qn.hash);
+        // Only add to zeroHopNeighbors if BIDIRECTIONAL (confirmed two-way RF link)
+        if (qn.isBidirectional) {
+          neighborSet.add(qn.hash);
+        } else {
+          // Track unidirectional neighbors separately (for potential future UI display)
+          unidirectionalSet.add(qn.hash);
+        }
+        
         // Convert QuickNeighbor to LastHopNeighbor-like format for compatibility
+        // Store all neighbors (including unidirectional) for RSSI/SNR data access
         neighborMap.set(qn.hash, {
           hash: qn.hash,
           prefix: qn.prefix,
           count: qn.count,
-          confidence: 1.0, // Quick neighbors are resolved, so high confidence
+          confidence: qn.isBidirectional ? 1.0 : 0.5, // Higher confidence for bidirectional
           avgRssi: qn.avgRssi,
           avgSnr: qn.avgSnr,
           lastSeen: qn.lastSeen,
@@ -849,29 +864,37 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     // Enhancement: merge in topology's lastHopNeighbors (may have more neighbors after deep analysis)
     // These may include neighbors that quickNeighbors missed due to prefix collisions
+    // Note: topology lastHopNeighbors don't have bidirectionality data, so we add them
+    // only if they're not already tracked (to avoid overwriting bidirectional status)
     for (const lastHop of meshTopology.lastHopNeighbors) {
-      if (!neighborSet.has(lastHop.hash)) {
-        neighborSet.add(lastHop.hash);
+      if (!neighborSet.has(lastHop.hash) && !unidirectionalSet.has(lastHop.hash)) {
+        // Topology-based neighbors have high confidence due to disambiguation
+        // but we can't confirm bidirectionality, so treat as unidirectional
+        unidirectionalSet.add(lastHop.hash);
         neighborMap.set(lastHop.hash, lastHop);
       }
     }
     
     // Fallback: if still no neighbors, use the old inference method
     // This handles edge cases where both quickNeighbors and topology are empty
-    if (neighborSet.size === 0) {
+    if (neighborSet.size === 0 && unidirectionalSet.size === 0) {
       const inferred = inferZeroHopNeighbors(
         packets, 
         neighbors, 
         meshTopology.validatedEdges,
         localHash
       );
-      // Add inferred neighbors to the set (no LastHopNeighbor data available)
+      // Add inferred neighbors to unidirectional set (no bidirectionality confirmation)
       for (const hash of inferred) {
-        neighborSet.add(hash);
+        unidirectionalSet.add(hash);
       }
     }
     
-    return { zeroHopNeighbors: neighborSet, lastHopNeighborMap: neighborMap };
+    return { 
+      zeroHopNeighbors: neighborSet, 
+      lastHopNeighborMap: neighborMap,
+      unidirectionalNeighbors: unidirectionalSet,
+    };
   }, [quickNeighbors, meshTopology.lastHopNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
   
   // Filter neighbors with valid coordinates
@@ -2270,11 +2293,23 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Get TX delay recommendation for this node
           const txDelayRec = meshTopology.txDelayRecommendations.get(hash);
           
+          // Z-index layering (lower to higher):
+          // 1. Standard nodes: 0
+          // 2. Hubs: 1000 
+          // 3. Neighbors (zero-hop): 2000
+          // 4. Room servers: 5000 (near top, transparent icon so we can see through)
+          // 5. Local node: 10000 (always on top - set separately)
+          const zIndex = isRoomServer ? 5000 
+            : isZeroHop ? 2000 
+            : isHub ? 1000 
+            : 0;
+          
           return (
             <Marker
               key={`${hash}-${opacityKey}${hoverKey}`}
               position={[neighbor.latitude, neighbor.longitude]}
               icon={icon}
+              zIndexOffset={zIndex}
               eventHandlers={{
                 mouseover: () => setHoveredMarker(hash),
                 mouseout: () => setHoveredMarker(null),
