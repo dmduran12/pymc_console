@@ -106,19 +106,35 @@ export default function Contacts() {
     return distances;
   }, [visibleContacts, localNode]);
   
-  // Build set of neighbor hashes - use quickNeighbors as primary (always available),
-  // merge with lastHopNeighbors from topology (available after deep analysis)
-  const neighborHashSet = useMemo(() => {
+  // Build set of BIDIRECTIONAL neighbor hashes - only includes confirmed two-way RF links
+  // Also build a map for signal data lookup
+  const { neighborHashSet, neighborSignalMap } = useMemo(() => {
     const set = new Set<string>();
+    const signalMap = new Map<string, { avgRssi: number | null; avgSnr: number | null }>();
+    
     // Primary: quickNeighbors from main store (runs on every poll, persisted)
+    // Only include BIDIRECTIONAL neighbors - confirmed two-way RF communication
     for (const qn of quickNeighbors) {
-      set.add(qn.hash);
+      if (qn.isBidirectional) {
+        set.add(qn.hash);
+        signalMap.set(qn.hash, { avgRssi: qn.avgRssi, avgSnr: qn.avgSnr });
+      }
     }
+    
     // Merge: lastHopNeighbors from topology (may have additional neighbors after deep analysis)
+    // Note: topology lastHopNeighbors don't have bidirectionality data, so treat conservatively
     for (const n of lastHopNeighbors) {
-      set.add(n.hash);
+      if (!set.has(n.hash)) {
+        // Only add if not already in set - preserve bidirectional status from quickNeighbors
+        // Topology neighbors are RX-only confirmed, not necessarily bidirectional
+      }
+      // But if already a neighbor, update signal data if better
+      if (set.has(n.hash) && !signalMap.has(n.hash)) {
+        signalMap.set(n.hash, { avgRssi: n.avgRssi, avgSnr: n.avgSnr });
+      }
     }
-    return set;
+    
+    return { neighborHashSet: set, neighborSignalMap: signalMap };
   }, [quickNeighbors, lastHopNeighbors]);
   
   // Filter contacts based on search query and neighbors toggle
@@ -373,14 +389,19 @@ export default function Contacts() {
               const distance = contactDistances.get(hash);
               const nodeCentrality = centrality.get(hash) || 0;
               
+              // Get signal data ONLY for bidirectional neighbors
+              // Signal from non-neighbors is misleading (it's from the last hop, not the contact)
+              const neighborSignal = isNeighbor ? neighborSignalMap.get(hash) : undefined;
+              const showSignal = isNeighbor && neighborSignal;
+              
               return (
                 <div key={hash}>
                   <div 
                     className={`roster-row ${isHub ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${hasLocation ? 'cursor-pointer hover:bg-white/[0.02]' : ''}`}
                     onClick={() => handleNodeClick(hash)}
                   >
-                    {/* Icon with signal indicator */}
-                    <div className="relative">
+                    {/* Icon with signal indicator - only show signal dot for neighbors */}
+                    <div className="relative flex-shrink-0">
                       <div className="roster-icon">
                         {contact.is_repeater ? (
                           <Repeat className="w-5 h-5 text-accent-primary" />
@@ -388,12 +409,15 @@ export default function Contacts() {
                           <ChevronsLeftRightEllipsis className="w-5 h-5 text-text-muted" />
                         )}
                       </div>
-                      <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(contact.snr)} border-2 border-bg-surface`} />
+                      {/* Signal indicator dot - ONLY for bidirectional neighbors */}
+                      {showSignal && neighborSignal?.avgSnr !== null && (
+                        <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${getSignalColor(neighborSignal.avgSnr)} border-2 border-bg-surface`} />
+                      )}
                     </div>
                     
-                    {/* Main content */}
-                    <div className="roster-content">
-                      <div className="flex items-center gap-2">
+                    {/* Main content - name, badges, hash */}
+                    <div className="roster-content min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="roster-title">{displayName}</span>
                         {isNeighbor && (
                           <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded" style={{ backgroundColor: 'rgba(57, 217, 138, 0.2)', color: '#39D98A' }}>
@@ -410,28 +434,37 @@ export default function Contacts() {
                           <span className="pill-tag">RPT</span>
                         )}
                       </div>
-                      <HashBadge hash={hash} size="sm" />
+                      {/* Hash: full on desktop (md+), truncated on mobile */}
+                      <div className="hidden md:block">
+                        <HashBadge hash={hash} size="sm" full />
+                      </div>
+                      <div className="md:hidden">
+                        <HashBadge hash={hash} size="sm" prefixLength={8} suffixLength={6} />
+                      </div>
                     </div>
                     
-                    {/* Metrics row */}
-                    <div className="roster-metrics">
-                      {contact.rssi !== undefined && (
+                    {/* Metrics - Signal ONLY for neighbors, then distance, then centrality */}
+                    <div className="roster-metrics flex-shrink-0">
+                      {/* Signal metrics - ONLY for bidirectional neighbors */}
+                      {showSignal && neighborSignal?.avgRssi !== null && (
                         <div className="flex items-center gap-1.5">
-                          <SignalIcon rssi={contact.rssi} className="w-3.5 h-3.5" />
-                          <span className="type-data-xs tabular-nums">{contact.rssi}</span>
+                          <SignalIcon rssi={neighborSignal.avgRssi} className="w-3.5 h-3.5" />
+                          <span className="type-data-xs tabular-nums">{Math.round(neighborSignal.avgRssi)}</span>
                         </div>
                       )}
-                      {contact.snr !== undefined && (
+                      {showSignal && neighborSignal?.avgSnr !== null && (
                         <div className="flex items-center gap-1.5">
-                          <span className="type-data-xs tabular-nums">{contact.snr.toFixed(1)} dB</span>
+                          <span className="type-data-xs tabular-nums">{neighborSignal.avgSnr.toFixed(1)} dB</span>
                         </div>
                       )}
+                      {/* Distance */}
                       {distance !== null && distance !== undefined && (
                         <div className="flex items-center gap-1 text-accent-tertiary">
                           <Ruler className="w-3 h-3" />
                           <span className="type-data-xs tabular-nums">{formatDistance(distance)}</span>
                         </div>
                       )}
+                      {/* Centrality */}
                       {nodeCentrality > 0 && (
                         <div className="flex items-center gap-1 text-amber-400/70">
                           <Activity className="w-3 h-3" />
@@ -441,7 +474,7 @@ export default function Contacts() {
                     </div>
                     
                     {/* Last seen */}
-                    <div className="roster-metric">
+                    <div className="roster-metric flex-shrink-0">
                       {contact.last_seen ? formatRelativeTime(contact.last_seen) : '—'}
                     </div>
                     
@@ -451,7 +484,7 @@ export default function Contacts() {
                         e.stopPropagation();
                         setPendingRemove({ hash, name: displayName });
                       }}
-                      className="ml-2 p-1.5 rounded-lg text-text-muted/50 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      className="ml-2 p-1.5 rounded-lg text-text-muted/50 hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0"
                       title="Remove contact"
                     >
                       <Trash2 className="w-4 h-4" />
