@@ -12,8 +12,6 @@ import { useMemo, useState, useCallback, useRef } from 'react';
 import MapGL, { NavigationControl, ScaleControl } from 'react-map-gl/maplibre';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Maximize2, Minimize2, Network, GitBranch, Radio, BarChart2, Loader2 } from 'lucide-react';
-import clsx from 'clsx';
 
 import type { NeighborInfo } from '@/types/api';
 import type { LastHopNeighbor } from '@/lib/mesh-topology';
@@ -27,6 +25,8 @@ import {
   READY_DISPLAY_TIME_MS,
   POST_MODAL_ANIMATION_DELAY_MS,
 } from './map/constants';
+import { MapLegend } from './map/overlays/MapLegend';
+import { MapControls } from './map/overlays/MapControls';
 
 import { useEdgeAnimation } from './map/animations/useEdgeAnimation';
 import { useNodeAnimation } from './map/animations/useNodeAnimation';
@@ -92,8 +92,6 @@ export default function ContactsMapMapLibre({
   const quickNeighbors = useQuickNeighbors();
   const packetCacheState = usePacketCacheState();
   
-  // Track if deep analysis has completed (for button state)
-  const hasDeepLoaded = packetCacheState.backgroundLoadComplete;
   
   // ─── LOCAL STATE ───────────────────────────────────────────────────────────
   const [viewState, setViewState] = useState(DEFAULT_VIEW_STATE);
@@ -497,99 +495,34 @@ export default function ContactsMapMapLibre({
           />
         </MapGL>
         
-        {/* ─── MAP CONTROLS (inline overlay) ───────────────────────────────── */}
-        <div className="absolute top-3 left-3 z-10 flex flex-col gap-2">
-          {/* Fullscreen toggle */}
-          <button
-            onClick={handleToggleFullscreen}
-            className="p-2 rounded-lg bg-surface/80 backdrop-blur-sm border border-white/10 hover:bg-surface/90 transition-colors"
-            title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-4 h-4 text-text-secondary" />
-            ) : (
-              <Maximize2 className="w-4 h-4 text-text-secondary" />
-            )}
-          </button>
-          
-          {/* Topology toggle */}
-          <button
-            onClick={handleToggleTopology}
-            className={clsx(
-              'p-2 rounded-lg backdrop-blur-sm border transition-colors',
-              showTopology
-                ? 'bg-[#4338CA]/20 border-[#4338CA]/40 text-[#4338CA]'
-                : 'bg-surface/80 border-white/10 text-text-secondary hover:bg-surface/90'
-            )}
-            title={showTopology ? 'Hide topology' : 'Show topology'}
-          >
-            <GitBranch className="w-4 h-4" />
-          </button>
-          
-          {/* Solo Direct toggle */}
-          <button
-            onClick={handleToggleSoloDirect}
-            className={clsx(
-              'p-2 rounded-lg backdrop-blur-sm border transition-colors',
-              soloDirect
-                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
-                : 'bg-surface/80 border-white/10 text-text-secondary hover:bg-surface/90'
-            )}
-            title={soloDirect ? 'Show all nodes' : 'Show direct neighbors only'}
-          >
-            <Radio className="w-4 h-4" />
-          </button>
-          
-          {/* Solo Hubs toggle */}
-          <button
-            onClick={handleToggleSoloHubs}
-            className={clsx(
-              'p-2 rounded-lg backdrop-blur-sm border transition-colors',
-              soloHubs
-                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
-                : 'bg-surface/80 border-white/10 text-text-secondary hover:bg-surface/90'
-            )}
-            title={soloHubs ? 'Show all nodes' : 'Show hub connections only'}
-          >
-            <Network className="w-4 h-4" />
-          </button>
-          
-          {/* Deep Analysis button */}
-          <button
-            onClick={handleDeepAnalysis}
-            disabled={isDeepLoading}
-            className={clsx(
-              'p-2 rounded-lg backdrop-blur-sm border transition-colors',
-              hasDeepLoaded
-                ? 'bg-accent-success/20 border-accent-success/40 text-accent-success'
-                : 'bg-surface/80 border-white/10 text-text-secondary hover:bg-surface/90',
-              isDeepLoading && 'opacity-50 cursor-not-allowed'
-            )}
-            title={hasDeepLoaded ? 'Deep analysis complete' : 'Run deep analysis'}
-          >
-            {isDeepLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <BarChart2 className="w-4 h-4" />
-            )}
-          </button>
-        </div>
+        {/* ─── MAP CONTROLS (top-right) ─────────────────────────────────────── */}
+        <MapControls
+          isDeepLoading={isDeepLoading}
+          showDeepAnalysisModal={showAnalysisModal}
+          onDeepAnalysis={handleDeepAnalysis}
+          showTopology={showTopology}
+          onToggleTopology={handleToggleTopology}
+          hasValidatedPolylines={validatedPolylines.length > 0}
+          soloHubs={soloHubs}
+          onToggleSoloHubs={handleToggleSoloHubs}
+          hasHubNodes={meshTopology.hubNodes.length > 0}
+          soloDirect={soloDirect}
+          onToggleSoloDirect={handleToggleSoloDirect}
+          hasZeroHopNeighbors={zeroHopNeighbors.size > 0}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={handleToggleFullscreen}
+        />
         
         {/* ─── LEGEND (bottom-left) ─────────────────────────────────────────── */}
-        {showTopology && (
-          <div className="absolute bottom-3 left-3 z-10 p-2 rounded-lg bg-surface/80 backdrop-blur-sm border border-white/10 text-[10px] text-text-muted">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-[#3B3F4A]" />
-                <span>Topology</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5" style={{ background: '#FBBF24', opacity: 0.6 }} />
-                <span>Direct</span>
-              </span>
-            </div>
-          </div>
-        )}
+        <MapLegend
+          showTopology={showTopology}
+          validatedPolylineCount={validatedPolylines.length}
+          filteredNeighborCount={neighborsWithLocation.length}
+          hasLocalNode={!!(localNode?.latitude && localNode?.longitude)}
+          meshTopology={meshTopology}
+          zeroHopNeighbors={zeroHopNeighbors}
+          neighborsWithLocation={neighborsWithLocation}
+        />
       </div>
       
       {/* ─── MODALS ─────────────────────────────────────────────────────────── */}
