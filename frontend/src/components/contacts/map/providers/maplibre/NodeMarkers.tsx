@@ -14,7 +14,7 @@
  * @module providers/maplibre/NodeMarkers
  */
 
-import { useMemo, useCallback, useState, useRef } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 import { Marker, Popup } from 'react-map-gl/maplibre';
 import type { NeighborInfo } from '@/types/api';
 import type { MeshTopology, LastHopNeighbor } from '@/lib/mesh-topology';
@@ -25,7 +25,6 @@ import {
   createFilledIconHtml,
   createLocalIconHtml,
   createRoomServerIconHtml,
-  createMarkerElement,
 } from './icons';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -91,27 +90,6 @@ function getHashPrefix(hash: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Marker Element Hook
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Hook to create and manage a marker DOM element.
- * Updates the element when the icon HTML changes.
- */
-function useMarkerElement(html: string): HTMLDivElement | null {
-  const elementRef = useRef<HTMLDivElement | null>(null);
-  const prevHtmlRef = useRef<string>('');
-  
-  // Create or update element when HTML changes
-  if (html !== prevHtmlRef.current) {
-    prevHtmlRef.current = html;
-    elementRef.current = createMarkerElement(html);
-  }
-  
-  return elementRef.current;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // Single Marker Component
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -174,9 +152,6 @@ function NodeMarker({
     return createRingIconHtml(DESIGN.nodeColor, quantizedOpacity, isHovered, isZeroHop);
   }, [isRoomServer, isHub, isMobile, isZeroHop, quantizedOpacity, isHovered]);
   
-  // Create marker element
-  const element = useMarkerElement(iconHtml);
-  
   // Calculate marker size for hover area
   const markerSize = isZeroHop ? NEIGHBOR_OUTER_RING_SIZE : MARKER_SIZE;
   
@@ -185,7 +160,7 @@ function NodeMarker({
   const handleMouseLeave = useCallback(() => onHover(null), [onHover]);
   const handleClick = useCallback(() => setShowPopup(true), []);
   
-  if (!neighbor.latitude || !neighbor.longitude || !element) return null;
+  if (!neighbor.latitude || !neighbor.longitude) return null;
   
   return (
     <>
@@ -193,21 +168,14 @@ function NodeMarker({
         longitude={neighbor.longitude}
         latitude={neighbor.latitude}
         anchor="center"
-        element={element}
         onClick={handleClick}
       >
-        {/* Invisible hit area for hover events */}
+        {/* Marker content rendered as HTML */}
         <div
-          style={{
-            position: 'absolute',
-            top: -markerSize / 2,
-            left: -markerSize / 2,
-            width: markerSize,
-            height: markerSize,
-            cursor: 'pointer',
-          }}
+          style={{ cursor: 'pointer' }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
+          dangerouslySetInnerHTML={{ __html: iconHtml }}
         />
       </Marker>
       
@@ -258,13 +226,12 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
   const [showPopup, setShowPopup] = useState(false);
   
   const iconHtml = useMemo(() => createLocalIconHtml(isHovered), [isHovered]);
-  const element = useMarkerElement(iconHtml);
   
   const handleMouseEnter = useCallback(() => onHover('local'), [onHover]);
   const handleMouseLeave = useCallback(() => onHover(null), [onHover]);
   const handleClick = useCallback(() => setShowPopup(true), []);
   
-  if (!localNode.latitude || !localNode.longitude || !element) return null;
+  if (!localNode.latitude || !localNode.longitude) return null;
   
   const markerSize = MARKER_SIZE + 2;
   
@@ -274,20 +241,13 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
         longitude={localNode.longitude}
         latitude={localNode.latitude}
         anchor="center"
-        element={element}
         onClick={handleClick}
       >
         <div
-          style={{
-            position: 'absolute',
-            top: -markerSize / 2,
-            left: -markerSize / 2,
-            width: markerSize,
-            height: markerSize,
-            cursor: 'pointer',
-          }}
+          style={{ cursor: 'pointer' }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
+          dangerouslySetInnerHTML={{ __html: iconHtml }}
         />
       </Marker>
       
