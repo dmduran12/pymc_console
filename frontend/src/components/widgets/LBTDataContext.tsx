@@ -2,33 +2,27 @@
  * LBTDataContext - Shared data context for LBT Insights widgets
  *
  * Computes LBT (Listen Before Talk) statistics client-side from packet data.
- * This approach uses existing /api/recent_packets or /api/filtered_packets
- * endpoints rather than requiring new backend endpoints.
+ * 
+ * ARCHITECTURE:
+ * This context consumes data from the centralized Zustand store rather than
+ * polling independently. It only computes derived LBT statistics from the
+ * shared packet/stats data.
+ * 
+ * COMPUTED STATISTICS:
+ * - lbtStats: retry rate, busy events, backoff times from packet LBT fields
+ * - noiseFloor: current noise floor from stats
+ * - linkQuality: computed from neighbor SNR/RSSI
+ * - channelHealth: composite score combining all above
  *
  * LBT fields in packet records:
  * - lbt_attempts: number of CAD checks before TX (1 = clean channel)
  * - lbt_backoff_delays_ms: JSON array of backoff delays "[192.0, 314.0]"
  * - lbt_channel_busy: boolean (true if TX failed due to channel busy)
- *
- * Data structure computed:
- * - lbtStats: retry rate, busy events, backoff times from packet LBT fields
- * - noiseFloor: current noise floor from /api/stats (already available)
- * - linkQuality: computed from neighbor SNR/RSSI in /api/stats
- * - channelHealth: composite score computed from all above
  */
 
-import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
-import { getStats, getFilteredPackets } from '@/lib/api';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { useStats, usePackets } from '@/lib/stores/useStore';
 import type { Packet, Stats, NeighborInfo } from '@/types/api';
-
-/** Fast refresh for real-time stats (noise floor, neighbors) */
-const REFRESH_INTERVAL_FAST = 3000; // 3 seconds
-
-/** Slow refresh for historical packet data (LBT trends) */
-const REFRESH_INTERVAL_SLOW = 60000; // 60 seconds
-
-/** Time window - 24 hours in seconds */
-const HOURS_24 = 24 * 60 * 60;
 
 /** LBT Statistics computed from packets */
 export interface ComputedLBTStats {
@@ -309,93 +303,38 @@ export interface LBTDataProviderProps {
   children: ReactNode;
 }
 
+/**
+ * LBTDataProvider - Computes LBT statistics from centralized store data
+ * 
+ * NOTE: This provider does NOT poll for data. It consumes stats and packets
+ * from the centralized Zustand store, which handles all polling.
+ * Only derived computations are performed here.
+ */
 export function LBTDataProvider({ children }: LBTDataProviderProps) {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [packets, setPackets] = useState<Packet[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Consume data from centralized store (polling handled at App level)
+  const stats = useStats();
+  const packets = usePackets();
+  
+  // Derived loading state - we're "loading" if store hasn't populated data yet
+  const isLoading = stats === null;
 
-  /**
-   * Fast poll: /api/stats for real-time noise floor and neighbor data
-   * This is lightweight and can poll every 3 seconds
-   */
-  const fetchStats = useCallback(async () => {
-    try {
-      const statsRes = await getStats();
-      if (statsRes) {
-        setStats(statsRes);
-        setError(null);
-      }
-    } catch (err) {
-      // Don't clear packet data on stats error
-      if (!packets.length) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch stats');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [packets.length]);
-
-  /**
-   * Slow poll: 24h packets for LBT historical statistics
-   * This is heavier and polls every 60 seconds
-   */
-  const fetchPackets = useCallback(async () => {
-    try {
-      const now = Math.floor(Date.now() / 1000);
-      const packetsRes = await getFilteredPackets({
-        start_timestamp: now - HOURS_24,
-        limit: 10000,
-      });
-
-      if (packetsRes.success && packetsRes.data) {
-        setPackets(packetsRes.data);
-      }
-    } catch (err) {
-      // Don't override stats error
-      if (!stats) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch packets');
-      }
-    }
-  }, [stats]);
-
-  /**
-   * Manual refresh - fetches all data
-   */
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    await Promise.all([fetchStats(), fetchPackets()]);
-  }, [fetchStats, fetchPackets]);
-
-  // Initial fetch and separate intervals for fast/slow polling
-  useEffect(() => {
-    // Initial fetch of both
-    void fetchStats();
-    void fetchPackets();
-
-    // Fast interval for stats (real-time: noise floor, neighbors)
-    const fastInterval = setInterval(() => void fetchStats(), REFRESH_INTERVAL_FAST);
-    
-    // Slow interval for packets (historical LBT data)
-    const slowInterval = setInterval(() => void fetchPackets(), REFRESH_INTERVAL_SLOW);
-
-    return () => {
-      clearInterval(fastInterval);
-      clearInterval(slowInterval);
-    };
-  }, [fetchStats, fetchPackets]);
-
-  // Compute derived stats
+  // Compute derived LBT statistics from store data
   const lbtStats = useMemo(() => computeLBTStats(packets, 24), [packets]);
   const noiseFloor = stats?.noise_floor_dbm ?? null;
+  // Extract neighbors to satisfy React compiler's dependency inference
+  const neighbors = stats?.neighbors;
   const linkQuality = useMemo(
-    () => stats?.neighbors ? computeLinkQuality(stats.neighbors) : null,
-    [stats?.neighbors]
+    () => neighbors ? computeLinkQuality(neighbors) : null,
+    [neighbors]
   );
   const channelHealth = useMemo(
     () => computeChannelHealth(lbtStats, noiseFloor, linkQuality),
     [lbtStats, noiseFloor, linkQuality]
   );
+
+  // Refresh is now a no-op since polling is centralized
+  // Kept for API compatibility
+  const refresh = async () => {};
 
   const value: LBTData = {
     lbtStats,
@@ -405,7 +344,7 @@ export function LBTDataProvider({ children }: LBTDataProviderProps) {
     stats,
     recentPackets: packets,
     isLoading,
-    error,
+    error: null, // Errors handled at store level
     refresh,
   };
 

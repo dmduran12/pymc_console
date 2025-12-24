@@ -1,9 +1,24 @@
+/**
+ * Central Zustand Store - Single source of truth for app state
+ * 
+ * ARCHITECTURE:
+ * - All data polling is centralized here (stats, packets)
+ * - Components subscribe to granular selectors to minimize re-renders
+ * - Heavy computation (topology) offloaded to Web Worker via topologyService
+ * 
+ * POLLING STRATEGY:
+ * - Stats: Every 3 seconds (lightweight API call)
+ * - Packets: Every 3 seconds via packet cache (incremental)
+ * - Components should NOT poll independently - subscribe to this store
+ */
+
 import { create } from 'zustand';
 import type { Stats, Packet, LogEntry, NeighborInfo } from '@/types/api';
 import * as api from '@/lib/api';
 import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
 import { topologyService } from '@/lib/topology-service';
 import { parsePacketPath, getHashPrefix } from '@/lib/path-utils';
+import { POLLING_INTERVALS } from '@/lib/constants';
 
 /** Data point for system resource history */
 export interface ResourceDataPoint {
@@ -68,9 +83,6 @@ function detectQuickNeighbors(
   localHash: string | undefined
 ): QuickNeighbor[] {
   if (!localHash || packets.length === 0 || Object.keys(neighbors).length === 0) {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[quickNeighbors] Early return:', { localHash, packetCount: packets.length, neighborCount: Object.keys(neighbors).length });
-    }
     return [];
   }
   
@@ -121,11 +133,6 @@ function detectQuickNeighbors(
         prefixToHash.set(prefix, sorted[0]);
       }
     }
-  }
-  
-  if (process.env.NODE_ENV === 'development') {
-    const collisionCount = [...prefixCollisions.values()].filter(h => h.length > 1).length;
-    console.log('[quickNeighbors] Built prefix lookup:', prefixToHash.size, 'prefixes,', collisionCount, 'collisions resolved');
   }
   
   // Track last-hop stats (standard neighbor detection)
@@ -215,18 +222,6 @@ function detectQuickNeighbors(
   
   // Sort by count descending
   result.sort((a, b) => b.count - a.count);
-  
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[quickNeighbors] Detected:', result.length, 'neighbors from', advertPackets, 'ADVERT packets');
-    console.log('[quickNeighbors] Stats: withPath=', packetsWithPath, 'resolved=', packetsResolved);
-    if (result.length > 0) {
-      console.log('[quickNeighbors] Top neighbors:', result.slice(0, 5).map(n => ({
-        hash: n.hash.slice(0, 8),
-        prefix: n.prefix,
-        count: n.count,
-      })));
-    }
-  }
   
   return result;
 }
@@ -474,6 +469,24 @@ const store = create<StoreState>((set, get) => ({
         packetsLoading: false,
       });
     }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CENTRALIZED POLLING
+    // All components should subscribe to this store instead of polling themselves.
+    // This prevents redundant API calls and ensures consistent data.
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // Poll stats every 3 seconds
+    setInterval(() => {
+      get().fetchStats();
+    }, POLLING_INTERVALS.stats);
+    
+    // Poll packets every 3 seconds (only when liveMode is enabled)
+    setInterval(() => {
+      if (get().liveMode) {
+        get().fetchPackets();
+      }
+    }, POLLING_INTERVALS.packets);
   },
   
   // Prefetch data for a route before navigation (called on hover)

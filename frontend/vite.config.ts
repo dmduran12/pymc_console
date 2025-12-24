@@ -15,7 +15,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
+          // Split large dependencies into separate chunks for better caching
           recharts: ['recharts'],
+          leaflet: ['leaflet', 'react-leaflet'],
         },
       },
     },

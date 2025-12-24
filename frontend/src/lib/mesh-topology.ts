@@ -53,7 +53,6 @@ import { Packet, NeighborInfo, isFloodRoute, isDirectRoute } from '@/types/api';
 import { 
   buildPrefixLookup, 
   resolvePrefix, 
-  getDisambiguationStats,
 } from './prefix-disambiguation';
 import {
   parsePacketPath, 
@@ -1634,12 +1633,6 @@ export function buildMeshTopology(
   // using position consistency, co-occurrence patterns, and geographic proximity
   const prefixLookup = buildPrefixLookup(sortedPackets, neighbors, localHash, localLat, localLon);
   
-  // Log disambiguation stats in development
-  if (process.env.NODE_ENV === 'development') {
-    const disambigStats = getDisambiguationStats(prefixLookup);
-    console.log('[mesh-topology] Disambiguation stats:', disambigStats);
-  }
-  
   // First pass: build neighbor affinity map with proximity scores (for backward compat)
   const neighborAffinity = buildNeighborAffinity(sortedPackets, neighbors, localLat, localLon, localHash);
   const localPrefix = localHash ? getHashPrefix(localHash) : null;
@@ -2205,26 +2198,10 @@ export function buildMeshTopology(
     edge.isLoopEdge = loopEdgeKeys.has(edge.key);
   }
   
-  // Log loop detection results in development
-  if (process.env.NODE_ENV === 'development' && loops.length > 0) {
-    console.log(`[mesh-topology] Found ${loops.length} loops:`, loops.map(l => ({
-      id: l.id,
-      size: l.size,
-      nodes: l.nodes.length,
-      strength: l.strength.toFixed(2),
-      includesLocal: l.includesLocal,
-    })));
-  }
-  
   // === PHASE 2: PATH SEQUENCE TRACKING ===
   // Build registry of observed paths for route analysis
   // NOTE: Must be built BEFORE TX delay recommendations (Phase 6 depends on it)
   const pathRegistry = buildPathRegistry(sortedPackets, localHash);
-  
-  // Log path registry stats in development
-  if (process.env.NODE_ENV === 'development') {
-    console.log(`[mesh-topology] Path registry: ${pathRegistry.uniquePathCount} unique paths, ${pathRegistry.totalObservations} observations`);
-  }
   
   // === TX DELAY RECOMMENDATIONS FOR ALL NODES ===
   // Calculate recommended tx_delay and direct.tx_delay for all nodes with sufficient data
@@ -2237,58 +2214,18 @@ export function buildMeshTopology(
     neighbors
   );
   
-  // Log tx delay recommendations in development
-  if (process.env.NODE_ENV === 'development' && txDelayRecommendations.size > 0) {
-    const withData = [...txDelayRecommendations.values()].filter(r => !r.insufficientData).length;
-    console.log(`[mesh-topology] TX delay recommendations: ${withData} nodes with data, ${txDelayRecommendations.size - withData} insufficient`);
-  }
-  
   // === PHASE 4: EDGE BETWEENNESS CENTRALITY ===
   // Calculate betweenness from observed paths (more accurate than count-based backbone)
   const edgeBetweenness = calculateEdgeBetweenness(pathRegistry, edges);
   const backboneEdges = identifyBackboneEdges(edgeBetweenness, 3, 0.3);
   
-  // Log backbone edges in development
-  if (process.env.NODE_ENV === 'development' && backboneEdges.length > 0) {
-    console.log(`[mesh-topology] Backbone edges (by betweenness):`, backboneEdges.map(key => {
-      const edge = edgeMap.get(key);
-      return {
-        key,
-        betweenness: edgeBetweenness.get(key)?.toFixed(2),
-        certainCount: edge?.certainCount,
-      };
-    }));
-  }
-  
   // === PHASE 5: MOBILE REPEATER DETECTION ===
   // Identify nodes that appear/disappear frequently from paths
   const { nodeMobility, mobileNodes } = calculateNodeMobility(pathRegistry, neighbors);
   
-  // Log mobile nodes in development
-  if (process.env.NODE_ENV === 'development' && mobileNodes.length > 0) {
-    console.log(`[mesh-topology] Mobile nodes:`, mobileNodes.map(hash => {
-      const mob = nodeMobility.get(hash);
-      return {
-        hash: hash.slice(0, 8),
-        volatility: mob?.pathVolatility.toFixed(2),
-        activeRatio: mob?.activeWindowRatio.toFixed(2),
-      };
-    }));
-  }
-  
   // === PHASE 7: PATH HEALTH INDICATORS ===
   // Calculate health metrics for top observed paths
   const pathHealth = calculatePathHealth(pathRegistry, edges, hubNodes, 20);
-  
-  // Log path health in development
-  if (process.env.NODE_ENV === 'development' && pathHealth.length > 0) {
-    console.log(`[mesh-topology] Path health:`, pathHealth.slice(0, 5).map(ph => ({
-      path: ph.hops.join('>'),
-      health: ph.healthScore,
-      weakest: ph.weakestLinkConfidence.toFixed(2),
-      observations: ph.observationCount,
-    })));
-  }
   
   // === BUILD LAST-HOP NEIGHBORS ARRAY (ADVERT packets only) ===
   // Convert collected ADVERT prefix data into LastHopNeighbor objects.
@@ -2332,18 +2269,6 @@ export function buildMeshTopology(
   
   // Sort by count descending (most traffic first)
   lastHopNeighbors.sort((a, b) => b.count - a.count);
-  
-  // Log last-hop neighbors in development
-  if (process.env.NODE_ENV === 'development' && lastHopNeighbors.length > 0) {
-    console.log(`[mesh-topology] Last-hop neighbors from ADVERTs (${lastHopNeighbors.length}):`, lastHopNeighbors.map(n => ({
-      prefix: n.prefix,
-      hash: n.hash.slice(0, 8),
-      adverts: n.count,
-      conf: n.confidence.toFixed(2),
-      rssi: n.avgRssi?.toFixed(0),
-      snr: n.avgSnr?.toFixed(1),
-    })));
-  }
   
   return {
     edges, 

@@ -44,6 +44,8 @@ type StateListener = (state: PacketCacheState) => void;
 
 class PacketCache {
   private packets: Map<string, Packet> = new Map(); // Keyed by packet_hash for dedup
+  private sortedPackets: Packet[] = []; // Pre-sorted cache (ascending by timestamp)
+  private sortedDirty = true; // Track if sortedPackets needs rebuild
   private meta: PacketCacheMeta = {
     oldestTimestamp: 0,
     newestTimestamp: 0,
@@ -92,11 +94,16 @@ class PacketCache {
   }
 
   /**
-   * Get all cached packets (sorted by timestamp ascending)
+   * Get all cached packets (sorted by timestamp ascending).
+   * Uses a cached sorted array to avoid re-sorting on every call.
    */
   getPackets(): Packet[] {
-    return Array.from(this.packets.values())
-      .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    if (this.sortedDirty) {
+      this.sortedPackets = Array.from(this.packets.values())
+        .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+      this.sortedDirty = false;
+    }
+    return this.sortedPackets;
   }
 
   /**
@@ -115,7 +122,6 @@ class PacketCache {
   async quickLoad(): Promise<Packet[]> {
     // If stale (away > 1hr), clear and refetch
     if (this.isStale() && this.packets.size > 0) {
-      console.log('[PacketCache] Cache stale, clearing...');
       this.clear();
     }
 
@@ -141,7 +147,6 @@ class PacketCache {
         this.notifyListeners();
         this.mergePackets(response.data);
         this.saveToStorage();
-        console.log(`[PacketCache] Quick load: ${response.data.length} packets`);
       }
     } catch (error) {
       console.error('[PacketCache] Quick load failed:', error);
@@ -187,11 +192,9 @@ class PacketCache {
         this.statusMessage = `Processing ${response.data.length.toLocaleString()} packets...`;
         this.notifyListeners();
         
-        const beforeCount = this.packets.size;
         this.mergePackets(response.data);
         this.meta.backgroundLoadComplete = true;
         this.saveToStorage();
-        console.log(`[PacketCache] Background load: +${this.packets.size - beforeCount} packets, total: ${this.packets.size}`);
       }
     } catch (error) {
       console.error('[PacketCache] Background load failed:', error);
@@ -252,11 +255,9 @@ class PacketCache {
         this.statusMessage = `Processing ${response.data.length.toLocaleString()} packets...`;
         this.notifyListeners();
         
-        const beforeCount = this.packets.size;
         this.mergePackets(response.data);
         this.meta.deepLoadComplete = true;
         this.saveToStorage();
-        console.log(`[PacketCache] Deep load: +${this.packets.size - beforeCount} packets, total: ${this.packets.size}`);
       }
     } catch (error) {
       console.error('[PacketCache] Deep load failed:', error);
@@ -297,6 +298,8 @@ class PacketCache {
    */
   clear(): void {
     this.packets.clear();
+    this.sortedPackets = [];
+    this.sortedDirty = true;
     this.meta = {
       oldestTimestamp: 0,
       newestTimestamp: 0,
@@ -314,10 +317,12 @@ class PacketCache {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private mergePackets(newPackets: Packet[]): void {
+    let addedAny = false;
     for (const packet of newPackets) {
       const hash = packet.packet_hash;
       if (hash && !this.packets.has(hash)) {
         this.packets.set(hash, packet);
+        addedAny = true;
         
         const ts = packet.timestamp ?? 0;
         if (this.meta.oldestTimestamp === 0 || ts < this.meta.oldestTimestamp) {
@@ -327,6 +332,11 @@ class PacketCache {
           this.meta.newestTimestamp = ts;
         }
       }
+    }
+    
+    // Mark sorted cache as dirty only if we actually added new packets
+    if (addedAny) {
+      this.sortedDirty = true;
     }
     
     this.meta.lastUpdated = Date.now();
@@ -367,7 +377,6 @@ class PacketCache {
       if (this.meta.lastUpdated > 0) {
         const age = Date.now() - this.meta.lastUpdated;
         if (age > STALE_THRESHOLD_MS) {
-          console.log('[PacketCache] Cache stale (away > 1hr), will re-bootstrap');
           this.clear();
         }
       }

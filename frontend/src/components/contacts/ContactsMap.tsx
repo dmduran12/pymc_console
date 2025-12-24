@@ -19,6 +19,36 @@ import { parsePath, getHashPrefix } from '@/lib/path-utils';
 
 // Uniform marker size for all nodes (outer dimension)
 const MARKER_SIZE = 14;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Icon Cache
+// ═══════════════════════════════════════════════════════════════════════════════
+// Leaflet DivIcon instances are expensive to create (DOM string parsing).
+// Since opacity is quantized to 20 steps and hover/neighbor are boolean,
+// the parameter space is bounded. Cache icons by their parameter signature.
+
+const ICON_CACHE_MAX_SIZE = 200;
+const iconCache = new Map<string, L.DivIcon>();
+
+/**
+ * Get a cached icon or create and cache a new one.
+ * @param cacheKey - Unique key for this icon configuration
+ * @param createFn - Factory function to create the icon if not cached
+ */
+function getCachedIcon(cacheKey: string, createFn: () => L.DivIcon): L.DivIcon {
+  const cached = iconCache.get(cacheKey);
+  if (cached) return cached;
+  
+  // Evict oldest entries if cache is full (simple FIFO eviction)
+  if (iconCache.size >= ICON_CACHE_MAX_SIZE) {
+    const firstKey = iconCache.keys().next().value;
+    if (firstKey) iconCache.delete(firstKey);
+  }
+  
+  const icon = createFn();
+  iconCache.set(cacheKey, icon);
+  return icon;
+}
 // Ring thickness - thick enough for small donut hole
 const RING_THICKNESS = 5;
 // Outer ring for neighbor indicator
@@ -111,70 +141,75 @@ function getEdgeColor(
  * @param isNeighbor - Whether this node is a zero-hop neighbor (adds green outer ring)
  */
 function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1, isHovered: boolean = false, isNeighbor: boolean = false): L.DivIcon {
-  // Hover: instant on, ease-out off (150ms)
-  const brightness = isHovered ? 1.25 : 1;
+  // Build cache key from parameters
+  const cacheKey = `ring:${color}:${opacity}:${isHovered}:${isNeighbor}`;
   
-  // Neighbor indicator: green outer ring wrapping the main marker
-  if (isNeighbor) {
-    const offset = (NEIGHBOR_OUTER_RING_SIZE - MARKER_SIZE) / 2;
+  return getCachedIcon(cacheKey, () => {
+    // Hover: instant on, ease-out off (150ms)
+    const brightness = isHovered ? 1.25 : 1;
+    
+    // Neighbor indicator: green outer ring wrapping the main marker
+    if (isNeighbor) {
+      const offset = (NEIGHBOR_OUTER_RING_SIZE - MARKER_SIZE) / 2;
+      return L.divIcon({
+        className: 'map-ring-marker-neighbor',
+        html: `<div style="
+          position: relative;
+          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          opacity: ${opacity};
+          filter: brightness(${brightness});
+          transition: filter 0s ease-in, filter 150ms ease-out;
+        ">
+          <!-- Green outer ring -->
+          <div style="
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+            height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+            background: transparent;
+            border-radius: 50%;
+            border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
+            box-sizing: border-box;
+            opacity: 0.7;
+          "></div>
+          <!-- Inner colored ring -->
+          <div style="
+            position: absolute;
+            top: ${offset}px;
+            left: ${offset}px;
+            width: ${MARKER_SIZE}px;
+            height: ${MARKER_SIZE}px;
+            background: transparent;
+            border-radius: 50%;
+            border: ${RING_THICKNESS}px solid ${color};
+            box-sizing: border-box;
+          "></div>
+        </div>`,
+        iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
+        iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
+        popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+      });
+    }
+    
     return L.divIcon({
-      className: 'map-ring-marker-neighbor',
+      className: 'map-ring-marker',
       html: `<div style="
-        position: relative;
-        width: ${NEIGHBOR_OUTER_RING_SIZE}px;
-        height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        width: ${MARKER_SIZE}px;
+        height: ${MARKER_SIZE}px;
+        background: transparent;
+        border-radius: 50%;
+        border: ${RING_THICKNESS}px solid ${color};
+        box-sizing: border-box;
         opacity: ${opacity};
         filter: brightness(${brightness});
         transition: filter 0s ease-in, filter 150ms ease-out;
-      ">
-        <!-- Green outer ring -->
-        <div style="
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
-          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
-          background: transparent;
-          border-radius: 50%;
-          border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
-          box-sizing: border-box;
-          opacity: 0.7;
-        "></div>
-        <!-- Inner colored ring -->
-        <div style="
-          position: absolute;
-          top: ${offset}px;
-          left: ${offset}px;
-          width: ${MARKER_SIZE}px;
-          height: ${MARKER_SIZE}px;
-          background: transparent;
-          border-radius: 50%;
-          border: ${RING_THICKNESS}px solid ${color};
-          box-sizing: border-box;
-        "></div>
-      </div>`,
-      iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
-      iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
-      popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+      "></div>`,
+      iconSize: [MARKER_SIZE, MARKER_SIZE],
+      iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
+      popupAnchor: [0, -MARKER_SIZE / 2],
     });
-  }
-  
-  return L.divIcon({
-    className: 'map-ring-marker',
-    html: `<div style="
-      width: ${MARKER_SIZE}px;
-      height: ${MARKER_SIZE}px;
-      background: transparent;
-      border-radius: 50%;
-      border: ${RING_THICKNESS}px solid ${color};
-      box-sizing: border-box;
-      opacity: ${opacity};
-      filter: brightness(${brightness});
-      transition: filter 0s ease-in, filter 150ms ease-out;
-    "></div>`,
-    iconSize: [MARKER_SIZE, MARKER_SIZE],
-    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
-    popupAnchor: [0, -MARKER_SIZE / 2],
   });
 }
 
@@ -188,70 +223,83 @@ function createRingIcon(color: string = DESIGN.nodeColor, opacity: number = 1, i
  * @param isNeighbor - Whether this node is a zero-hop neighbor (adds green outer ring)
  */
 function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1, isHovered: boolean = false, isNeighbor: boolean = false): L.DivIcon {
-  // Hover: instant on, ease-out off (150ms)
-  const brightness = isHovered ? 1.25 : 1;
+  // Build cache key from parameters
+  const cacheKey = `filled:${color}:${opacity}:${isHovered}:${isNeighbor}`;
   
-  // Neighbor indicator: green outer ring wrapping the hub marker
-  if (isNeighbor) {
-    const offset = (NEIGHBOR_OUTER_RING_SIZE - MARKER_SIZE) / 2;
+  return getCachedIcon(cacheKey, () => {
+    // Hover: instant on, ease-out off (150ms)
+    const brightness = isHovered ? 1.25 : 1;
+    
+    // Neighbor indicator: green outer ring wrapping the hub marker
+    if (isNeighbor) {
+      const offset = (NEIGHBOR_OUTER_RING_SIZE - MARKER_SIZE) / 2;
+      return L.divIcon({
+        className: 'map-filled-marker-neighbor',
+        html: `<div style="
+          position: relative;
+          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          opacity: ${opacity};
+          filter: brightness(${brightness});
+          transition: filter 0s ease-in, filter 150ms ease-out;
+        ">
+          <!-- Green outer ring -->
+          <div style="
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+            height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+            background: transparent;
+            border-radius: 50%;
+            border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
+            box-sizing: border-box;
+            opacity: 0.7;
+          "></div>
+          <!-- Inner filled dot -->
+          <div style="
+            position: absolute;
+            top: ${offset}px;
+            left: ${offset}px;
+            width: ${MARKER_SIZE}px;
+            height: ${MARKER_SIZE}px;
+            background-color: ${color};
+            border-radius: 50%;
+            box-sizing: border-box;
+          "></div>
+        </div>`,
+        iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
+        iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
+        popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+      });
+    }
+    
     return L.divIcon({
-      className: 'map-filled-marker-neighbor',
+      className: 'map-filled-marker',
       html: `<div style="
-        position: relative;
-        width: ${NEIGHBOR_OUTER_RING_SIZE}px;
-        height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        width: ${MARKER_SIZE}px;
+        height: ${MARKER_SIZE}px;
+        background-color: ${color};
+        border-radius: 50%;
+        box-sizing: border-box;
         opacity: ${opacity};
         filter: brightness(${brightness});
         transition: filter 0s ease-in, filter 150ms ease-out;
-      ">
-        <!-- Green outer ring -->
-        <div style="
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
-          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
-          background: transparent;
-          border-radius: 50%;
-          border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
-          box-sizing: border-box;
-          opacity: 0.7;
-        "></div>
-        <!-- Inner filled dot -->
-        <div style="
-          position: absolute;
-          top: ${offset}px;
-          left: ${offset}px;
-          width: ${MARKER_SIZE}px;
-          height: ${MARKER_SIZE}px;
-          background-color: ${color};
-          border-radius: 50%;
-          box-sizing: border-box;
-        "></div>
-      </div>`,
-      iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
-      iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
-      popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+      "></div>`,
+      iconSize: [MARKER_SIZE, MARKER_SIZE],
+      iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
+      popupAnchor: [0, -MARKER_SIZE / 2],
     });
-  }
-  
-  return L.divIcon({
-    className: 'map-filled-marker',
-    html: `<div style="
-      width: ${MARKER_SIZE}px;
-      height: ${MARKER_SIZE}px;
-      background-color: ${color};
-      border-radius: 50%;
-      box-sizing: border-box;
-      opacity: ${opacity};
-      filter: brightness(${brightness});
-      transition: filter 0s ease-in, filter 150ms ease-out;
-    "></div>`,
-    iconSize: [MARKER_SIZE, MARKER_SIZE],
-    iconAnchor: [MARKER_SIZE / 2, MARKER_SIZE / 2],
-    popupAnchor: [0, -MARKER_SIZE / 2],
   });
 }
+
+// Pre-render SVG icons once (expensive React render)
+const HOME_ICON_SVG = renderToStaticMarkup(
+  <Home size={MARKER_SIZE + 2} color={DESIGN.localColor} strokeWidth={2.5} fill="none" />
+);
+const ROOM_SERVER_ICON_SVG = renderToStaticMarkup(
+  <MessagesSquare size={MARKER_SIZE + 2} color={DESIGN.roomServerColor} strokeWidth={2.5} fill="none" />
+);
 
 /**
  * Create local node icon - yellow house icon to indicate "home" node.
@@ -259,33 +307,28 @@ function createFilledIcon(color: string = DESIGN.hubColor, opacity: number = 1, 
  * @param isHovered - Whether the node is currently hovered (adds brightness)
  */
 function createLocalIcon(isHovered: boolean = false): L.DivIcon {
-  // Render the Home icon to static SVG markup
-  const iconMarkup = renderToStaticMarkup(
-    <Home 
-      size={MARKER_SIZE + 2} 
-      color={DESIGN.localColor} 
-      strokeWidth={2.5}
-      fill="none"
-    />
-  );
+  // Build cache key from parameters (only hover state varies)
+  const cacheKey = `local:${isHovered}`;
   
-  // Hover: instant on, ease-out off (150ms)
-  const brightness = isHovered ? 1.25 : 1;
-  
-  return L.divIcon({
-    className: 'map-local-marker',
-    html: `<div style="
-      width: ${MARKER_SIZE + 2}px;
-      height: ${MARKER_SIZE + 2}px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
-      transition: filter 0s ease-in, filter 150ms ease-out;
-    ">${iconMarkup}</div>`,
-    iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
-    iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
-    popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
+  return getCachedIcon(cacheKey, () => {
+    // Hover: instant on, ease-out off (150ms)
+    const brightness = isHovered ? 1.25 : 1;
+    
+    return L.divIcon({
+      className: 'map-local-marker',
+      html: `<div style="
+        width: ${MARKER_SIZE + 2}px;
+        height: ${MARKER_SIZE + 2}px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
+        transition: filter 0s ease-in, filter 150ms ease-out;
+      ">${HOME_ICON_SVG}</div>`,
+      iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
+      iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
+      popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
+    });
   });
 }
 
@@ -298,79 +341,74 @@ function createLocalIcon(isHovered: boolean = false): L.DivIcon {
  * @param isNeighbor - Whether this node is a zero-hop neighbor (adds green outer ring)
  */
 function createRoomServerIcon(opacity: number = 1, isHovered: boolean = false, isNeighbor: boolean = false): L.DivIcon {
-  // Render the MessagesSquare icon to static SVG markup
-  const iconMarkup = renderToStaticMarkup(
-    <MessagesSquare 
-      size={MARKER_SIZE + 2} 
-      color={DESIGN.roomServerColor} 
-      strokeWidth={2.5}
-      fill="none"
-    />
-  );
+  // Build cache key from parameters
+  const cacheKey = `roomserver:${opacity}:${isHovered}:${isNeighbor}`;
   
-  // Hover: instant on, ease-out off (150ms)
-  const brightness = isHovered ? 1.25 : 1;
-  
-  // Neighbor indicator: green outer ring wrapping the icon
-  if (isNeighbor) {
-    const iconSize = MARKER_SIZE + 2;
-    const offset = (NEIGHBOR_OUTER_RING_SIZE - iconSize) / 2;
+  return getCachedIcon(cacheKey, () => {
+    // Hover: instant on, ease-out off (150ms)
+    const brightness = isHovered ? 1.25 : 1;
+    
+    // Neighbor indicator: green outer ring wrapping the icon
+    if (isNeighbor) {
+      const iconSize = MARKER_SIZE + 2;
+      const offset = (NEIGHBOR_OUTER_RING_SIZE - iconSize) / 2;
+      return L.divIcon({
+        className: 'map-room-server-marker-neighbor',
+        html: `<div style="
+          position: relative;
+          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+          opacity: ${opacity};
+          filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
+          transition: filter 0s ease-in, filter 150ms ease-out;
+        ">
+          <!-- Green outer ring -->
+          <div style="
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${NEIGHBOR_OUTER_RING_SIZE}px;
+            height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+            background: transparent;
+            border-radius: 50%;
+            border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
+            box-sizing: border-box;
+            opacity: 0.7;
+          "></div>
+          <!-- Icon -->
+          <div style="
+            position: absolute;
+            top: ${offset}px;
+            left: ${offset}px;
+            width: ${iconSize}px;
+            height: ${iconSize}px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          ">${ROOM_SERVER_ICON_SVG}</div>
+        </div>`,
+        iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
+        iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
+        popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+      });
+    }
+    
     return L.divIcon({
-      className: 'map-room-server-marker-neighbor',
+      className: 'map-room-server-marker',
       html: `<div style="
-        position: relative;
-        width: ${NEIGHBOR_OUTER_RING_SIZE}px;
-        height: ${NEIGHBOR_OUTER_RING_SIZE}px;
+        width: ${MARKER_SIZE + 2}px;
+        height: ${MARKER_SIZE + 2}px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         opacity: ${opacity};
         filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
         transition: filter 0s ease-in, filter 150ms ease-out;
-      ">
-        <!-- Green outer ring -->
-        <div style="
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: ${NEIGHBOR_OUTER_RING_SIZE}px;
-          height: ${NEIGHBOR_OUTER_RING_SIZE}px;
-          background: transparent;
-          border-radius: 50%;
-          border: ${NEIGHBOR_RING_THICKNESS}px solid ${DESIGN.neighborColor};
-          box-sizing: border-box;
-          opacity: 0.7;
-        "></div>
-        <!-- Icon -->
-        <div style="
-          position: absolute;
-          top: ${offset}px;
-          left: ${offset}px;
-          width: ${iconSize}px;
-          height: ${iconSize}px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">${iconMarkup}</div>
-      </div>`,
-      iconSize: [NEIGHBOR_OUTER_RING_SIZE, NEIGHBOR_OUTER_RING_SIZE],
-      iconAnchor: [NEIGHBOR_OUTER_RING_SIZE / 2, NEIGHBOR_OUTER_RING_SIZE / 2],
-      popupAnchor: [0, -NEIGHBOR_OUTER_RING_SIZE / 2],
+      ">${ROOM_SERVER_ICON_SVG}</div>`,
+      iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
+      iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
+      popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
     });
-  }
-  
-  return L.divIcon({
-    className: 'map-room-server-marker',
-    html: `<div style="
-      width: ${MARKER_SIZE + 2}px;
-      height: ${MARKER_SIZE + 2}px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      opacity: ${opacity};
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)) brightness(${brightness});
-      transition: filter 0s ease-in, filter 150ms ease-out;
-    ">${iconMarkup}</div>`,
-    iconSize: [MARKER_SIZE + 2, MARKER_SIZE + 2],
-    iconAnchor: [(MARKER_SIZE + 2) / 2, (MARKER_SIZE + 2) / 2],
-    popupAnchor: [0, -(MARKER_SIZE + 2) / 2],
   });
 }
 
@@ -629,14 +667,15 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
     : { label: 'Forwards', value: String(affinity?.directForwardCount || 0), suffix: '' };
   
   return (
-    <div className="min-w-[180px] max-w-[240px]">
+    <div className="min-w-[180px] max-w-[240px] pr-4">
       {/* === HEADER: Name + Remove === */}
+      {/* pr-4 above accounts for Leaflet's close button in top-right */}
       <div className="flex items-center gap-1 mb-0.5">
-        <span className="text-[14px] font-semibold text-text-primary leading-snug flex-1 min-w-0">{name}</span>
+        <span className="text-[14px] font-semibold text-text-primary leading-snug flex-1 min-w-0 truncate">{name}</span>
         {onRemove && (
           <button
             onClick={onRemove}
-            className="p-1 -mr-1 text-text-muted/30 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            className="p-1 -mr-1 text-text-muted/30 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors flex-shrink-0"
             title="Remove node"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -1375,13 +1414,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     // Build animation targets - only for nodes whose visibility actually changed
     const animationTargets: Array<{ hash: string; startOpacity: number; targetOpacity: number }> = [];
     
-    console.log('[ContactsMap] Animation effect triggered:', {
-      wasDirectMode, wasHubsMode, isDirectMode, isHubsMode,
-      hubConnectedSize: hubConnected.size,
-      directNodesSize: directNodes.size,
-      neighborsCount: allNeighborHashes.length,
-    });
-    
     for (const hash of allNeighborHashes) {
       const wasVisible = isVisibleInMode(hash, wasDirectMode, wasHubsMode);
       const nowVisible = isVisibleInMode(hash, isDirectMode, isHubsMode);
@@ -1395,8 +1427,6 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         });
       }
     }
-    
-    console.log('[ContactsMap] Animation targets:', animationTargets.length, 'nodes to animate');
     
     if (animationTargets.length === 0) return;
     
@@ -2299,7 +2329,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 mouseout: () => setHoveredMarker(null),
               }}
             >
-              <Popup closeButton={false}>
+              <Popup 
+                closeButton={true}
+                autoClose={true}
+                closeOnClick={false}
+                closeOnEscapeKey={true}
+              >
                 <NodePopupContent
                   hash={hash}
                   hashPrefix={hashPrefix}
@@ -2333,7 +2368,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               mouseout: () => setHoveredMarker(null),
             }}
           >
-            <Popup>
+          <Popup
+              closeButton={true}
+              autoClose={true}
+              closeOnClick={false}
+              closeOnEscapeKey={true}
+            >
               <div className="text-sm">
                 <strong className="text-base">{localNode.name}</strong>
                 {localHash && (

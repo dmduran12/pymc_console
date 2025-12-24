@@ -108,8 +108,7 @@ export default function Packets() {
         return typeName.toLowerCase().includes('advert');
       });
       if (newestAdvert) {
-        const id = String(newestAdvert.id ?? newestAdvert.packet_hash ?? '');
-        const raf = requestAnimationFrame(() => setFlashingAdvertId(id));
+        const raf = requestAnimationFrame(() => setFlashingAdvertId(newestAdvert.packet_hash));
         const timer = setTimeout(() => setFlashingAdvertId(null), 600);
         return () => {
           cancelAnimationFrame(raf);
@@ -340,16 +339,15 @@ export default function Packets() {
                   </td>
                 </tr>
               ) : (
-                filteredPackets.map((packet, index) => {
-                  const packetId = String(packet.id ?? packet.packet_hash ?? index);
+              filteredPackets.map((packet) => {
                   const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
                   const isAdvert = typeName.toLowerCase().includes('advert');
                   return (
                     <PacketRow
-                      key={packetId}
+                      key={packet.packet_hash}
                       packet={packet}
                       onClick={setSelectedPacket}
-                      isFlashing={isAdvert && flashingAdvertId === packetId}
+                      isFlashing={isAdvert && flashingAdvertId === packet.packet_hash}
                     />
                   );
                 })
@@ -369,16 +367,15 @@ export default function Packets() {
               No packets found
             </div>
           ) : (
-            filteredPackets.map((packet, index) => {
-              const packetId = String(packet.id ?? packet.packet_hash ?? index);
+            filteredPackets.map((packet) => {
               const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
               const isAdvert = typeName.toLowerCase().includes('advert');
               return (
                 <PacketCard
-                  key={packetId}
+                  key={packet.packet_hash}
                   packet={packet}
                   onClick={setSelectedPacket}
-                  isFlashing={isAdvert && flashingAdvertId === packetId}
+                  isFlashing={isAdvert && flashingAdvertId === packet.packet_hash}
                 />
               );
             })

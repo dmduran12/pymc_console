@@ -712,13 +712,7 @@ export function buildPrefixLookup(
           // This candidate is dominant at position 1 - major confidence boost
           // Scale boost by how dominant (80% = +0.3, 90% = +0.45, 100% = +0.6)
           const dominanceBoost = 0.30 + (pos1Ratio - 0.80) * 1.5; // 0.30 to 0.60
-          const newConfidence = Math.min(1, confidence + dominanceBoost);
-          
-          if (process.env.NODE_ENV === 'development') {
-            console.log(`[disambiguation] Prefix ${prefix}: DOMINANT BOOST! ratio=${pos1Ratio.toFixed(2)}, boost=${dominanceBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
-          }
-          
-          confidence = newConfidence;
+          confidence = Math.min(1, confidence + dominanceBoost);
         }
       }
       
@@ -775,13 +769,7 @@ export function buildPrefixLookup(
           ? bestSrcGeoEvidence / (bestSrcGeoEvidence + secondSrcGeoEvidence)
           : 1.0;
         const srcGeoConfBoost = Math.min(0.3, (evidenceRatio - 0.5) * 0.6); // Up to +0.3
-        const newConfidence = Math.min(1, confidence + srcGeoConfBoost);
-        
-        if (process.env.NODE_ENV === 'development' && srcGeoConfBoost > 0.05) {
-          console.log(`[disambiguation] Prefix ${prefix}: SRC-GEO BOOST! bestEvidence=${bestSrcGeoEvidence.toFixed(1)}, secondEvidence=${secondSrcGeoEvidence.toFixed(1)}, boost=${srcGeoConfBoost.toFixed(2)}, newConf=${newConfidence.toFixed(2)}`);
-        }
-        
-        confidence = newConfidence;
+        confidence = Math.min(1, confidence + srcGeoConfBoost);
       }
     }
     

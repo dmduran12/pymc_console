@@ -138,39 +138,6 @@ class TopologyService {
     // Deserialize and store result
     this.currentTopology = deserializeTopology(message.payload);
     
-    // DEBUG: Log topology stats including edges touching local
-    const localPrefix = this.currentTopology.localPrefix;
-    // Find edges where fromHash or toHash IS the local node (0x19 or full hash starting with 0x)
-    const localEdges = this.currentTopology.edges.filter(e => 
-      e.fromHash.startsWith('0x') || e.toHash.startsWith('0x')
-    );
-    // Also check for edges where neighbor's prefix matches local
-    const allEdgesWithPrefix = localPrefix ? this.currentTopology.edges.filter(e => {
-      const fromPrefix = e.fromHash.startsWith('0x') ? e.fromHash.slice(2).toUpperCase() : e.fromHash.slice(0, 2).toUpperCase();
-      const toPrefix = e.toHash.startsWith('0x') ? e.toHash.slice(2).toUpperCase() : e.toHash.slice(0, 2).toUpperCase();
-      return fromPrefix === localPrefix.toUpperCase() || toPrefix === localPrefix.toUpperCase();
-    }) : [];
-    console.log(`[TopologyService] Computed in ${message.computeTimeMs.toFixed(0)}ms:`, {
-      totalEdges: this.currentTopology.edges.length,
-      validatedEdges: this.currentTopology.validatedEdges.length,
-      hubNodes: this.currentTopology.hubNodes.length,
-      localPrefix,
-      edgesWithLocalHash: localEdges.length,
-      edgesWithLocalPrefix: allEdgesWithPrefix.length,
-      localEdgeSample: localEdges.slice(0, 5).map(e => ({
-        from: e.fromHash,
-        to: e.toHash,
-        certainCount: e.certainCount,
-        validated: e.certainCount >= 5,
-      })),
-      prefixEdgeSample: allEdgesWithPrefix.slice(0, 5).map(e => ({
-        from: e.fromHash,
-        to: e.toHash,
-        certainCount: e.certainCount,
-        validated: e.certainCount >= 5,
-      })),
-    });
-    
     // Notify listeners
     for (const listener of this.listeners) {
       try {
