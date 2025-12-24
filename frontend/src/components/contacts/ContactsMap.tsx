@@ -446,11 +446,15 @@ interface ContactsMapProps {
  * A neighbor is considered zero-hop if we've DIRECTLY received RF signal from them.
  * This is determined by:
  * 1. Topology edges with hopDistanceFromLocal === 0 (most reliable - uses disambiguation)
- * 2. route_type = 1 (DIRECT) AND src_hash matches - they sent directly to us
- * 3. Empty path AND src_hash matches - no forwarding, direct reception
- * 4. Last hop prefix matches their hash prefix (fallback when no topology available)
+ * 2. Empty path AND src_hash matches - no forwarding, direct RF reception
+ * 3. Path with single element (last forwarder) that matches a known neighbor
  * 
- * IMPORTANT: The topology approach (method 1) is preferred because it uses the centralized
+ * IMPORTANT: MeshCore route_type does NOT indicate hop count!
+ * - DIRECT route (route=2) means "pre-computed path", NOT "zero-hop"
+ * - A DIRECT-routed packet can have multiple hops with a predetermined path
+ * - Zero-hop detection must use PATH LENGTH, not route type
+ * 
+ * The topology approach (method 1) is preferred because it uses the centralized
  * prefix disambiguation system which considers position consistency, co-occurrence patterns,
  * and geographic proximity to resolve prefix collisions.
  * 
@@ -495,25 +499,19 @@ function inferZeroHopNeighbors(
     // Skip if no source hash
     if (!packet.src_hash) continue;
     
-    // Method 2: route_type = 1 (DIRECT) means the source sent directly to us
-    const routeType = packet.route_type ?? packet.route;
-    if (routeType === 1) {
-      zeroHopNodes.add(packet.src_hash);
-      continue;
-    }
-    
-    // Method 3: Empty path means we received directly from source (no relays)
+    // Method 2: Empty/null path means we received directly from source (no relays)
+    // This is TRUE zero-hop detection based on path absence
     const path = packet.forwarded_path ?? packet.original_path;
-    if (!path || path.length === 0) {
+    if (!path || (Array.isArray(path) && path.length === 0)) {
       zeroHopNodes.add(packet.src_hash);
       continue;
     }
     
-    // Method 4: (Fallback) The LAST non-local element in the path is the node that transmitted to us.
+    // Method 3: (Fallback) The LAST non-local element in the path is the node that transmitted to us.
     // Only use this if we don't already have edges from topology
     // Note: This is less reliable for prefix collisions
     // Use centralized path parsing which handles local stripping
-    if (path.length > 0 && (!topologyEdges || topologyEdges.length === 0)) {
+    if (Array.isArray(path) && path.length > 0 && (!topologyEdges || topologyEdges.length === 0)) {
       const parsed = parsePath(path, localHash);
       if (!parsed || parsed.effectiveLength === 0) continue;
       
@@ -1799,6 +1797,27 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     }
   }, [isFullscreen]);
 
+  // Show loading gate until background load (30k packets) is complete
+  // This ensures the map has enough data for meaningful topology
+  if (!packetCacheState.backgroundLoadComplete) {
+    return (
+      <div className="glass-card h-[500px] flex items-center justify-center">
+        <div className="text-center">
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+            <p className="text-lg text-text-primary font-medium">Loading Database</p>
+          </div>
+          <p className="text-sm text-text-muted">
+            {packetCacheState.statusMessage || `Fetching ${packetCacheState.packetCount.toLocaleString()} packets...`}
+          </p>
+          <p className="text-xs text-text-muted/60 mt-2">
+            This enables accurate topology visualization
+          </p>
+        </div>
+      </div>
+    );
+  }
+  
   // No locations available
   if (allPositions.length === 0) {
     return (
