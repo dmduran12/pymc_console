@@ -95,6 +95,11 @@ interface EdgeFeatureProperties {
   toName: string;
 }
 
+// Convert [lat, lng] to GeoJSON [lng, lat]
+function toGeoJSON(coord: [number, number]): [number, number] {
+  return [coord[1], coord[0]];
+}
+
 /**
  * Build GeoJSON for weak edges (emerging connections).
  */
@@ -108,11 +113,10 @@ function buildWeakEdgesGeoJSON(
     const traceProgress = edgeAnimProgress.get(edge.key) ?? 0;
     if (traceProgress <= 0) continue;
     
-    // Animate "to" position for trace effect
-    // Note: GeoJSON uses [lng, lat] order (opposite of Leaflet's [lat, lng])
-    const animatedTo: [number, number] = [
-      from[1] + (to[1] - from[1]) * traceProgress, // lng
+    // Animate "to" position for trace effect (in [lat, lng] format, like Leaflet)
+    const animatedToLatLng: [number, number] = [
       from[0] + (to[0] - from[0]) * traceProgress, // lat
+      from[1] + (to[1] - from[1]) * traceProgress, // lng
     ];
     
     features.push({
@@ -136,8 +140,8 @@ function buildWeakEdgesGeoJSON(
       geometry: {
         type: 'LineString',
         coordinates: [
-          [from[1], from[0]], // [lng, lat]
-          animatedTo,
+          toGeoJSON(from),
+          toGeoJSON(animatedToLatLng),
         ],
       },
     });
@@ -182,22 +186,16 @@ function buildValidatedEdgesGeoJSON(
     const isAnyHovered = hoveredEdgeKey !== null;
     const isHighlighted = highlightedEdgeKey === edge.key;
     
-    // Link quality percentage (used in tooltip via properties)
-    // const linkQuality = maxCertainCount > 0 
-    //   ? (edge.certainCount / maxCertainCount)
-    //   : 0;
-    
     // Get names for tooltip
     const fromNeighbor = neighbors[edge.fromHash];
     const toNeighbor = neighbors[edge.toHash];
     const fromName = fromNeighbor?.node_name || fromNeighbor?.name || edge.fromHash.slice(0, 8);
     const toName = toNeighbor?.node_name || toNeighbor?.name || edge.toHash.slice(0, 8);
     
-    // Animate "to" position for trace effect
-    // GeoJSON uses [lng, lat] order
-    const animatedTo: [number, number] = [
-      from[1] + (to[1] - from[1]) * traceProgress, // lng
+    // Animate "to" position for trace effect (in [lat, lng] format, like Leaflet)
+    const animatedToLatLng: [number, number] = [
       from[0] + (to[0] - from[0]) * traceProgress, // lat
+      from[1] + (to[1] - from[1]) * traceProgress, // lng
     ];
     
     // Opacity scales with trace progress
@@ -208,7 +206,8 @@ function buildValidatedEdgesGeoJSON(
     
     // ─── LOOP EDGES: Parallel double-lines ─────────────────────────────────
     if (isLoopEdge) {
-      const { line1, line2 } = getParallelOffsets(from, animatedTo, animatedWeight * 1.5);
+      // getParallelOffsets expects [lat, lng] and returns [lat, lng]
+      const { line1, line2 } = getParallelOffsets(from, animatedToLatLng, animatedWeight * 1.5);
       const loopColor = isHovered ? DESIGN.edges.hoverLoop : DESIGN.edges.rest;
       const loopOpacity = baseOpacity * 1.1 * hoverOpacityMult;
       const loopWeight = isHovered 
@@ -237,8 +236,8 @@ function buildValidatedEdgesGeoJSON(
         geometry: {
           type: 'LineString',
           coordinates: [
-            [line1[0][1], line1[0][0]], // [lng, lat]
-            [line1[1][1], line1[1][0]],
+            toGeoJSON(line1[0]),
+            toGeoJSON(line1[1]),
           ],
         },
       });
@@ -265,8 +264,8 @@ function buildValidatedEdgesGeoJSON(
         geometry: {
           type: 'LineString',
           coordinates: [
-            [line2[0][1], line2[0][0]], // [lng, lat]
-            [line2[1][1], line2[1][0]],
+            toGeoJSON(line2[0]),
+            toGeoJSON(line2[1]),
           ],
         },
       });
@@ -314,8 +313,8 @@ function buildValidatedEdgesGeoJSON(
       geometry: {
         type: 'LineString',
         coordinates: [
-          [from[1], from[0]], // [lng, lat]
-          animatedTo,
+          toGeoJSON(from),
+          toGeoJSON(animatedToLatLng),
         ],
       },
     });
