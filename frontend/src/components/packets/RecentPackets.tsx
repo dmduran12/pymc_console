@@ -1,9 +1,15 @@
+/**
+ * RecentPackets - Dashboard widget showing latest packet activity
+ * 
+ * NOTE: This component does NOT poll for data. It consumes packets from the
+ * centralized Zustand store, which handles polling at the App level.
+ * Only visual state (flash effects, modal) is managed locally.
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { usePackets, usePacketsLoading, useLiveMode, useFetchPackets, useFlashAdvert } from '@/lib/stores/useStore';
-import { usePolling } from '@/lib/hooks/usePolling';
+import { usePackets, usePacketsLoading, useLiveMode, useFlashAdvert } from '@/lib/stores/useStore';
 import { Radio, Circle, ArrowRight } from 'lucide-react';
-import { POLLING_INTERVALS } from '@/lib/constants';
 import { getPayloadTypeName } from '@/lib/packet-utils';
 import { PacketRow, PacketCard } from './PacketRow';
 import { PacketDetailModal } from './PacketDetailModal';
@@ -13,21 +19,16 @@ import type { Packet } from '@/types/api';
 const MAX_PACKETS = 15;
 
 export function RecentPackets() {
+  // Data from centralized store (polling handled at App level)
   const packets = usePackets();
   const packetsLoading = usePacketsLoading();
   const liveMode = useLiveMode();
-  const fetchPackets = useFetchPackets();
   const flashAdvert = useFlashAdvert();
+  
+  // Local UI state only
   const [flashingAdvertId, setFlashingAdvertId] = useState<string | null>(null);
   const [selectedPacket, setSelectedPacket] = useState<Packet | null>(null);
   const lastHandledFlash = useRef(0);
-
-  // Poll packets when in live mode
-  usePolling(
-    () => fetchPackets(MAX_PACKETS + 5), // Fetch a few extra for buffer
-    POLLING_INTERVALS.packets,
-    liveMode
-  );
   
   // Detect new advert packets when flashAdvert changes (only trigger once per flash)
   useEffect(() => {
@@ -40,9 +41,8 @@ export function RecentPackets() {
         return typeName.toLowerCase().includes('advert');
       });
       if (newestAdvert) {
-        const id = String(newestAdvert.id ?? newestAdvert.packet_hash ?? '');
         // Use requestAnimationFrame to avoid synchronous setState in effect
-        const raf = requestAnimationFrame(() => setFlashingAdvertId(id));
+        const raf = requestAnimationFrame(() => setFlashingAdvertId(newestAdvert.packet_hash));
         const timer = setTimeout(() => setFlashingAdvertId(null), 600);
         return () => {
           cancelAnimationFrame(raf);
@@ -117,16 +117,15 @@ export function RecentPackets() {
                   </td>
                 </tr>
               ) : (
-                displayPackets.map((packet, index) => {
-                  const packetId = String(packet.id ?? packet.packet_hash ?? index);
+              displayPackets.map((packet) => {
                   const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
                   const isAdvert = typeName.toLowerCase().includes('advert');
                   return (
                     <PacketRow
-                      key={packetId}
+                      key={packet.packet_hash}
                       packet={packet}
                       onClick={setSelectedPacket}
-                      isFlashing={isAdvert && flashingAdvertId === packetId}
+                      isFlashing={isAdvert && flashingAdvertId === packet.packet_hash}
                     />
                   );
                 })
@@ -149,16 +148,15 @@ export function RecentPackets() {
             <div className="text-xs text-text-muted">Packets will appear here</div>
           </div>
         ) : (
-          displayPackets.map((packet, index) => {
-            const packetId = String(packet.id ?? packet.packet_hash ?? index);
+          displayPackets.map((packet) => {
             const typeName = packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
             const isAdvert = typeName.toLowerCase().includes('advert');
             return (
               <PacketCard
-                key={packetId}
+                key={packet.packet_hash}
                 packet={packet}
                 onClick={setSelectedPacket}
-                isFlashing={isAdvert && flashingAdvertId === packetId}
+                isFlashing={isAdvert && flashingAdvertId === packet.packet_hash}
               />
             );
           })

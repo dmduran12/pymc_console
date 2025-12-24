@@ -1,18 +1,30 @@
 import { Routes, Route } from 'react-router-dom';
-import { Component, ReactNode, useEffect } from 'react';
+import { Component, ReactNode, useEffect, lazy, Suspense } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { BackgroundProvider } from '@/components/layout/BackgroundProvider';
-import { ThemeProvider } from '@/lib/theme';
 import { useInitializeApp } from '@/lib/stores/useStore';
 
-// Pages
-import Dashboard from '@/pages/Dashboard';
-import Packets from '@/pages/Packets';
-import Contacts from '@/pages/Contacts';
-import Statistics from '@/pages/Statistics';
-import System from '@/pages/System';
-import Logs from '@/pages/Logs';
-import Settings from '@/pages/Settings';
+// Skeletons for route transitions
+import {
+  DashboardSkeleton,
+  ListSkeleton,
+  MapSkeleton,
+  ChartSkeleton,
+  SystemSkeleton,
+  FormSkeleton,
+} from '@/components/layout/PageSkeleton';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Lazy-loaded pages for code splitting
+// Each page is loaded on-demand, reducing initial bundle size significantly.
+// ═══════════════════════════════════════════════════════════════════════════════
+const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const Packets = lazy(() => import('@/pages/Packets'));
+const Contacts = lazy(() => import('@/pages/Contacts'));
+const Statistics = lazy(() => import('@/pages/Statistics'));
+const System = lazy(() => import('@/pages/System'));
+const Logs = lazy(() => import('@/pages/Logs'));
+const Settings = lazy(() => import('@/pages/Settings'));
 
 // Error boundary to catch page render errors
 interface ErrorBoundaryState {
@@ -58,7 +70,7 @@ export default function App() {
   }, [initializeApp]);
   
   return (
-    <ThemeProvider>
+    <>
       {/* Dynamic background - controlled by ThemeContext */}
       <BackgroundProvider />
 
@@ -72,19 +84,47 @@ export default function App() {
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
               <PageErrorBoundary>
                 <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/packets" element={<Packets />} />
-                  <Route path="/contacts" element={<Contacts />} />
-                  <Route path="/statistics" element={<Statistics />} />
-                  <Route path="/system" element={<System />} />
-                  <Route path="/logs" element={<Logs />} />
-                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/" element={
+                    <Suspense fallback={<DashboardSkeleton />}>
+                      <Dashboard />
+                    </Suspense>
+                  } />
+                  <Route path="/packets" element={
+                    <Suspense fallback={<ListSkeleton />}>
+                      <Packets />
+                    </Suspense>
+                  } />
+                  <Route path="/contacts" element={
+                    <Suspense fallback={<MapSkeleton />}>
+                      <Contacts />
+                    </Suspense>
+                  } />
+                  <Route path="/statistics" element={
+                    <Suspense fallback={<ChartSkeleton />}>
+                      <Statistics />
+                    </Suspense>
+                  } />
+                  <Route path="/system" element={
+                    <Suspense fallback={<SystemSkeleton />}>
+                      <System />
+                    </Suspense>
+                  } />
+                  <Route path="/logs" element={
+                    <Suspense fallback={<ListSkeleton />}>
+                      <Logs />
+                    </Suspense>
+                  } />
+                  <Route path="/settings" element={
+                    <Suspense fallback={<FormSkeleton />}>
+                      <Settings />
+                    </Suspense>
+                  } />
                 </Routes>
               </PageErrorBoundary>
             </div>
           </div>
         </main>
       </div>
-    </ThemeProvider>
+    </>
   );
 }

@@ -1,3 +1,15 @@
+/**
+ * Sidebar - Main navigation and control panel
+ * 
+ * Contains:
+ * - Navigation links with prefetch on hover
+ * - Control panel (send advert, mode toggle, duty cycle)
+ * - Status panel (uptime, noise floor, version)
+ * 
+ * NOTE: This component does NOT poll for data. It consumes stats from the
+ * centralized Zustand store, which is polled at the App level.
+ */
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -22,9 +34,7 @@ import { version } from '../../../package.json';
 import wifiIcon from '@/assets/WCM_Waves.gif';
 import clsx from 'clsx';
 import { useStore, usePrefetchForRoute } from '@/lib/stores/useStore';
-import { usePolling } from '@/lib/hooks/usePolling';
 import { formatUptime } from '@/lib/format';
-import { POLLING_INTERVALS } from '@/lib/constants';
 
 const navigation = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
@@ -40,7 +50,8 @@ const CONTROLS_EXPANDED_KEY = 'pymc-controls-expanded';
 
 export function Sidebar() {
   const { pathname } = useLocation();
-  const { stats, fetchStats, setMode, setDutyCycle, sendAdvert } = useStore();
+  // NOTE: stats is updated by the centralized polling in useStore - no local polling needed
+  const { stats, setMode, setDutyCycle, sendAdvert } = useStore();
   const prefetchForRoute = usePrefetchForRoute();
   const [isOpen, setIsOpen] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(true);
@@ -88,8 +99,6 @@ export function Sidebar() {
     setControlsExpanded(newState);
     localStorage.setItem(CONTROLS_EXPANDED_KEY, String(newState));
   };
-
-  usePolling(fetchStats, POLLING_INTERVALS.stats);
 
   // Close drawer on route change
   useEffect(() => {
