@@ -525,6 +525,20 @@ export default function ContactsMapMapLibre({
         />
       </div>
       
+      {/* ─── LIQUID GLASS OVERLAY EFFECTS ──────────────────────────────────────── */}
+      {/* Rendered AFTER map for proper stacking, only when not fullscreen */}
+      {!isFullscreen && (
+        <div className="absolute inset-0 pointer-events-none rounded-[1.125rem] overflow-hidden">
+          {/* Top edge highlight */}
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+          {/* Corner accents */}
+          <div className="absolute top-0 left-0 w-24 h-24 bg-gradient-to-br from-white/[0.03] to-transparent" />
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-white/[0.03] to-transparent" />
+          {/* Bottom edge fade */}
+          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/20 to-transparent" />
+        </div>
+      )}
+      
       {/* ─── MODALS ─────────────────────────────────────────────────────────── */}
       <ConfirmModal
         isOpen={removeConfirmHash !== null}
