@@ -61,6 +61,11 @@ interface NeighborEdgeProperties {
   opacity: number;
 }
 
+// Convert [lat, lng] to GeoJSON [lng, lat]
+function toGeoJSON(coord: [number, number]): [number, number] {
+  return [coord[1], coord[0]];
+}
+
 /**
  * Build GeoJSON for neighbor edges.
  */
@@ -106,8 +111,8 @@ function buildNeighborEdgesGeoJSON(
       geometry: {
         type: 'LineString',
         coordinates: [
-          [from[1], from[0]], // [lng, lat]
-          [to[1], to[0]],
+          toGeoJSON(from),
+          toGeoJSON(to),
         ],
       },
     });
