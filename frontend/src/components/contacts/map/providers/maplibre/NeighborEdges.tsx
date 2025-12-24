@@ -212,10 +212,13 @@ export function NeighborEdges({
     properties: NeighborEdgeProperties;
   } | null>(null);
   
-  // Build GeoJSON data
+  // Whether we have data to render
+  const hasData = neighborPolylines.length > 0;
+  
+  // Build GeoJSON data (always call hooks to maintain consistent order)
   const neighborEdgesData = useMemo(
-    () => buildNeighborEdgesGeoJSON(neighborPolylines, hoveredEdgeKey),
-    [neighborPolylines, hoveredEdgeKey]
+    () => hasData ? buildNeighborEdgesGeoJSON(neighborPolylines, hoveredEdgeKey) : { type: 'FeatureCollection' as const, features: [] },
+    [neighborPolylines, hoveredEdgeKey, hasData]
   );
   
   // Mouse event handlers for edges (to be wired up at Map level)
@@ -245,7 +248,8 @@ export function NeighborEdges({
   void _handleMouseEnter;
   void _handleMouseLeave;
   
-  if (neighborPolylines.length === 0) {
+  // Early return after all hooks
+  if (!hasData) {
     return null;
   }
   
