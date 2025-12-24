@@ -1954,8 +1954,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
-        {/* Draw neighbor edges (direct RF links to local) - green, always visible */}
-        {/* Weight based on signal strength: higher RSSI = thicker line */}
+        {/* Draw neighbor edges (direct RF links to local) - dashed green, always visible */}
         {/* Uses topology-computed avgRssi/avgSnr when available (from lastHopNeighbors) */}
         {neighborPolylines.map(({ from, to, hash, neighbor, lastHopData }) => {
           const name = neighbor.node_name || neighbor.name || hash.slice(0, 8);
@@ -1966,25 +1965,15 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const packetCount = lastHopData?.count;
           const confidence = lastHopData?.confidence;
           
-          // Weight scales with RSSI: -50 dBm = 4px, -120 dBm = 1.5px
-          const minWeight = 1.5;
-          const maxWeight = 4;
-          const minRssi = -120;
-          const maxRssi = -50;
-          let weight = minWeight;
-          if (rssi !== undefined && rssi !== null) {
-            const normalized = Math.max(0, Math.min(1, (rssi - minRssi) / (maxRssi - minRssi)));
-            weight = minWeight + normalized * (maxWeight - minWeight);
-          }
-          
           return (
             <Polyline
               key={`neighbor-edge-${hash}`}
               positions={[from, to]}
               pathOptions={{
                 color: DESIGN.edges.neighbor,
-                weight,
-                opacity: 0.75,
+                weight: 1.5,
+                opacity: 0.85,
+                dashArray: '4, 4',
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
@@ -2387,13 +2376,13 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   className="flex-shrink-0" 
                   style={{ 
                     width: '14px',
-                    height: '3px',
-                    backgroundColor: DESIGN.edges.neighbor,
+                    height: '2px',
+                    backgroundImage: `repeating-linear-gradient(90deg, ${DESIGN.edges.neighbor} 0, ${DESIGN.edges.neighbor} 3px, transparent 3px, transparent 5px)`,
                     borderRadius: '1px',
                   }}
                 />
                 <span className="text-text-muted">Neighbor link</span>
-                <LegendTooltip text="Green lines to MeshCore neighbors (direct RF contact with local)." />
+                <LegendTooltip text="Dashed green lines to MeshCore neighbors (direct RF contact with local)." />
               </div>
             </div>
           )}
