@@ -403,8 +403,9 @@ const store = create<StoreState>((set, get) => ({
         const allPackets = packetCache.getPackets();
         if (allPackets.length > 0) {
           set({ packets: allPackets });
-          // Recompute topology with full packet set
+          // Recompute topology with full packet set AND update quick neighbors
           get().triggerTopologyCompute();
+          get().updateQuickNeighbors();
         }
       }
       wasDeepLoading = cacheState.isDeepLoading;
