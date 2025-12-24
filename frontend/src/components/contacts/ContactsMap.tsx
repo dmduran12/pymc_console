@@ -433,23 +433,12 @@ interface ContactsMapProps {
   highlightedEdgeKey?: string | null; // Edge key to highlight (from PathHealth panel)
 }
 
-/**
- * Calculate mean SNR from packets for a given source hash.
- * 
- * IMPORTANT: The SNR value in a packet is what the LOCAL NODE measured when receiving.
- * For multi-hop packets, this SNR reflects the LAST HOP quality (neighbor → local),
- * NOT the RF link quality to the original source.
- * 
- * This function returns the mean SNR for display purposes, but consumers should
- * understand this is only meaningful for direct (zero-hop) neighbors.
- */
-function calculateMeanSnr(packets: Packet[], srcHash: string): number | undefined {
-  const nodePackets = packets.filter(p => p.src_hash === srcHash && p.snr !== undefined);
-  if (nodePackets.length === 0) return undefined;
-  
-  const sum = nodePackets.reduce((acc, p) => acc + (p.snr ?? 0), 0);
-  return sum / nodePackets.length;
-}
+// NOTE: SNR/RSSI averaging is now done correctly in:
+// - detectQuickNeighbors() in useStore.ts (for quick/polled packets)
+// - lastHopNeighbors computation in mesh-topology.ts (for deep analysis)
+// Both correctly filter to ONLY packets where the node was the last hop (direct RF).
+// The old calculateMeanSnr() was averaging ALL packets from a src_hash, which is wrong
+// because multi-hop packets have SNR from the last forwarder, not the original source.
 
 /**
  * Analyze packets and topology to determine which neighbors are zero-hop (direct RF contact with local).
@@ -598,7 +587,8 @@ interface NodePopupContentProps {
   isRoomServer: boolean;
   centrality: number;
   affinity?: FullAffinity;
-  meanSnr?: number;
+  meanSnr?: number;   // From direct RF packets only (lastHopNeighbors)
+  meanRssi?: number;  // From direct RF packets only (lastHopNeighbors)
   neighbor: NeighborInfo;
   onRemove?: () => void;
   txDelayRec?: TxDelayRec;
@@ -611,7 +601,7 @@ function formatDistance(meters: number | null): string {
   return `${(meters / 1000).toFixed(1)}km`;
 }
 
-function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, isRoomServer, centrality, affinity, meanSnr, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
+function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, isRoomServer, centrality, affinity, meanSnr, meanRssi, neighbor, onRemove, txDelayRec }: NodePopupContentProps) {
   const [copied, setCopied] = useState(false);
   
   const copyHash = () => {
@@ -633,11 +623,12 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
     : { label: 'Forwards', value: String(affinity?.directForwardCount || 0), highlight: false };
   
   // Build dynamic fourth metric
-  const fourthMetric = isZeroHop && neighbor.rssi !== undefined
-    ? { label: 'RSSI', value: String(neighbor.rssi) }
+  // For zero-hop neighbors, prefer averaged RSSI from direct RF packets over API snapshot
+  const fourthMetric = isZeroHop && (meanRssi !== undefined || neighbor.rssi !== undefined)
+    ? { label: 'RSSI', value: meanRssi !== undefined ? Math.round(meanRssi).toString() : String(neighbor.rssi), suffix: meanRssi !== undefined ? ' avg' : '' }
     : txDelayRec && !txDelayRec.insufficientData
-    ? { label: 'Neighbors', value: String(txDelayRec.directNeighborCount) }
-    : { label: 'Forwards', value: String(affinity?.directForwardCount || 0) };
+    ? { label: 'Neighbors', value: String(txDelayRec.directNeighborCount), suffix: '' }
+    : { label: 'Forwards', value: String(affinity?.directForwardCount || 0), suffix: '' };
   
   return (
     <div className="min-w-[180px] max-w-[240px]">
@@ -715,7 +706,7 @@ function NodePopupContent({ hash, hashPrefix, name, isHub, isZeroHop, isMobile, 
         </div>
         <div className="flex justify-between">
           <span className="text-text-muted/50">{fourthMetric.label}</span>
-          <span className="font-semibold tabular-nums">{fourthMetric.value}</span>
+          <span className="font-semibold tabular-nums">{fourthMetric.value}{fourthMetric.suffix}</span>
         </div>
       </div>
       
@@ -827,7 +818,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Get topology from store (computed by worker)
   const meshTopology = useTopology();
   
-  // Get packets for SNR calculation (lightweight, still needed)
+  // Get packets for fallback neighbor inference (when quickNeighbors/topology unavailable)
   const packets = usePackets();
   
   // Get quick neighbors from main store (runs on every poll, persisted)
@@ -2210,8 +2201,11 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           // Don't render if opacity is effectively 0 (hidden)
           if (nodeOpacity <= 0.01) return null;
           
-          // Calculate SNR (only meaningful for zero-hop neighbors)
-          const meanSnr = calculateMeanSnr(packets, hash);
+          // Get SNR/RSSI from lastHopNeighborMap (only for zero-hop neighbors)
+          // This data is already correctly filtered to packets where this node was the last hop
+          const lastHopData = lastHopNeighborMap.get(hash);
+          const meanSnr = lastHopData?.avgSnr ?? undefined;
+          const meanRssi = lastHopData?.avgRssi ?? undefined;
           
           const name = neighbor.node_name || neighbor.name || 'Unknown';
           
@@ -2279,6 +2273,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   centrality={centrality}
                   affinity={affinity}
                   meanSnr={meanSnr}
+                  meanRssi={meanRssi}
                   neighbor={neighbor}
                   txDelayRec={txDelayRec}
                   onRemove={onRemoveNode ? () => setPendingRemove({ hash, name }) : undefined}
