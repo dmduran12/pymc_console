@@ -16,8 +16,9 @@ import type { Packet } from '@/types/api';
 const STORAGE_KEY = 'pymc-packet-cache';
 const META_KEY = 'pymc-packet-cache-meta';
 const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour - clear cache if away longer
-const QUICK_FETCH_LIMIT = 1000;  // Fast initial load
-const DEEP_FETCH_LIMIT = 20000;  // Background load for full topology (~7 days)
+const QUICK_FETCH_LIMIT = 1000;  // Fast initial load (instant charts)
+const BACKGROUND_FETCH_LIMIT = 30000;  // Background load for app-wide data (~10 days)
+const DEEP_FETCH_LIMIT = 50000;  // Deep analysis for topology (user-triggered)
 const POLL_LIMIT = 500;          // Incremental polling
 
 export interface PacketCacheMeta {
@@ -25,12 +26,15 @@ export interface PacketCacheMeta {
   newestTimestamp: number;
   lastUpdated: number;
   packetCount: number;
-  deepLoadComplete: boolean;
+  backgroundLoadComplete: boolean;  // 30k background load done
+  deepLoadComplete: boolean;        // 50k deep analysis done
 }
 
 export interface PacketCacheState {
   isLoading: boolean;
-  isDeepLoading: boolean;
+  isBackgroundLoading: boolean;  // 30k background load in progress
+  isDeepLoading: boolean;        // 50k deep analysis in progress
+  backgroundLoadComplete: boolean;  // 30k load finished (map can render)
   packetCount: number;
   /** Status message for UI feedback */
   statusMessage: string;
@@ -45,9 +49,11 @@ class PacketCache {
     newestTimestamp: 0,
     lastUpdated: 0,
     packetCount: 0,
+    backgroundLoadComplete: false,
     deepLoadComplete: false,
   };
   private isLoading = false;
+  private isBackgroundLoading = false;
   private isDeepLoading = false;
   private listeners: Set<StateListener> = new Set();
 
@@ -77,7 +83,9 @@ class PacketCache {
   getState(): PacketCacheState {
     return {
       isLoading: this.isLoading,
+      isBackgroundLoading: this.isBackgroundLoading,
       isDeepLoading: this.isDeepLoading,
+      backgroundLoadComplete: this.meta.backgroundLoadComplete,
       packetCount: this.packets.size,
       statusMessage: this.statusMessage,
     };
@@ -102,7 +110,7 @@ class PacketCache {
 
   /**
    * Quick load: Fast 1K packet fetch for immediate usability
-   * Triggers deep load in background automatically
+   * Triggers 30K background load automatically for map/topology data
    */
   async quickLoad(): Promise<Packet[]> {
     // If stale (away > 1hr), clear and refetch
@@ -113,14 +121,14 @@ class PacketCache {
 
     // Return cached data immediately if we have any
     if (this.packets.size > 0) {
-      // Trigger deep load in background if not done
-      if (!this.meta.deepLoadComplete) {
-        this.deepLoad();
+      // Trigger background load if not done (30k for map)
+      if (!this.meta.backgroundLoadComplete) {
+        this.backgroundLoad();
       }
       return this.getPackets();
     }
 
-    // No cached data - do quick initial load
+    // No cached data - do quick initial load (1k)
     this.isLoading = true;
     this.statusMessage = 'Fetching recent packets...';
     this.notifyListeners();
@@ -144,14 +152,60 @@ class PacketCache {
       this.notifyListeners();
     }
 
-    // Trigger deep load in background
-    this.deepLoad();
+    // Trigger background load (30k) for map/topology
+    this.backgroundLoad();
 
     return this.getPackets();
   }
 
   /**
-   * Deep load: Background fetch of 20K packets for full topology
+   * Background load: 30K packets for map and topology data.
+   * Runs automatically after quick load, enables the contacts map.
+   */
+  async backgroundLoad(): Promise<void> {
+    if (this.meta.backgroundLoadComplete || this.isBackgroundLoading) {
+      return;
+    }
+
+    this.isBackgroundLoading = true;
+    this.statusMessage = 'Loading database...';
+    this.notifyListeners();
+
+    try {
+      // Update status periodically while fetching
+      const statusInterval = setInterval(() => {
+        if (this.isBackgroundLoading) {
+          this.statusMessage = `Loading ${BACKGROUND_FETCH_LIMIT.toLocaleString()} packets...`;
+          this.notifyListeners();
+        }
+      }, 500);
+
+      const response = await this.fetchRecentPackets(BACKGROUND_FETCH_LIMIT);
+      clearInterval(statusInterval);
+      
+      if (response.success && response.data) {
+        this.statusMessage = `Processing ${response.data.length.toLocaleString()} packets...`;
+        this.notifyListeners();
+        
+        const beforeCount = this.packets.size;
+        this.mergePackets(response.data);
+        this.meta.backgroundLoadComplete = true;
+        this.saveToStorage();
+        console.log(`[PacketCache] Background load: +${this.packets.size - beforeCount} packets, total: ${this.packets.size}`);
+      }
+    } catch (error) {
+      console.error('[PacketCache] Background load failed:', error);
+      this.statusMessage = 'Background load failed';
+    } finally {
+      this.isBackgroundLoading = false;
+      this.statusMessage = '';
+      this.notifyListeners();
+    }
+  }
+
+  /**
+   * Deep load: 50K packets for comprehensive topology analysis.
+   * User-triggered via "Deep Analysis" button.
    */
   async deepLoad(): Promise<void> {
     if (this.meta.deepLoadComplete || this.isDeepLoading) {
@@ -161,7 +215,7 @@ class PacketCache {
   }
 
   /**
-   * Force deep load: Always fetch, even if already complete.
+   * Force deep load: Always fetch 50K, even if already complete.
    * Used by "Deep Analysis" button to refresh topology data.
    */
   async forceDeepLoad(): Promise<void> {
@@ -248,6 +302,7 @@ class PacketCache {
       newestTimestamp: 0,
       lastUpdated: 0,
       packetCount: 0,
+      backgroundLoadComplete: false,
       deepLoadComplete: false,
     };
     this.clearStorage();

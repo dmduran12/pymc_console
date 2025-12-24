@@ -11,6 +11,7 @@
  */
 
 import type { Packet } from '@/types/api';
+import { isFloodRoute, isDirectRoute } from '@/types/api';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -105,12 +106,20 @@ function createEndpointKey(srcHash: string, dstHash: string): string {
 
 /**
  * Determine route type from packet's route field.
- * MeshCore: 0 = FLOOD, 1 = DIRECT, 2 = TRANSPORT
+ * 
+ * MeshCore route semantics (from Packet.h):
+ *   0 = ROUTE_TYPE_TRANSPORT_FLOOD - flood + transport codes
+ *   1 = ROUTE_TYPE_FLOOD - standard flood (most common)
+ *   2 = ROUTE_TYPE_DIRECT - pre-computed path
+ *   3 = ROUTE_TYPE_TRANSPORT_DIRECT - direct + transport codes
+ * 
+ * IMPORTANT: Route type indicates ROUTING METHOD, not hop count!
+ * A "direct" packet can still have multiple hops - it just has a pre-computed path.
  */
 function getRouteType(packet: Packet): 'flood' | 'direct' | 'unknown' {
   const route = packet.route ?? packet.route_type;
-  if (route === 0) return 'flood';
-  if (route === 1) return 'direct';
+  if (isFloodRoute(route)) return 'flood';
+  if (isDirectRoute(route)) return 'direct';
   return 'unknown';
 }
 

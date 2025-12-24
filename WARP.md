@@ -506,9 +506,65 @@ import type { Packet } from '@/types/api';
 
 ## Type Definitions
 
-Packet and stats types in `src/types/api.ts`. Notable constants:
-- `PAYLOAD_TYPES` - Maps packet type numbers to names (REQ, RESPONSE, TXT_MSG, ACK, ADVERT, etc.)
-- `ROUTE_TYPES` - Maps route types (UNKNOWN, DIRECT, FLOOD, TRANSPORT, T_FLOOD, T_DIRECT)
+Packet and stats types in `src/types/api.ts`.
+
+### MeshCore Packet Constants (CRITICAL)
+
+**Source of truth**: These values come from MeshCore's `Packet.h` and MUST match exactly.
+
+**ROUTE_TYPES** - Maps route type integers to names:
+```typescript
+// From MeshCore Packet.h:
+// ROUTE_TYPE_TRANSPORT_FLOOD = 0x00
+// ROUTE_TYPE_FLOOD = 0x01
+// ROUTE_TYPE_DIRECT = 0x02
+// ROUTE_TYPE_TRANSPORT_DIRECT = 0x03
+export const ROUTE_TYPES: Record<number, string> = {
+  0x00: 'T_FLOOD',   // Transport flood (0)
+  0x01: 'FLOOD',     // Flood routing (1)
+  0x02: 'DIRECT',    // Direct/unicast (2)
+  0x03: 'T_DIRECT',  // Transport direct (3)
+};
+```
+
+**IMPORTANT: Route type indicates ROUTING METHOD, not hop count!**
+- **FLOOD (0, 1)**: Broadcast routing - path is built by forwarders as packet propagates
+- **DIRECT (2, 3)**: Unicast routing with pre-computed path - but CAN STILL BE MULTI-HOP!
+- A DIRECT-routed packet with `path: ["FA", "79", "24", "19"]` has 4 hops via unicast
+- Zero-hop detection must use **path length**, not route type
+
+**PAYLOAD_TYPES** - Maps payload type integers to names:
+```typescript
+// From MeshCore Packet.h:
+export const PAYLOAD_TYPES: Record<number, string> = {
+  0x00: 'REQ',         // PAYLOAD_TYPE_REQ - request (dest/src hashes, MAC, enc data)
+  0x01: 'RESPONSE',    // PAYLOAD_TYPE_RESPONSE - response to REQ or ANON_REQ
+  0x02: 'TXT_MSG',     // PAYLOAD_TYPE_TXT_MSG - plain text message
+  0x03: 'ACK',         // PAYLOAD_TYPE_ACK - simple acknowledgment
+  0x04: 'ADVERT',      // PAYLOAD_TYPE_ADVERT - node advertising its Identity
+  0x05: 'GRP_TXT',     // PAYLOAD_TYPE_GRP_TXT - group text message (unverified)
+  0x06: 'GRP_DATA',    // PAYLOAD_TYPE_GRP_DATA - group datagram (unverified)
+  0x07: 'ANON_REQ',    // PAYLOAD_TYPE_ANON_REQ - anonymous request
+  0x08: 'PATH',        // PAYLOAD_TYPE_PATH - returned path response
+  0x09: 'TRACE',       // PAYLOAD_TYPE_TRACE - trace path, collecting SNR per hop
+  0x0A: 'MULTIPART',   // PAYLOAD_TYPE_MULTIPART - packet is part of a sequence
+  // 0x0B-0x0E reserved
+  0x0F: 'RAW_CUSTOM',  // PAYLOAD_TYPE_RAW_CUSTOM - custom raw bytes
+};
+```
+
+**Helper functions** (use these instead of magic numbers):
+```typescript
+import { isFloodRoute, isDirectRoute, ROUTE, PAYLOAD } from '@/types/api';
+
+// Route type checking
+if (isFloodRoute(packet.route)) { /* flood or transport flood */ }
+if (isDirectRoute(packet.route)) { /* direct or transport direct */ }
+
+// Numeric constants for direct comparison
+if (packet.route === ROUTE.FLOOD) { ... }
+if (packet.type === PAYLOAD.ADVERT) { ... }
+```
 
 ## Design System (Tailwind CSS 4)
 

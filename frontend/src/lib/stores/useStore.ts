@@ -404,12 +404,25 @@ const store = create<StoreState>((set, get) => ({
     set({ initialized: true, statsLoading: true, packetsLoading: true });
     
     // Subscribe to packet cache state changes
-    // When deep load completes, update packets with the full cache
+    // Update packets when background load (30k) or deep load (50k) completes
+    let wasBackgroundLoading = false;
     let wasDeepLoading = false;
     packetCache.subscribe((cacheState) => {
       set({ packetCacheState: cacheState });
       
-      // Detect when deep load just finished
+      // Detect when background load (30k) just finished
+      if (wasBackgroundLoading && !cacheState.isBackgroundLoading) {
+        const allPackets = packetCache.getPackets();
+        if (allPackets.length > 0) {
+          set({ packets: allPackets });
+          // Recompute topology with full packet set AND update quick neighbors
+          get().triggerTopologyCompute();
+          get().updateQuickNeighbors();
+        }
+      }
+      wasBackgroundLoading = cacheState.isBackgroundLoading;
+      
+      // Detect when deep load (50k) just finished
       if (wasDeepLoading && !cacheState.isDeepLoading) {
         const allPackets = packetCache.getPackets();
         if (allPackets.length > 0) {
@@ -426,7 +439,7 @@ const store = create<StoreState>((set, get) => ({
     try {
       const [stats, packets] = await Promise.all([
         api.getStats(),
-        packetCache.quickLoad(), // Fast 1K load, triggers 20K background load
+        packetCache.quickLoad(), // Fast 1K load, triggers 30K background load
       ]);
       
       set({ stats, statsLoading: false });

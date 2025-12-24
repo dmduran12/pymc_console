@@ -249,29 +249,114 @@ export interface GraphData {
   series: GraphDataSeries[];
 }
 
-// Packet type constants
+// ═══════════════════════════════════════════════════════════════════════════════
+// MeshCore Packet Constants (from MeshCore/src/Packet.h)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// IMPORTANT: These constants MUST match MeshCore's Packet.h definitions exactly.
+// Any mismatch will cause incorrect packet interpretation.
+//
+// Reference: https://github.com/ripplebiz/MeshCore/blob/main/src/Packet.h
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * MeshCore payload types (from Packet.h PAYLOAD_TYPE_* defines).
+ * 
+ * The payload type indicates what kind of data the packet carries.
+ * Extracted from header bits 2-5 (4 bits, mask 0x0F after shift).
+ */
 export const PAYLOAD_TYPES: Record<number, string> = {
-  0: 'REQ',
-  1: 'RESPONSE',
-  2: 'TXT_MSG',
-  3: 'ACK',
-  4: 'ADVERT',
-  5: 'GRP_TXT',
-  6: 'GRP_DATA',
-  7: 'ANON_REQ',
-  8: 'PATH',
-  9: 'TRACE',
-  10: 'RAW_CUSTOM',
+  0x00: 'REQ',         // PAYLOAD_TYPE_REQ - request (dest/src hashes, MAC, enc data)
+  0x01: 'RESPONSE',    // PAYLOAD_TYPE_RESPONSE - response to REQ or ANON_REQ
+  0x02: 'TXT_MSG',     // PAYLOAD_TYPE_TXT_MSG - plain text message
+  0x03: 'ACK',         // PAYLOAD_TYPE_ACK - simple acknowledgment
+  0x04: 'ADVERT',      // PAYLOAD_TYPE_ADVERT - node advertising its Identity
+  0x05: 'GRP_TXT',     // PAYLOAD_TYPE_GRP_TXT - group text message (unverified)
+  0x06: 'GRP_DATA',    // PAYLOAD_TYPE_GRP_DATA - group datagram (unverified)
+  0x07: 'ANON_REQ',    // PAYLOAD_TYPE_ANON_REQ - anonymous request
+  0x08: 'PATH',        // PAYLOAD_TYPE_PATH - returned path response
+  0x09: 'TRACE',       // PAYLOAD_TYPE_TRACE - trace path, collecting SNR per hop
+  0x0A: 'MULTIPART',   // PAYLOAD_TYPE_MULTIPART - packet is part of a sequence
+  // 0x0B-0x0E reserved for future use
+  0x0F: 'RAW_CUSTOM',  // PAYLOAD_TYPE_RAW_CUSTOM - custom raw bytes
 };
 
+/**
+ * MeshCore route types (from Packet.h ROUTE_TYPE_* defines).
+ * 
+ * The route type indicates HOW the packet is routed through the mesh:
+ * - FLOOD: Broadcast mode where each forwarder adds themselves to the path
+ * - DIRECT: Unicast mode with a pre-computed path (can still be multi-hop!)
+ * - Transport variants include transport codes for encrypted routing
+ * 
+ * Extracted from header bits 0-1 (2 bits, mask 0x03).
+ * 
+ * CRITICAL DISTINCTION:
+ * - Route type indicates the ROUTING METHOD, not hop count
+ * - A "DIRECT" packet can have multiple hops (it just has a pre-computed path)
+ * - Zero-hop detection must use path length, NOT route type
+ * - Use `isZeroHop()` helper function for true direct RF contact detection
+ */
 export const ROUTE_TYPES: Record<number, string> = {
-  0: 'UNKNOWN',
-  1: 'DIRECT',
-  2: 'FLOOD',
-  3: 'TRANSPORT',
-  4: 'T_FLOOD',   // Transport flood
-  5: 'T_DIRECT',  // Transport direct
+  0x00: 'T_FLOOD',     // ROUTE_TYPE_TRANSPORT_FLOOD - flood mode + transport codes
+  0x01: 'FLOOD',       // ROUTE_TYPE_FLOOD - flood mode, path built up by forwarders
+  0x02: 'DIRECT',      // ROUTE_TYPE_DIRECT - direct route, path is pre-supplied
+  0x03: 'T_DIRECT',    // ROUTE_TYPE_TRANSPORT_DIRECT - direct route + transport codes
 };
+
+/**
+ * MeshCore route type numeric constants for code clarity.
+ * Use these instead of magic numbers when checking route types.
+ */
+export const ROUTE = {
+  TRANSPORT_FLOOD: 0x00,  // Flood with transport codes
+  FLOOD: 0x01,            // Standard flood (most common)
+  DIRECT: 0x02,           // Pre-computed path
+  TRANSPORT_DIRECT: 0x03, // Direct with transport codes
+} as const;
+
+/**
+ * MeshCore payload type numeric constants for code clarity.
+ * Use these instead of magic numbers when checking payload types.
+ */
+export const PAYLOAD = {
+  REQ: 0x00,
+  RESPONSE: 0x01,
+  TXT_MSG: 0x02,
+  ACK: 0x03,
+  ADVERT: 0x04,
+  GRP_TXT: 0x05,
+  GRP_DATA: 0x06,
+  ANON_REQ: 0x07,
+  PATH: 0x08,
+  TRACE: 0x09,
+  MULTIPART: 0x0A,
+  RAW_CUSTOM: 0x0F,
+} as const;
+
+/**
+ * Check if a route type uses flood routing (broadcast to all neighbors).
+ * Flood-routed packets have their path built up as they traverse the mesh.
+ */
+export function isFloodRoute(routeType: number | undefined): boolean {
+  return routeType === ROUTE.FLOOD || routeType === ROUTE.TRANSPORT_FLOOD;
+}
+
+/**
+ * Check if a route type uses direct routing (pre-computed path).
+ * Direct-routed packets follow a predetermined path - but can still be multi-hop!
+ */
+export function isDirectRoute(routeType: number | undefined): boolean {
+  return routeType === ROUTE.DIRECT || routeType === ROUTE.TRANSPORT_DIRECT;
+}
+
+/**
+ * Check if a route type includes transport codes.
+ * Transport codes are used for encrypted mesh routing.
+ */
+export function hasTransportCodes(routeType: number | undefined): boolean {
+  return routeType === ROUTE.TRANSPORT_FLOOD || routeType === ROUTE.TRANSPORT_DIRECT;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Identity Management Types (feat/identity branch)

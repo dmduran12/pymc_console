@@ -49,7 +49,7 @@
  * ╚═══════════════════════════════════════════════════════════════════════════════╝
  */
 
-import { Packet, NeighborInfo } from '@/types/api';
+import { Packet, NeighborInfo, isFloodRoute, isDirectRoute } from '@/types/api';
 import { 
   buildPrefixLookup, 
   resolvePrefix, 
@@ -382,9 +382,12 @@ interface EdgeAccumulator {
   reverseCount: number;
   
   // === FLOOD vs DIRECT TRACKING (Phase 3) ===
-  /** Observations from flood-routed packets (route_type 0) */
+  // NOTE: Route type indicates ROUTING METHOD, not hop count!
+  // FLOOD (0,1) = broadcast, path built by forwarders
+  // DIRECT (2,3) = unicast with pre-computed path (can still be multi-hop!)
+  /** Observations from flood-routed packets (ROUTE.FLOOD=1 or ROUTE.TRANSPORT_FLOOD=0) */
   floodCount: number;
-  /** Observations from direct-routed packets (route_type 1) */
+  /** Observations from direct-routed packets (ROUTE.DIRECT=2 or ROUTE.TRANSPORT_DIRECT=3) */
   directCount: number;
   
   // === RECENCY TRACKING ===
@@ -1694,7 +1697,8 @@ export function buildMeshTopology(
   
   // Helper to add/update edge accumulator
   // actualFrom/actualTo represent the real direction of traffic flow (for directional tracking)
-  // routeType: 0=flood, 1=direct, 2=transport, undefined=unknown
+  // routeType: MeshCore route type from packet header (see ROUTE constants in api.ts)
+  //   0 = TRANSPORT_FLOOD, 1 = FLOOD, 2 = DIRECT, 3 = TRANSPORT_DIRECT
   // packetTimestamp: unix timestamp (seconds) of the packet for recency scoring
   const addEdgeObservation = (
     actualFrom: string,
@@ -1716,9 +1720,12 @@ export function buildMeshTopology(
       : [actualTo, actualFrom];
     const isForward = actualFrom === canonicalFrom; // Traffic matches canonical direction
     
-    // Determine if this is flood or direct routed
-    const isFlood = routeType === 0 || routeType === undefined; // Default to flood if unknown
-    const isDirect = routeType === 1;
+    // Determine if this is flood or direct routed using MeshCore semantics:
+    // FLOOD (0,1): Broadcast routing where path is built by forwarders
+    // DIRECT (2,3): Unicast with pre-computed path (can still be multi-hop!)
+    // Default to flood if unknown since flood is most common
+    const isFlood = isFloodRoute(routeType) || routeType === undefined;
+    const isDirect = isDirectRoute(routeType);
     
     // Calculate recency score for this observation
     const recencyScore = calculateRecencyScore(packetTimestamp);
