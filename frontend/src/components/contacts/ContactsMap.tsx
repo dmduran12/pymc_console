@@ -23,7 +23,7 @@ const MARKER_SIZE = 14;
 const RING_THICKNESS = 5;
 // Outer ring for neighbor indicator
 const NEIGHBOR_OUTER_RING_SIZE = 20;  // Larger than marker to show as outer glow/ring
-const NEIGHBOR_RING_THICKNESS = 2;    // Thin outer ring
+const NEIGHBOR_RING_THICKNESS = 1;    // 1px thin outer ring (subtle)
 
 // Design palette - sophisticated, minimal, low contrast against dark map
 const DESIGN = {
@@ -37,8 +37,8 @@ const DESIGN = {
   mobileColor: '#F97316',      // Orange-500 - indicates volatile/mobile node
   // Room server indicator - amber/gold (chat/server functionality)
   roomServerColor: '#F59E0B',  // Amber-500 - indicates room server node
-  // Zero-hop neighbor - success green (direct RF contact)
-  neighborColor: '#39D98A',    // accent-success - matches forward button
+  // Zero-hop neighbor - yellow (matches home icon semantic: "connected to home")
+  neighborColor: '#FBBF24',    // Amber-400 - same as localColor
   
   // ─── EDGE COLOR SYSTEM ─────────────────────────────────────────────────────
   // At rest: All edges are gray (calm, unified look)
@@ -53,11 +53,11 @@ const DESIGN = {
     hoverDirect: '#5EEAD4',    // Teal-300 - direct path edges
     hoverLoop: '#6366F1',      // Indigo-500 - loop/redundant edges
     hoverStandard: '#9CA3AF',  // Gray-400 - standard edges brighten
-    hoverNeighbor: '#39D98A',  // accent-success - neighbor edges
+    hoverNeighbor: '#FBBF24',  // Amber-400 - yellow neighbor edges (matches home icon)
     
     // Neighbor edges (always visible as dashed) - rest vs hover
     neighborRest: '#6B7280',   // Gray-500 - subtle dashed gray
-    neighborHover: '#39D98A',  // accent-success - green on hover
+    neighborHover: '#FBBF24',  // Amber-400 - yellow on hover (matches home icon)
   },
   
   // Base opacity for edges (increased from 0.7 for better visibility)
@@ -2104,7 +2104,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         {/* Note: Uncertain edges are no longer rendered - only validated (3+) topology shown */}
         
         {/* Draw neighbor edges (direct RF links to local) - dashed, always visible */}
-        {/* At rest: gray dashed. On hover: green dashed (reveals neighbor type) */}
+        {/* At rest: gray dashed. On hover: yellow dashed (matches home icon semantic) */}
         {/* Uses topology-computed avgRssi/avgSnr when available (from lastHopNeighbors) */}
         {neighborPolylines.map(({ from, to, hash, neighbor, lastHopData }) => {
           const name = neighbor.node_name || neighbor.name || hash.slice(0, 8);
@@ -2115,12 +2115,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           const packetCount = lastHopData?.count;
           const confidence = lastHopData?.confidence;
           
-          // Hover state: gray at rest, green on hover (matches new visual system)
+          // Hover state: gray at rest, yellow on hover (matches home icon semantic)
           const neighborEdgeKey = `neighbor-${hash}`;
           const isNeighborHovered = hoveredEdgeKey === neighborEdgeKey;
           const neighborColor = isNeighborHovered ? DESIGN.edges.neighborHover : DESIGN.edges.neighborRest;
           const neighborWeight = isNeighborHovered ? 2.5 : 1.5;
-          const neighborOpacity = isNeighborHovered ? 1 : 0.75;
+          const neighborOpacity = isNeighborHovered ? 1 : 0.6;  // 20% dimmer at rest
           
           return (
             <Polyline
@@ -2146,7 +2146,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
               >
                 <div className="text-xs">
                   <div className="font-medium text-text-primary">
-                    <span className="text-accent-success">●</span> {name}
+                    <span className="text-amber-400">●</span> {name}
                     {lastHopData?.prefix && (
                       <span className="ml-1 text-text-muted font-mono text-[10px]">
                         ({lastHopData.prefix})
@@ -2167,7 +2167,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                       {confidence !== undefined && ` • ${Math.round(confidence * 100)}% conf`}
                     </div>
                   )}
-                  <div className="text-accent-success text-[10px] mt-0.5">Direct RF neighbor</div>
+                  <div className="text-amber-400 text-[10px] mt-0.5">Direct RF neighbor</div>
                 </div>
               </Tooltip>
             </Polyline>
@@ -2233,12 +2233,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           
           // Icon selection with opacity, hover state, and neighbor indicator:
           // Base type priority: Room Server > Hub > Mobile > Standard
-          // Neighbor indicator: green outer ring added to ANY base type if node is zero-hop
+          // Neighbor indicator: yellow outer ring (1px) added to ANY base type if node is zero-hop
           // 
-          // - Room servers: amber chat bubble icon (+ green ring if neighbor)
-          // - Hubs: filled indigo dot (+ green ring if neighbor)
-          // - Mobile nodes: orange ring (+ green ring if neighbor)
-          // - Standard nodes: indigo ring (+ green ring if neighbor)
+          // - Room servers: amber chat bubble icon (+ yellow ring if neighbor)
+          // - Hubs: filled indigo dot (+ yellow ring if neighbor)
+          // - Mobile nodes: orange ring (+ yellow ring if neighbor)
+          // - Standard nodes: indigo ring (+ yellow ring if neighbor)
           // Quantize opacity to 20 steps for smooth-ish animation without too many remounts
           const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
           const isNodeHovered = hoveredMarker === hash;
@@ -2448,7 +2448,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           {/* Node types legend */}
           <div className="text-text-secondary font-medium mb-1.5 flex items-center gap-1">
             Nodes
-            <LegendTooltip text="Node type shown by shape/color. Green outer ring = direct RF neighbor." />
+            <LegendTooltip text="Node type shown by shape/color. Yellow outer ring = direct RF neighbor." />
           </div>
           <div className="flex flex-col gap-1">
             {/* Ring node indicator - thick ring like actual markers */}
@@ -2512,20 +2512,20 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                 <span className="text-text-muted">Mobile</span>
               </div>
             )}
-            {/* Neighbor indicator - green outer ring overlay (shown on any node type) */}
+            {/* Neighbor indicator - yellow outer ring overlay (shown on any node type) */}
             {zeroHopNeighbors.size > 0 && (
               <div className="flex items-center gap-1.5">
                 <div 
                   className="relative w-4 h-4 flex-shrink-0"
                 >
-                  {/* Outer green ring */}
+                  {/* Outer yellow ring (matches home icon) */}
                   <div 
                     className="absolute inset-0 rounded-full"
                     style={{ 
                       background: 'transparent',
-                      border: `1.5px solid ${DESIGN.neighborColor}`,
+                      border: `1px solid ${DESIGN.neighborColor}`,
                       boxSizing: 'border-box',
-                      opacity: 0.7,
+                      opacity: 0.8,
                     }}
                   />
                   {/* Inner node indicator */}
@@ -2561,7 +2561,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
                   }}
                 />
                 <span className="text-text-muted">Neighbor</span>
-                <LegendTooltip text="Dashed gray → green on hover. Direct RF contact with local." />
+                <LegendTooltip text="Dashed gray → yellow on hover. Direct RF contact with local." />
               </div>
             </div>
           )}
