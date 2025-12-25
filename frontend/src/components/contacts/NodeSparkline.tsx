@@ -79,12 +79,25 @@ export function computeNodeSparkline(
     // This matches topology's affinity.frequency counting
     let isInvolved = false;
     
-    // Check forwarded_path first (preferred)
-    const path = packet.forwarded_path ?? packet.original_path;
-    if (path && Array.isArray(path)) {
+    // Get path - may be array or JSON string
+    let rawPath: string | string[] | undefined = packet.forwarded_path ?? packet.original_path;
+    let path: string[] | null = null;
+    
+    // Handle JSON string format (common from API)
+    if (typeof rawPath === 'string') {
+      try {
+        path = JSON.parse(rawPath);
+      } catch {
+        path = null;
+      }
+    } else if (Array.isArray(rawPath)) {
+      path = rawPath;
+    }
+    
+    if (path && Array.isArray(path) && path.length > 0) {
       for (const hop of path) {
         // Path hops are 2-char prefixes, compare directly (case-insensitive)
-        if (hop.toUpperCase() === prefix) {
+        if (String(hop).toUpperCase() === prefix) {
           isInvolved = true;
           break;
         }
@@ -92,7 +105,7 @@ export function computeNodeSparkline(
     }
     
     // Also check src_hash for direct packets (empty path)
-    if (!isInvolved && (!path || path.length === 0) && packet.src_hash) {
+    if (!isInvolved && (!path || !Array.isArray(path) || path.length === 0) && packet.src_hash) {
       if (prefixMatches(prefix, packet.src_hash)) isInvolved = true;
     }
     
