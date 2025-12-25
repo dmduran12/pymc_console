@@ -487,6 +487,17 @@ const store = create<StoreState>((set, get) => ({
         get().fetchPackets();
       }
     }, POLLING_INTERVALS.packets);
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // AUTO-ADVERT ON STARTUP
+    // Workaround for radio initialization bug where RX doesn't work until first TX.
+    // Send an advert 3 seconds after app init to "wake up" the radio.
+    // ═══════════════════════════════════════════════════════════════════════════
+    setTimeout(() => {
+      get().sendAdvert().catch(() => {
+        // Silently ignore errors - this is just a wake-up call
+      });
+    }, 3000);
   },
   
   // Prefetch data for a route before navigation (called on hover)
