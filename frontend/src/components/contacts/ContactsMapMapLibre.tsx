@@ -433,18 +433,20 @@ export default function ContactsMapMapLibre({
           mapStyle={MAP_STYLE}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
-          // Darken map labels (city names) from ~50% gray to ~33% gray
+          // Darken map labels and use Inter font to match app
           onLoad={(e) => {
             const map = e.target;
-            // Find and darken text layers (place labels, road labels, etc.)
             const style = map.getStyle();
             if (style?.layers) {
               for (const layer of style.layers) {
-                if (layer.type === 'symbol' && layer.id.includes('label')) {
-                  // Darken text color to ~33% gray
-                  map.setPaintProperty(layer.id, 'text-color', 'rgba(85, 85, 85, 1)');
-                  // Also darken any halo
-                  map.setPaintProperty(layer.id, 'text-halo-color', 'rgba(0, 0, 0, 0.7)');
+                if (layer.type === 'symbol') {
+                  // Darken all text to ~20% gray (very subtle, matches dark map aesthetic)
+                  map.setPaintProperty(layer.id, 'text-color', 'rgba(50, 52, 58, 1)');
+                  // Darken halo to near-black for subtle contrast
+                  map.setPaintProperty(layer.id, 'text-halo-color', 'rgba(8, 9, 11, 0.9)');
+                  map.setPaintProperty(layer.id, 'text-halo-width', 1);
+                  // Use Inter font (app's display font) with fallbacks
+                  map.setLayoutProperty(layer.id, 'text-font', ['Inter', 'Open Sans Regular', 'Arial Unicode MS Regular']);
                 }
               }
             }
