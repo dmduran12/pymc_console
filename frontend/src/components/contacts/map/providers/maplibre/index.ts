@@ -35,10 +35,10 @@ export {
 export { NodeMarkers } from './NodeMarkers';
 export type { NodeMarkersProps, LocalNode } from './NodeMarkers';
 
-export { TopologyEdges } from './TopologyEdges';
+export { TopologyEdges, TOPOLOGY_EDGE_LAYER_IDS } from './TopologyEdges';
 export type { TopologyEdgesProps, EdgePolylineData, EdgeFeatureProperties } from './TopologyEdges';
 
-export { NeighborEdges } from './NeighborEdges';
+export { NeighborEdges, NEIGHBOR_EDGE_LAYER_IDS } from './NeighborEdges';
 export type { NeighborEdgesProps, NeighborPolylineData, NeighborEdgeProperties } from './NeighborEdges';
 
 // Map helpers

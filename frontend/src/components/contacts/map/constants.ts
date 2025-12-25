@@ -21,6 +21,12 @@ export const NEIGHBOR_OUTER_RING_SIZE = 20;
 /** Neighbor ring thickness (subtle 1px outer ring) */
 export const NEIGHBOR_RING_THICKNESS = 1;
 
+/** 
+ * Invisible hit area size for improved hover/click detection.
+ * Much larger than visual marker for easy interaction.
+ */
+export const HIT_AREA_SIZE = 32;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Color Palette
 // ═══════════════════════════════════════════════════════════════════════════════

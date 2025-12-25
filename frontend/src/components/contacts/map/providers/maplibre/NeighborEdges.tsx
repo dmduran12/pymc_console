@@ -13,8 +13,8 @@
  * @module providers/maplibre/NeighborEdges
  */
 
-import { useMemo, useState, useCallback } from 'react';
-import { Source, Layer, Popup } from 'react-map-gl/maplibre';
+import { useMemo } from 'react';
+import { Source, Layer } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import type { NeighborInfo } from '@/types/api';
 import type { LastHopNeighbor } from '@/lib/mesh-topology';
@@ -140,62 +140,20 @@ const neighborEdgesLayerStyle: LayerProps = {
   },
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Tooltip Content Component
-// ═══════════════════════════════════════════════════════════════════════════════
-
-interface NeighborTooltipContentProps {
-  name: string;
-  prefix?: string;
-  rssi?: number | null;
-  snr?: number | null;
-  packetCount?: number;
-  confidence?: number;
-  hasAvgRssi: boolean;
-  hasAvgSnr: boolean;
-}
-
-function NeighborTooltipContent({
-  name,
-  prefix,
-  rssi,
-  snr,
-  packetCount,
-  confidence,
-  hasAvgRssi,
-  hasAvgSnr,
-}: NeighborTooltipContentProps) {
-  return (
-    <div className="text-xs">
-      <div className="font-medium text-text-primary">
-        <span className="text-amber-400">●</span> {name}
-        {prefix && (
-          <span className="ml-1 text-text-muted font-mono text-[10px]">
-            ({prefix})
-          </span>
-        )}
-      </div>
-      
-      <div className="text-text-secondary flex gap-2">
-        {rssi !== undefined && rssi !== null && (
-          <span>RSSI: {Math.round(rssi)} dBm{hasAvgRssi && ' avg'}</span>
-        )}
-        {snr !== undefined && snr !== null && (
-          <span>SNR: {snr.toFixed(1)} dB{hasAvgSnr && ' avg'}</span>
-        )}
-      </div>
-      
-      {packetCount !== undefined && (
-        <div className="text-text-muted text-[10px]">
-          {packetCount.toLocaleString()} packets
-          {confidence !== undefined && ` • ${Math.round(confidence * 100)}% conf`}
-        </div>
-      )}
-      
-      <div className="text-amber-400 text-[10px] mt-0.5">Direct RF neighbor</div>
-    </div>
-  );
-}
+// Invisible hit-area layer for better neighbor edge interactivity
+const neighborEdgesHitAreaStyle: LayerProps = {
+  id: 'neighbor-edges-hitarea',
+  type: 'line',
+  paint: {
+    'line-color': 'transparent',
+    'line-width': 16, // Much wider than visual edges for easy hover
+    'line-opacity': 0,
+  },
+  layout: {
+    'line-cap': 'round',
+    'line-join': 'round',
+  },
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -208,15 +166,8 @@ function NeighborTooltipContent({
 export function NeighborEdges({
   neighborPolylines,
   hoveredEdgeKey,
-  onEdgeHover,
+  onEdgeHover: _onEdgeHover, // Hover handled at map level now
 }: NeighborEdgesProps) {
-  // Tooltip state
-  const [tooltipInfo, setTooltipInfo] = useState<{
-    longitude: number;
-    latitude: number;
-    properties: NeighborEdgeProperties;
-  } | null>(null);
-  
   // Whether we have data to render
   const hasData = neighborPolylines.length > 0;
   
@@ -226,69 +177,27 @@ export function NeighborEdges({
     [neighborPolylines, hoveredEdgeKey, hasData]
   );
   
-  // Mouse event handlers for edges (to be wired up at Map level)
-  const _handleMouseEnter = useCallback((e: maplibregl.MapLayerMouseEvent) => {
-    if (e.features && e.features.length > 0) {
-      const feature = e.features[0];
-      const props = feature.properties as NeighborEdgeProperties;
-      onEdgeHover(props.key);
-      
-      // Set tooltip at mouse position
-      if (e.lngLat) {
-        setTooltipInfo({
-          longitude: e.lngLat.lng,
-          latitude: e.lngLat.lat,
-          properties: props,
-        });
-      }
-    }
-  }, [onEdgeHover]);
-  
-  const _handleMouseLeave = useCallback(() => {
-    onEdgeHover(null);
-    setTooltipInfo(null);
-  }, [onEdgeHover]);
-  
-  // Export handlers for parent to use  
-  void _handleMouseEnter;
-  void _handleMouseLeave;
-  
   // Early return after all hooks
   if (!hasData) {
     return null;
   }
   
   return (
-    <>
-      <Source id="neighbor-edges" type="geojson" data={neighborEdgesData}>
-        <Layer {...neighborEdgesLayerStyle} />
-      </Source>
-      
-      {/* ─── NEIGHBOR TOOLTIP ───────────────────────────────────────────────── */}
-      {tooltipInfo && (
-        <Popup
-          longitude={tooltipInfo.longitude}
-          latitude={tooltipInfo.latitude}
-          anchor="bottom"
-          closeButton={false}
-          closeOnClick={false}
-          className="topology-edge-tooltip maplibre-popup"
-        >
-          <NeighborTooltipContent
-            name={tooltipInfo.properties.name}
-            prefix={tooltipInfo.properties.prefix}
-            rssi={tooltipInfo.properties.rssi}
-            snr={tooltipInfo.properties.snr}
-            packetCount={tooltipInfo.properties.packetCount}
-            confidence={tooltipInfo.properties.confidence}
-            hasAvgRssi={tooltipInfo.properties.hasAvgRssi}
-            hasAvgSnr={tooltipInfo.properties.hasAvgSnr}
-          />
-        </Popup>
-      )}
-    </>
+    <Source id="neighbor-edges" type="geojson" data={neighborEdgesData}>
+      {/* Hit-area layer (invisible, wider for easy hover detection) - rendered first (below) */}
+      <Layer {...neighborEdgesHitAreaStyle} />
+      {/* Visual layer */}
+      <Layer {...neighborEdgesLayerStyle} />
+      {/* Note: Tooltips handled at map level for proper interactivity */}
+    </Source>
   );
 }
 
-// Export types needed by parent
+// Export types and constants needed by parent
 export type { NeighborEdgeProperties };
+
+// Layer IDs for interactiveLayerIds
+export const NEIGHBOR_EDGE_LAYER_IDS = [
+  'neighbor-edges-hitarea',
+  'neighbor-edges',
+] as const;

@@ -9,8 +9,8 @@
  */
 
 import { useMemo, useState, useCallback, useRef } from 'react';
-import MapGL, { NavigationControl, ScaleControl } from 'react-map-gl/maplibre';
-import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
+import MapGL, { NavigationControl, ScaleControl, Popup } from 'react-map-gl/maplibre';
+import type { MapRef, ViewStateChangeEvent, MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 import type { NeighborInfo } from '@/types/api';
@@ -38,9 +38,13 @@ import {
   FitBoundsOnce,
   ZoomToNode,
   EdgeHighlighter,
+  TOPOLOGY_EDGE_LAYER_IDS,
+  NEIGHBOR_EDGE_LAYER_IDS,
   type EdgePolylineData,
   type NeighborPolylineData,
   type LocalNode,
+  type EdgeFeatureProperties,
+  type NeighborEdgeProperties,
 } from './map/providers/maplibre';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -69,6 +73,77 @@ interface ContactsMapProps {
   selectedNodeHash?: string | null;
   onNodeSelected?: () => void;
   highlightedEdgeKey?: string | null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Edge Tooltip Content
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface EdgeTooltipContentProps {
+  type: 'topology' | 'neighbor';
+  properties: EdgeFeatureProperties | NeighborEdgeProperties;
+  maxCertainCount: number;
+}
+
+/**
+ * Unified tooltip content for both topology and neighbor edges.
+ * Rendered at map level for proper interactivity with hit-area layers.
+ */
+function EdgeTooltipContent({ type, properties, maxCertainCount }: EdgeTooltipContentProps) {
+  if (type === 'neighbor') {
+    const props = properties as NeighborEdgeProperties;
+    return (
+      <div className="text-xs">
+        <div className="font-medium text-text-primary">
+          <span className="text-amber-400">●</span> {props.name}
+          {props.prefix && (
+            <span className="ml-1 text-text-muted font-mono text-[10px]">
+              ({props.prefix})
+            </span>
+          )}
+        </div>
+        <div className="text-text-secondary flex gap-2">
+          {props.rssi !== undefined && props.rssi !== null && (
+            <span>RSSI: {Math.round(props.rssi)} dBm{props.hasAvgRssi && ' avg'}</span>
+          )}
+          {props.snr !== undefined && props.snr !== null && (
+            <span>SNR: {Number(props.snr).toFixed(1)} dB{props.hasAvgSnr && ' avg'}</span>
+          )}
+        </div>
+        {props.packetCount !== undefined && (
+          <div className="text-text-muted text-[10px]">
+            {Number(props.packetCount).toLocaleString()} packets
+            {props.confidence !== undefined && ` • ${Math.round(Number(props.confidence) * 100)}% conf`}
+          </div>
+        )}
+        <div className="text-amber-400 text-[10px] mt-0.5">Direct RF neighbor</div>
+      </div>
+    );
+  }
+  
+  // Topology edge
+  const props = properties as EdgeFeatureProperties;
+  const linkQuality = maxCertainCount > 0 ? (Number(props.certainCount) / maxCertainCount) : 0;
+  
+  return (
+    <div className="text-xs">
+      <div className="font-medium text-text-primary">
+        {props.fromName} ↔ {props.toName}
+      </div>
+      <div className="text-text-secondary">
+        {props.certainCount} validations ({Math.round(linkQuality * 100)}%) • {Math.round(Number(props.confidence) * 100)}% conf
+      </div>
+      {props.isBackbone && (
+        <div className="text-gray-300 font-semibold">Backbone</div>
+      )}
+      {props.isLoopEdge && (
+        <div className="text-indigo-400 text-[10px] mt-0.5">Redundant path</div>
+      )}
+      {props.isDirectPath && (
+        <div className="text-teal-400 text-[10px]">Direct path</div>
+      )}
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -109,6 +184,14 @@ export default function ContactsMapMapLibre({
   const [analysisStep, setAnalysisStep] = useState<'fetching' | 'analyzing' | 'building' | 'complete'>('fetching');
   const [isDeepLoading, setIsDeepLoading] = useState(false);
   const [deepPacketCount, setDeepPacketCount] = useState(0);
+  
+  // ─── EDGE TOOLTIP STATE (managed at map level for interactivity) ────────────
+  const [edgeTooltip, setEdgeTooltip] = useState<{
+    longitude: number;
+    latitude: number;
+    type: 'topology' | 'neighbor';
+    properties: EdgeFeatureProperties | NeighborEdgeProperties;
+  } | null>(null);
   
   // ─── DERIVED DATA ──────────────────────────────────────────────────────────
   
@@ -416,6 +499,61 @@ export default function ContactsMapMapLibre({
     setRemoveConfirmName('');
   }, [removeConfirmHash, onRemoveNode]);
   
+  // ─── EDGE INTERACTION HANDLERS (for interactiveLayerIds) ──────────────────
+  
+  // Combine layer IDs for interactivity
+  const interactiveLayerIds = useMemo(() => [
+    ...TOPOLOGY_EDGE_LAYER_IDS,
+    ...NEIGHBOR_EDGE_LAYER_IDS,
+  ], []);
+  
+  // Handle edge mouse move for hover state and tooltip
+  const handleEdgeMouseMove = useCallback((e: MapLayerMouseEvent) => {
+    if (!e.features || e.features.length === 0) return;
+    
+    const feature = e.features[0];
+    const layerId = feature.layer?.id;
+    const props = feature.properties;
+    
+    if (!props?.key) return;
+    
+    // Determine if topology edge or neighbor edge
+    const isTopologyEdge = layerId?.startsWith('topology-');
+    const isNeighborEdge = layerId?.startsWith('neighbor-');
+    
+    if (isTopologyEdge || isNeighborEdge) {
+      // Extract base key (remove -loop1/-loop2 suffix for topology)
+      const baseKey = props.key.replace(/-loop[12]$/, '');
+      setHoveredEdgeKey(baseKey);
+      
+      // Update tooltip position
+      if (e.lngLat) {
+        setEdgeTooltip({
+          longitude: e.lngLat.lng,
+          latitude: e.lngLat.lat,
+          type: isTopologyEdge ? 'topology' : 'neighbor',
+          properties: props as EdgeFeatureProperties | NeighborEdgeProperties,
+        });
+      }
+    }
+    
+    // Change cursor to pointer over edges
+    if (mapRef.current) {
+      mapRef.current.getCanvas().style.cursor = 'pointer';
+    }
+  }, []);
+  
+  // Handle edge mouse leave
+  const handleEdgeMouseLeave = useCallback(() => {
+    setHoveredEdgeKey(null);
+    setEdgeTooltip(null);
+    
+    // Reset cursor
+    if (mapRef.current) {
+      mapRef.current.getCanvas().style.cursor = '';
+    }
+  }, []);
+  
   // ─── RENDER ────────────────────────────────────────────────────────────────
   
   const containerHeight = isFullscreen ? 'h-screen' : 'h-[500px]';
@@ -433,6 +571,10 @@ export default function ContactsMapMapLibre({
           mapStyle={MAP_STYLE}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
+          // Interactive layers for edge hover/click
+          interactiveLayerIds={interactiveLayerIds}
+          onMouseMove={handleEdgeMouseMove}
+          onMouseLeave={handleEdgeMouseLeave}
           // Darken map labels and use Inter font to match app
           onLoad={(e) => {
             const map = e.target;
@@ -511,6 +653,24 @@ export default function ContactsMapMapLibre({
             shouldShowNode={shouldShowNode}
             onRequestRemove={onRemoveNode ? handleRequestRemove : undefined}
           />
+          
+          {/* ─── EDGE TOOLTIP (rendered at map level for interactivity) ─────────── */}
+          {edgeTooltip && (
+            <Popup
+              longitude={edgeTooltip.longitude}
+              latitude={edgeTooltip.latitude}
+              anchor="bottom"
+              closeButton={false}
+              closeOnClick={false}
+              className="maplibre-popup"
+            >
+              <EdgeTooltipContent
+                type={edgeTooltip.type}
+                properties={edgeTooltip.properties}
+                maxCertainCount={maxCertainCount}
+              />
+            </Popup>
+          )}
         </MapGL>
         
         {/* ─── MAP CONTROLS (top-right) ─────────────────────────────────────── */}

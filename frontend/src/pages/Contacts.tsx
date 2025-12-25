@@ -8,6 +8,7 @@ import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
 import { PathHealthPanel } from '@/components/contacts/PathHealthPanel';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { NodeSparkline } from '@/components/contacts/NodeSparkline';
 
 // Get signal color for card badges based on SNR
 function getSignalColor(snr?: number): string {
@@ -467,6 +468,15 @@ export default function Contacts() {
                           <span className="type-data-xs tabular-nums">{(nodeCentrality * 100).toFixed(0)}%</span>
                         </div>
                       )}
+                      {/* 7-day activity sparkline */}
+                      <div className="hidden sm:block">
+                        <NodeSparkline 
+                          nodeHash={hash} 
+                          width={48} 
+                          height={16} 
+                          color="var(--accent-tertiary)"
+                        />
+                      </div>
                     </div>
                     
                     {/* Last seen */}

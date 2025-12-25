@@ -9,6 +9,7 @@ import { Copy, Check, Trash2, Info } from 'lucide-react';
 import type { NeighborInfo } from '@/types/api';
 import { formatRelativeTime } from '@/lib/format';
 import { DESIGN } from '../constants';
+import { NodeSparkline } from '../../NodeSparkline';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -131,19 +132,10 @@ export function NodePopupContent({
   
   return (
     <div className="min-w-[180px] max-w-[240px] pr-4">
-      {/* === HEADER: Name + Remove === */}
-      {/* pr-4 above accounts for Leaflet's close button in top-right */}
+      {/* === HEADER: Name === */}
+      {/* pr-4 above accounts for MapLibre's close button in top-right */}
       <div className="flex items-center gap-1 mb-0.5">
         <span className="text-[14px] font-semibold text-text-primary leading-snug flex-1 min-w-0 truncate">{name}</span>
-        {onRemove && (
-          <button
-            onClick={onRemove}
-            className="p-1 -mr-1 text-text-muted/30 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors flex-shrink-0"
-            title="Remove node"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        )}
       </div>
       
       {/* === BADGES: Inline, compact === */}
@@ -190,6 +182,18 @@ export function NodePopupContent({
         )}
       </div>
       
+      {/* === SPARKLINE: 7-day activity trend === */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-[9px] text-text-muted/40 uppercase tracking-wider">7d</span>
+        <NodeSparkline 
+          nodeHash={hash} 
+          width={140} 
+          height={24} 
+          color="var(--accent-tertiary)"
+          showArea={true}
+        />
+      </div>
+      
       {/* === METRICS: 2x2 grid, data-first === */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] mb-1.5">
         <div className="flex justify-between">
@@ -216,6 +220,20 @@ export function NodePopupContent({
           <span className="uppercase text-[8px] font-semibold tracking-wide">TX</span>
           <span>Flood <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span></span>
           <span>Direct <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span></span>
+        </div>
+      )}
+      
+      {/* === REMOVE BUTTON: Bottom-right, separate from close button === */}
+      {onRemove && (
+        <div className="flex justify-end mt-2 pt-1.5 border-t border-white/5">
+          <button
+            onClick={onRemove}
+            className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-text-muted/40 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            title="Remove node from contacts"
+          >
+            <Trash2 className="w-3 h-3" />
+            <span>Remove</span>
+          </button>
         </div>
       )}
     </div>

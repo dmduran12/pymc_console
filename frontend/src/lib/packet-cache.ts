@@ -377,9 +377,28 @@ class PacketCache {
       if (this.meta.lastUpdated > 0) {
         const age = Date.now() - this.meta.lastUpdated;
         if (age > STALE_THRESHOLD_MS) {
+          console.log('[PacketCache] Cache stale, clearing');
           this.clear();
+          return;
         }
       }
+      
+      // Validate backgroundLoadComplete - only trust it if we have enough packets
+      // (handles case where previous session only did quick load before closing)
+      const MIN_BACKGROUND_PACKETS = BACKGROUND_FETCH_LIMIT * 0.5; // 50% of target
+      if (this.meta.backgroundLoadComplete && this.packets.size < MIN_BACKGROUND_PACKETS) {
+        console.log(`[PacketCache] Background load incomplete (${this.packets.size} < ${MIN_BACKGROUND_PACKETS}), will re-run`);
+        this.meta.backgroundLoadComplete = false;
+      }
+      
+      // Same for deep load
+      const MIN_DEEP_PACKETS = DEEP_FETCH_LIMIT * 0.5;
+      if (this.meta.deepLoadComplete && this.packets.size < MIN_DEEP_PACKETS) {
+        console.log(`[PacketCache] Deep load incomplete (${this.packets.size} < ${MIN_DEEP_PACKETS}), will re-run`);
+        this.meta.deepLoadComplete = false;
+      }
+      
+      console.log(`[PacketCache] Loaded ${this.packets.size} packets from storage (bg:${this.meta.backgroundLoadComplete}, deep:${this.meta.deepLoadComplete})`);
     } catch (error) {
       console.error('[PacketCache] Failed to load from storage:', error);
       this.clear();

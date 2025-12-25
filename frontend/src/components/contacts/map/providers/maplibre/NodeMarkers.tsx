@@ -18,7 +18,7 @@ import { useMemo, useCallback, useState } from 'react';
 import { Marker, Popup } from 'react-map-gl/maplibre';
 import type { NeighborInfo } from '@/types/api';
 import type { MeshTopology, LastHopNeighbor } from '@/lib/mesh-topology';
-import { DESIGN, MARKER_SIZE, NEIGHBOR_OUTER_RING_SIZE } from '../../constants';
+import { DESIGN, MARKER_SIZE, NEIGHBOR_OUTER_RING_SIZE, HIT_AREA_SIZE } from '../../constants';
 import { NodePopupContent, type TxDelayRec, type FullAffinity } from '../../utils/node-popup';
 import {
   createRingIconHtml,
@@ -170,13 +170,22 @@ function NodeMarker({
         anchor="center"
         onClick={handleClick}
       >
-        {/* Marker content rendered as HTML */}
+        {/* Hit area wrapper - larger invisible area for easier hover/click */}
         <div
-          style={{ cursor: 'pointer' }}
+          style={{
+            width: HIT_AREA_SIZE,
+            height: HIT_AREA_SIZE,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          dangerouslySetInnerHTML={{ __html: iconHtml }}
-        />
+        >
+          {/* Visual marker content */}
+          <div dangerouslySetInnerHTML={{ __html: iconHtml }} />
+        </div>
       </Marker>
       
       {showPopup && (
@@ -185,7 +194,7 @@ function NodeMarker({
           latitude={neighbor.latitude}
           anchor="bottom"
           offset={[0, -markerSize / 2] as [number, number]}
-          closeOnClick={false}
+          closeOnClick={true}
           onClose={() => setShowPopup(false)}
           className="maplibre-popup"
         >
@@ -243,12 +252,22 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
         anchor="center"
         onClick={handleClick}
       >
+        {/* Hit area wrapper - larger invisible area for easier hover/click */}
         <div
-          style={{ cursor: 'pointer' }}
+          style={{
+            width: HIT_AREA_SIZE,
+            height: HIT_AREA_SIZE,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          dangerouslySetInnerHTML={{ __html: iconHtml }}
-        />
+        >
+          {/* Visual marker content */}
+          <div dangerouslySetInnerHTML={{ __html: iconHtml }} />
+        </div>
       </Marker>
       
       {showPopup && (
@@ -257,7 +276,7 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
           latitude={localNode.latitude}
           anchor="bottom"
           offset={[0, -markerSize / 2] as [number, number]}
-          closeOnClick={false}
+          closeOnClick={true}
           onClose={() => setShowPopup(false)}
           className="maplibre-popup"
         >
