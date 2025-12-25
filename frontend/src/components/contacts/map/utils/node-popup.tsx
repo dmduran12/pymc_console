@@ -182,14 +182,13 @@ export function NodePopupContent({
         )}
       </div>
       
-      {/* === SPARKLINE: 7-day activity trend === */}
+      {/* === SPARKLINE: 7-day activity trend (health-colored) === */}
       <div className="flex items-center gap-2 mb-1.5">
         <span className="text-[9px] text-text-muted/40 uppercase tracking-wider">7d</span>
         <NodeSparkline 
           nodeHash={hash} 
           width={140} 
           height={24} 
-          color="var(--accent-tertiary)"
           showArea={true}
         />
       </div>
