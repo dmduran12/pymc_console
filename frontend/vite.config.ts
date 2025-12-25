@@ -11,13 +11,15 @@ export default defineConfig({
   },
   build: {
     outDir: 'out',
-    chunkSizeWarningLimit: 600, // Acknowledge Recharts adds ~250KB to main bundle
+    chunkSizeWarningLimit: 1100, // maplibre-gl is ~1MB, recharts ~500KB
     rollupOptions: {
       output: {
         manualChunks: {
           // Split large dependencies into separate chunks for better caching
-          recharts: ['recharts'],
-          leaflet: ['leaflet', 'react-leaflet'],
+          // These are loaded lazily via route-based code splitting
+          'maplibre-gl': ['maplibre-gl'],
+          'recharts': ['recharts'],
+          'leaflet': ['leaflet', 'react-leaflet'],
         },
       },
     },
