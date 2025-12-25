@@ -155,10 +155,15 @@ function NodeMarker({
   // Calculate marker size for hover area
   const markerSize = isZeroHop ? NEIGHBOR_OUTER_RING_SIZE : MARKER_SIZE;
   
-  // Event handlers
+  // Event handlers - unified for mouse and touch
   const handleMouseEnter = useCallback(() => onHover(hash), [hash, onHover]);
   const handleMouseLeave = useCallback(() => onHover(null), [onHover]);
-  const handleClick = useCallback(() => setShowPopup(true), []);
+  
+  // Click/tap handler on the wrapper div for cross-platform support
+  const handleInteraction = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation(); // Prevent map click
+    setShowPopup(true);
+  }, []);
   
   if (!neighbor.latitude || !neighbor.longitude) return null;
   
@@ -168,10 +173,12 @@ function NodeMarker({
         longitude={neighbor.longitude}
         latitude={neighbor.latitude}
         anchor="center"
-        onClick={handleClick}
       >
-        {/* Hit area wrapper - larger invisible area for easier hover/click */}
+        {/* Hit area wrapper - larger invisible area for easier hover/click/tap */}
         <div
+          role="button"
+          tabIndex={0}
+          aria-label={`Node ${name}`}
           style={{
             width: HIT_AREA_SIZE,
             height: HIT_AREA_SIZE,
@@ -179,12 +186,21 @@ function NodeMarker({
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
+            // Ensure touch events work on iOS/Android
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent',
           }}
+          onClick={handleInteraction}
+          onTouchEnd={handleInteraction}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
+          onKeyDown={(e) => e.key === 'Enter' && setShowPopup(true)}
         >
           {/* Visual marker content */}
-          <div dangerouslySetInnerHTML={{ __html: iconHtml }} />
+          <div 
+            style={{ pointerEvents: 'none' }}
+            dangerouslySetInnerHTML={{ __html: iconHtml }} 
+          />
         </div>
       </Marker>
       
@@ -238,7 +254,12 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
   
   const handleMouseEnter = useCallback(() => onHover('local'), [onHover]);
   const handleMouseLeave = useCallback(() => onHover(null), [onHover]);
-  const handleClick = useCallback(() => setShowPopup(true), []);
+  
+  // Click/tap handler on the wrapper div for cross-platform support
+  const handleInteraction = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation(); // Prevent map click
+    setShowPopup(true);
+  }, []);
   
   if (!localNode.latitude || !localNode.longitude) return null;
   
@@ -250,10 +271,12 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
         longitude={localNode.longitude}
         latitude={localNode.latitude}
         anchor="center"
-        onClick={handleClick}
       >
-        {/* Hit area wrapper - larger invisible area for easier hover/click */}
+        {/* Hit area wrapper - larger invisible area for easier hover/click/tap */}
         <div
+          role="button"
+          tabIndex={0}
+          aria-label={`Local node ${localNode.name}`}
           style={{
             width: HIT_AREA_SIZE,
             height: HIT_AREA_SIZE,
@@ -261,12 +284,21 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
+            // Ensure touch events work on iOS/Android
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent',
           }}
+          onClick={handleInteraction}
+          onTouchEnd={handleInteraction}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
+          onKeyDown={(e) => e.key === 'Enter' && setShowPopup(true)}
         >
           {/* Visual marker content */}
-          <div dangerouslySetInnerHTML={{ __html: iconHtml }} />
+          <div 
+            style={{ pointerEvents: 'none' }}
+            dangerouslySetInnerHTML={{ __html: iconHtml }} 
+          />
         </div>
       </Marker>
       

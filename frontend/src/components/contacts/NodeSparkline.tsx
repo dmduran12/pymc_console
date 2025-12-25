@@ -23,6 +23,13 @@ const BUCKET_HOURS = 6;  // 6-hour buckets
 const MAX_BUCKETS = 28;  // 7 days = 28 buckets
 const MS_PER_BUCKET = BUCKET_HOURS * 60 * 60 * 1000;
 
+// Color scale for activity health (CSS variable names)
+const COLOR_CRITICAL = 'var(--signal-critical)';  // Red - no activity
+const COLOR_POOR = 'var(--signal-poor)';          // Orange - very low
+const COLOR_FAIR = 'var(--signal-fair)';          // Yellow - low
+const COLOR_GOOD = 'var(--signal-good)';          // Green - normal
+const COLOR_EXCELLENT = 'var(--signal-excellent)';// Bright green - high
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Data Computation
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -150,14 +157,57 @@ export interface NodeSparklineProps {
 }
 
 /**
+ * Get health color based on recent activity.
+ * Uses the last 4 buckets (24 hours) to determine current health.
+ */
+function getHealthColor(data: SparklineDataPoint[]): string {
+  if (data.length === 0) return COLOR_CRITICAL;
+  
+  // Look at last 4 buckets (24 hours) for current health
+  const recentBuckets = data.slice(-4);
+  const recentTotal = recentBuckets.reduce((sum, d) => sum + d.count, 0);
+  const recentAvg = recentTotal / recentBuckets.length;
+  
+  // Also calculate overall average for comparison
+  const totalCount = data.reduce((sum, d) => sum + d.count, 0);
+  const overallAvg = totalCount / data.length;
+  
+  // If recent activity is zero, it's critical
+  if (recentTotal === 0) return COLOR_CRITICAL;
+  
+  // Compare recent to overall average
+  if (overallAvg > 0) {
+    const ratio = recentAvg / overallAvg;
+    if (ratio >= 1.2) return COLOR_EXCELLENT;  // 20%+ above average
+    if (ratio >= 0.8) return COLOR_GOOD;       // Within normal range
+    if (ratio >= 0.4) return COLOR_FAIR;       // Below average
+    if (ratio >= 0.1) return COLOR_POOR;       // Very low
+    return COLOR_CRITICAL;                      // Almost nothing
+  }
+  
+  // Fallback based on absolute recent count
+  if (recentTotal >= 10) return COLOR_EXCELLENT;
+  if (recentTotal >= 5) return COLOR_GOOD;
+  if (recentTotal >= 2) return COLOR_FAIR;
+  if (recentTotal >= 1) return COLOR_POOR;
+  return COLOR_CRITICAL;
+}
+
+/**
  * Compact sparkline showing 7-day packet activity trend for a node.
  * Automatically fetches data from the packet cache.
+ * 
+ * Color coding:
+ * - Green: Normal/high activity
+ * - Yellow: Below average activity  
+ * - Orange: Very low activity
+ * - Red: No recent activity (last 24h)
  */
 export function NodeSparkline({
   nodeHash,
   width = 60,
   height = 20,
-  color = 'var(--accent-primary)',
+  color,  // If not provided, will use health-based color
   showArea = true,
   className = '',
 }: NodeSparklineProps) {
@@ -171,12 +221,15 @@ export function NodeSparkline({
     return computeNodeSparkline(nodeHash, packets);
   }, [nodeHash, cacheState.packetCount]);
   
-  // No data - render empty placeholder
+  // Determine color based on health (or use provided color)
+  const lineColor = color ?? getHealthColor(data);
+  
+  // No data - render red dashed line (critical)
   if (data.length < 2) {
     return (
       <div 
-        className={`flex items-center justify-center text-text-muted/30 ${className}`}
-        style={{ width, height }}
+        className={`flex items-center justify-center ${className}`}
+        style={{ width, height, color: COLOR_CRITICAL }}
       >
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
           <line 
@@ -185,13 +238,16 @@ export function NodeSparkline({
             x2={width - 4} 
             y2={height / 2} 
             stroke="currentColor" 
-            strokeWidth={1} 
-            strokeDasharray="2,2"
+            strokeWidth={1.5} 
+            strokeDasharray="3,2"
           />
         </svg>
       </div>
     );
   }
+  
+  // Unique gradient ID for this instance
+  const gradientId = `sparkline-gradient-${nodeHash.slice(-6)}`;
   
   return (
     <div className={className} style={{ width, height }}>
@@ -199,22 +255,22 @@ export function NodeSparkline({
         {showArea ? (
           <ComposedChart data={data} margin={{ top: 1, right: 1, bottom: 1, left: 1 }}>
             <defs>
-              <linearGradient id={`sparkline-gradient-${nodeHash.slice(-6)}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-                <stop offset="100%" stopColor={color} stopOpacity={0} />
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={lineColor} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={lineColor} stopOpacity={0.05} />
               </linearGradient>
             </defs>
             <Area
               type="monotone"
               dataKey="count"
               stroke="none"
-              fill={`url(#sparkline-gradient-${nodeHash.slice(-6)})`}
+              fill={`url(#${gradientId})`}
               isAnimationActive={false}
             />
             <Line
               type="monotone"
               dataKey="count"
-              stroke={color}
+              stroke={lineColor}
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}
@@ -225,7 +281,7 @@ export function NodeSparkline({
             <Line
               type="monotone"
               dataKey="count"
-              stroke={color}
+              stroke={lineColor}
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}

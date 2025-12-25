@@ -468,13 +468,12 @@ export default function Contacts() {
                           <span className="type-data-xs tabular-nums">{(nodeCentrality * 100).toFixed(0)}%</span>
                         </div>
                       )}
-                      {/* 7-day activity sparkline */}
+                      {/* 7-day activity sparkline (health-colored) */}
                       <div className="hidden sm:block">
                         <NodeSparkline 
                           nodeHash={hash} 
                           width={48} 
                           height={16} 
-                          color="var(--accent-tertiary)"
                         />
                       </div>
                     </div>
