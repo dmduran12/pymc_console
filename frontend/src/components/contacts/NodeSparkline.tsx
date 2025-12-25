@@ -9,7 +9,7 @@
  */
 
 import { useMemo } from 'react';
-import { ResponsiveContainer, LineChart, Line, Area, ComposedChart } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, Area, ComposedChart, Tooltip } from 'recharts';
 import { packetCache } from '@/lib/packet-cache';
 import { usePacketCacheState } from '@/lib/stores/useStore';
 import type { Packet } from '@/types/api';
@@ -144,14 +144,16 @@ export function computeNodeSparkline(
 export interface NodeSparklineProps {
   /** Full node hash */
   nodeHash: string;
-  /** Width of the sparkline (default: 60px) */
-  width?: number;
+  /** Width of the sparkline (default: 60px, or '100%' for full width) */
+  width?: number | string;
   /** Height of the sparkline (default: 20px) */
   height?: number;
-  /** Line color (default: accent-primary) */
+  /** Line color (default: health-based) */
   color?: string;
   /** Show filled area under the line */
   showArea?: boolean;
+  /** Show tooltip on hover with daily data */
+  showTooltip?: boolean;
   /** Custom class name */
   className?: string;
 }
@@ -194,6 +196,24 @@ function getHealthColor(data: SparklineDataPoint[]): string {
 }
 
 /**
+ * Custom tooltip for sparkline hover
+ */
+function SparklineTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: SparklineDataPoint }> }) {
+  if (!active || !payload || !payload.length) return null;
+  
+  const data = payload[0].payload;
+  const date = new Date(data.timestamp);
+  const dateStr = `${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+  
+  return (
+    <div className="bg-bg-surface/95 border border-border-subtle rounded px-1.5 py-0.5 text-[10px] shadow-lg">
+      <span className="text-text-muted">{dateStr}</span>
+      <span className="ml-1.5 font-semibold tabular-nums">{data.count}</span>
+    </div>
+  );
+}
+
+/**
  * Compact sparkline showing 7-day packet activity trend for a node.
  * Automatically fetches data from the packet cache.
  * 
@@ -209,6 +229,7 @@ export function NodeSparkline({
   height = 20,
   color,  // If not provided, will use health-based color
   showArea = true,
+  showTooltip = false,
   className = '',
 }: NodeSparklineProps) {
   // Subscribe to cache state to trigger re-render when packets load
@@ -224,18 +245,25 @@ export function NodeSparkline({
   // Determine color based on health (or use provided color)
   const lineColor = color ?? getHealthColor(data);
   
+  // Style object handles both number and string widths
+  const containerStyle = {
+    width: typeof width === 'number' ? width : width,
+    height,
+  };
+  
   // No data - render red dashed line (critical)
   if (data.length < 2) {
+    const svgWidth = typeof width === 'number' ? width : 60;
     return (
       <div 
         className={`flex items-center justify-center ${className}`}
-        style={{ width, height, color: COLOR_CRITICAL }}
+        style={{ ...containerStyle, color: COLOR_CRITICAL }}
       >
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        <svg width="100%" height={height} viewBox={`0 0 ${svgWidth} ${height}`} preserveAspectRatio="none">
           <line 
             x1={4} 
             y1={height / 2} 
-            x2={width - 4} 
+            x2={svgWidth - 4} 
             y2={height / 2} 
             stroke="currentColor" 
             strokeWidth={1.5} 
@@ -250,7 +278,7 @@ export function NodeSparkline({
   const gradientId = `sparkline-gradient-${nodeHash.slice(-6)}`;
   
   return (
-    <div className={className} style={{ width, height }}>
+    <div className={className} style={containerStyle}>
       <ResponsiveContainer width="100%" height="100%">
         {showArea ? (
           <ComposedChart data={data} margin={{ top: 1, right: 1, bottom: 1, left: 1 }}>
@@ -260,6 +288,12 @@ export function NodeSparkline({
                 <stop offset="100%" stopColor={lineColor} stopOpacity={0.05} />
               </linearGradient>
             </defs>
+            {showTooltip && (
+              <Tooltip 
+                content={<SparklineTooltip />}
+                cursor={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+              />
+            )}
             <Area
               type="monotone"
               dataKey="count"
@@ -278,6 +312,12 @@ export function NodeSparkline({
           </ComposedChart>
         ) : (
           <LineChart data={data} margin={{ top: 1, right: 1, bottom: 1, left: 1 }}>
+            {showTooltip && (
+              <Tooltip 
+                content={<SparklineTooltip />}
+                cursor={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+              />
+            )}
             <Line
               type="monotone"
               dataKey="count"

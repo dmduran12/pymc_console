@@ -85,7 +85,17 @@ export function LegendTooltip({ text }: { text: string }) {
   );
 }
 
-/** Node popup content - compact, information-rich */
+/** 
+ * Node popup content - 12-column grid layout
+ * 
+ * Layout structure (conceptual 12-col grid mapped to actual widths):
+ * Row 1: Name (12 cols)
+ * Row 2: Hash + Badges (12 cols, flex wrap)
+ * Row 3: Meta info (12 cols) 
+ * Row 4: Sparkline (12 cols, full width with tooltip)
+ * Row 5: Metrics grid (6+6 cols = 2 columns)
+ * Row 6: Footer - TX recs + Remove (split 8+4)
+ */
 export function NodePopupContent({
   hash,
   hashPrefix,
@@ -115,31 +125,35 @@ export function NodePopupContent({
     : affinity?.typicalHopPosition ? `${affinity.typicalHopPosition}-hop` 
     : null;
   
-  // Build dynamic third metric based on node type
-  const thirdMetric = isZeroHop && meanSnr !== undefined 
-    ? { label: 'SNR', value: meanSnr.toFixed(1), highlight: false }
-    : isHub && centrality > 0 
-    ? { label: 'Centrality', value: `${(centrality * 100).toFixed(0)}%`, highlight: true }
-    : { label: 'Forwards', value: String(affinity?.directForwardCount || 0), highlight: false };
+  // Build metrics array for clean rendering
+  type Metric = { label: string; value: string | number; highlight?: boolean };
+  const metrics: Metric[] = [
+    { label: 'Packets', value: affinity?.frequency || 0 },
+    { label: 'Adverts', value: neighbor.advert_count || 0 },
+  ];
   
-  // Build dynamic fourth metric
-  // For zero-hop neighbors, prefer averaged RSSI from direct RF packets over API snapshot
-  const fourthMetric = isZeroHop && (meanRssi !== undefined || neighbor.rssi !== undefined)
-    ? { label: 'RSSI', value: meanRssi !== undefined ? Math.round(meanRssi).toString() : String(neighbor.rssi), suffix: meanRssi !== undefined ? ' avg' : '' }
-    : txDelayRec && !txDelayRec.insufficientData
-    ? { label: 'Neighbors', value: String(txDelayRec.directNeighborCount), suffix: '' }
-    : { label: 'Forwards', value: String(affinity?.directForwardCount || 0), suffix: '' };
+  // Add SNR/RSSI for direct neighbors, or centrality for hubs
+  if (isZeroHop && meanSnr !== undefined) {
+    metrics.push({ label: 'SNR', value: `${meanSnr.toFixed(1)} dB` });
+  } else if (isHub && centrality > 0) {
+    metrics.push({ label: 'Centrality', value: `${(centrality * 100).toFixed(0)}%`, highlight: true });
+  }
+  
+  if (isZeroHop && meanRssi !== undefined) {
+    metrics.push({ label: 'RSSI', value: `${Math.round(meanRssi)} dBm` });
+  }
+  
+  const hasTxRecs = txDelayRec && !txDelayRec.insufficientData;
   
   return (
-    <div className="min-w-[180px] max-w-[240px] pr-4">
-      {/* === HEADER: Name === */}
-      {/* pr-4 above accounts for MapLibre's close button in top-right */}
-      <div className="flex items-center gap-1 mb-0.5">
-        <span className="text-[14px] font-semibold text-text-primary leading-snug flex-1 min-w-0 truncate">{name}</span>
+    <div className="w-[220px] pr-3">
+      {/* ═══ ROW 1: Name (full width) ═══ */}
+      <div className="text-[14px] font-semibold text-text-primary leading-snug truncate mb-0.5">
+        {name}
       </div>
       
-      {/* === BADGES: Inline, compact === */}
-      <div className="flex items-center gap-1 mb-1">
+      {/* ═══ ROW 2: Hash + Badges (flex wrap) ═══ */}
+      <div className="flex items-center gap-1 flex-wrap mb-1.5">
         <code className="font-mono text-[10px] text-text-muted/70 bg-white/5 px-1 py-px rounded">{hashPrefix}</code>
         <button onClick={copyHash} className="p-0.5 hover:bg-white/10 rounded transition-colors" title="Copy full hash">
           {copied ? <Check className="w-2.5 h-2.5 text-accent-success" /> : <Copy className="w-2.5 h-2.5 text-text-muted/50" />}
@@ -159,9 +173,7 @@ export function NodePopupContent({
           </span>
         )}
         {isMobile && (
-          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-orange-500/25 text-orange-300" title="Volatile paths">
-            Mobile
-          </span>
+          <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-orange-500/25 text-orange-300">Mobile</span>
         )}
         {neighbor.is_repeater && (
           <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-cyan-500/20 text-cyan-400">Rptr</span>
@@ -171,8 +183,8 @@ export function NodePopupContent({
         )}
       </div>
       
-      {/* === META: Time, Distance, Location === */}
-      <div className="text-[10px] text-text-muted/60 mb-1.5 leading-tight">
+      {/* ═══ ROW 3: Meta - Time · Distance · Coords ═══ */}
+      <div className="text-[10px] text-text-muted/60 mb-2 leading-tight">
         <span>{formatRelativeTime(neighbor.last_seen)}</span>
         {affinity?.distanceMeters && (
           <span className="font-medium text-text-muted/80"> · {formatDistance(affinity.distanceMeters)}</span>
@@ -182,57 +194,53 @@ export function NodePopupContent({
         )}
       </div>
       
-      {/* === SPARKLINE: 7-day activity trend (health-colored) === */}
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-[9px] text-text-muted/40 uppercase tracking-wider">7d</span>
+      {/* ═══ ROW 4: Sparkline (full width, interactive) ═══ */}
+      <div className="mb-2">
         <NodeSparkline 
           nodeHash={hash} 
-          width={140} 
-          height={24} 
+          width="100%" 
+          height={28} 
           showArea={true}
+          showTooltip={true}
         />
       </div>
       
-      {/* === METRICS: 2x2 grid, data-first === */}
-      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] mb-1.5">
-        <div className="flex justify-between">
-          <span className="text-text-muted/50">Packets</span>
-          <span className="font-semibold tabular-nums">{affinity?.frequency || 0}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-text-muted/50">Adverts</span>
-          <span className="font-semibold tabular-nums">{neighbor.advert_count || 0}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-text-muted/50">{thirdMetric.label}</span>
-          <span className={`font-semibold tabular-nums ${thirdMetric.highlight ? 'text-amber-400' : ''}`}>{thirdMetric.value}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-text-muted/50">{fourthMetric.label}</span>
-          <span className="font-semibold tabular-nums">{fourthMetric.value}{fourthMetric.suffix}</span>
-        </div>
+      {/* ═══ ROW 5: Metrics (2-column grid) ═══ */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] mb-2">
+        {metrics.map((m, i) => (
+          <div key={i} className="flex justify-between">
+            <span className="text-text-muted/50">{m.label}</span>
+            <span className={`font-semibold tabular-nums ${'highlight' in m && m.highlight ? 'text-amber-400' : ''}`}>
+              {m.value}
+            </span>
+          </div>
+        ))}
       </div>
       
-      {/* === TX DELAY: Compact inline === */}
-      {txDelayRec && !txDelayRec.insufficientData && (
-        <div className="flex items-center gap-2 text-[10px] text-text-muted/60 bg-white/[0.02] rounded px-1.5 py-1">
-          <span className="uppercase text-[8px] font-semibold tracking-wide">TX</span>
-          <span>Flood <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span></span>
-          <span>Direct <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span></span>
-        </div>
-      )}
-      
-      {/* === REMOVE BUTTON: Bottom-right, separate from close button === */}
-      {onRemove && (
-        <div className="flex justify-end mt-2 pt-1.5 border-t border-white/5">
-          <button
-            onClick={onRemove}
-            className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-text-muted/40 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-            title="Remove node from contacts"
-          >
-            <Trash2 className="w-3 h-3" />
-            <span>Remove</span>
-          </button>
+      {/* ═══ ROW 6: Footer - TX Recs (left) + Remove (right) ═══ */}
+      {(hasTxRecs || onRemove) && (
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/5">
+          {/* TX Recommendations */}
+          {hasTxRecs ? (
+            <div className="flex items-center gap-1.5 text-[10px] text-text-muted/60">
+              <span className="uppercase text-[8px] font-semibold tracking-wide text-text-muted/40">TX</span>
+              <span>F <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span></span>
+              <span>D <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span></span>
+            </div>
+          ) : (
+            <div /> /* Spacer */
+          )}
+          
+          {/* Remove button */}
+          {onRemove && (
+            <button
+              onClick={onRemove}
+              className="flex items-center gap-0.5 p-1 text-[10px] text-text-muted/30 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+              title="Remove from contacts"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          )}
         </div>
       )}
     </div>
