@@ -433,8 +433,24 @@ export default function ContactsMapMapLibre({
           mapStyle={MAP_STYLE}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
+          // Darken map labels (city names) from ~50% gray to ~33% gray
+          onLoad={(e) => {
+            const map = e.target;
+            // Find and darken text layers (place labels, road labels, etc.)
+            const style = map.getStyle();
+            if (style?.layers) {
+              for (const layer of style.layers) {
+                if (layer.type === 'symbol' && layer.id.includes('label')) {
+                  // Darken text color to ~33% gray
+                  map.setPaintProperty(layer.id, 'text-color', 'rgba(85, 85, 85, 1)');
+                  // Also darken any halo
+                  map.setPaintProperty(layer.id, 'text-halo-color', 'rgba(0, 0, 0, 0.7)');
+                }
+              }
+            }
+          }}
         >
-          <NavigationControl position="top-right" />
+          <NavigationControl position="top-left" style={{ marginTop: '1rem', marginLeft: '1rem' }} />
           <ScaleControl position="bottom-right" />
           
           <FitBoundsOnce positions={allPositions} />
