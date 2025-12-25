@@ -20,9 +20,8 @@
  * @module providers/maplibre/TopologyEdges
  */
 
-import { useMemo, useState, useCallback } from 'react';
-import { Source, Layer, Popup } from 'react-map-gl/maplibre';
-import { ArrowRight, RefreshCw, Zap } from 'lucide-react';
+import { useMemo } from 'react';
+import { Source, Layer } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import type { TopologyEdge } from '@/lib/mesh-topology';
 import { getLinkQualityWeight } from '@/lib/mesh-topology';
@@ -355,80 +354,21 @@ const validatedEdgesLayerStyle: LayerProps = {
   },
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Tooltip Content Component
-// ═══════════════════════════════════════════════════════════════════════════════
-
-interface EdgeTooltipContentProps {
-  fromName: string;
-  toName: string;
-  certainCount: number;
-  linkQuality: number;
-  confidence: number;
-  isBackbone: boolean;
-  isLoopEdge: boolean;
-  isDirectPath: boolean;
-  isHubConnection: boolean;
-  symmetryRatio: number;
-  dominantDirection: string;
-}
-
-function EdgeTooltipContent({
-  fromName,
-  toName,
-  certainCount,
-  linkQuality,
-  confidence,
-  isBackbone,
-  isLoopEdge,
-  isDirectPath,
-  isHubConnection,
-  symmetryRatio,
-  dominantDirection,
-}: EdgeTooltipContentProps) {
-  return (
-    <div className="text-xs">
-      {/* Directional indicator if asymmetric */}
-      {symmetryRatio < 0.7 && dominantDirection !== 'balanced' ? (
-        <div className="font-medium text-text-primary flex items-center gap-1">
-          {dominantDirection === 'forward' ? (
-            <>{fromName} <ArrowRight className="w-3 h-3" /> {toName}</>
-          ) : (
-            <>{toName} <ArrowRight className="w-3 h-3" /> {fromName}</>
-          )}
-        </div>
-      ) : (
-        <div className="font-medium text-text-primary">{fromName} ↔ {toName}</div>
-      )}
-      
-      <div className="text-text-secondary">
-        {certainCount} validations ({Math.round(linkQuality * 100)}%) • {Math.round(confidence * 100)}% conf
-      </div>
-      
-      {isBackbone && (
-        <div className="text-gray-300 font-semibold">Backbone</div>
-      )}
-      
-      {isLoopEdge && (
-        <div style={{ color: DESIGN.edges.hoverLoop }} className="flex items-center gap-1 mt-0.5">
-          <RefreshCw className="w-3 h-3" />
-          <span>Redundant path</span>
-        </div>
-      )}
-      
-      {isDirectPath && (
-        <div className="text-teal-400 flex items-center gap-1">
-          <Zap className="w-3 h-3" />
-          <span>Direct path</span>
-        </div>
-      )}
-      
-      {isHubConnection && !isBackbone && !isDirectPath && (
-        <div className="text-amber-400">Hub connection</div>
-      )}
-    </div>
-  );
-}
+// Invisible hit-area layer for better edge interactivity
+// Wider than visual edges to make hovering easier
+const validatedEdgesHitAreaStyle: LayerProps = {
+  id: 'topology-validated-edges-hitarea',
+  type: 'line',
+  paint: {
+    'line-color': 'transparent',
+    'line-width': 16, // Much wider than visual edges for easy hover
+    'line-opacity': 0,
+  },
+  layout: {
+    'line-cap': 'round',
+    'line-join': 'round',
+  },
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -447,17 +387,10 @@ export function TopologyEdges({
   loopEdgeKeys,
   backboneEdgeKeys,
   hoveredEdgeKey,
-  onEdgeHover,
+  onEdgeHover: _onEdgeHover, // Hover handled at map level now
   highlightedEdgeKey,
   neighbors,
 }: TopologyEdgesProps) {
-  // Tooltip state
-  const [tooltipInfo, setTooltipInfo] = useState<{
-    longitude: number;
-    latitude: number;
-    properties: EdgeFeatureProperties;
-  } | null>(null);
-  
   // Whether we should render - computed before hooks to maintain hook order
   const shouldRender = showTopology || isExiting;
   
@@ -497,44 +430,6 @@ export function TopologyEdges({
     ]
   );
   
-  // Mouse event handlers for edges (to be wired up at Map level)
-  // These are exposed for parent component to attach to Map's interactiveLayerIds
-  const _handleMouseEnter = useCallback((e: maplibregl.MapLayerMouseEvent) => {
-    if (e.features && e.features.length > 0) {
-      const feature = e.features[0];
-      const props = feature.properties as EdgeFeatureProperties;
-      // Extract base key (remove -loop1/-loop2 suffix)
-      const baseKey = props.key.replace(/-loop[12]$/, '');
-      onEdgeHover(baseKey);
-      
-      // Set tooltip at mouse position
-      if (e.lngLat) {
-        setTooltipInfo({
-          longitude: e.lngLat.lng,
-          latitude: e.lngLat.lat,
-          properties: props,
-        });
-      }
-    }
-  }, [onEdgeHover]);
-  
-  const _handleMouseLeave = useCallback(() => {
-    onEdgeHover(null);
-    setTooltipInfo(null);
-  }, [onEdgeHover]);
-  
-  // Export handlers for parent to use
-  // Note: In react-map-gl, these need to be attached at the Map level
-  void _handleMouseEnter;
-  void _handleMouseLeave;
-  
-  // Calculate link quality for tooltip
-  const linkQuality = tooltipInfo 
-    ? maxCertainCount > 0 
-      ? (tooltipInfo.properties.certainCount / maxCertainCount)
-      : 0
-    : 0;
-  
   // Don't render content if topology is off and not exiting
   if (!shouldRender) {
     return null;
@@ -549,41 +444,22 @@ export function TopologyEdges({
       
       {/* ─── VALIDATED EDGES ───────────────────────────────────────────── */}
       <Source id="validated-edges" type="geojson" data={validatedEdgesData}>
-        <Layer 
-          {...validatedEdgesLayerStyle}
-          // Enable interactivity for hover/click events
-          // Note: react-map-gl handles this via onMouseEnter/onMouseLeave props on Map
-        />
+        {/* Hit-area layer (invisible, wider for easy hover detection) - rendered first (below) */}
+        <Layer {...validatedEdgesHitAreaStyle} />
+        {/* Visual layer */}
+        <Layer {...validatedEdgesLayerStyle} />
       </Source>
       
-      {/* ─── EDGE TOOLTIP ─────────────────────────────────────────────── */}
-      {tooltipInfo && (
-        <Popup
-          longitude={tooltipInfo.longitude}
-          latitude={tooltipInfo.latitude}
-          anchor="bottom"
-          closeButton={false}
-          closeOnClick={false}
-          className="topology-edge-tooltip maplibre-popup"
-        >
-          <EdgeTooltipContent
-            fromName={tooltipInfo.properties.fromName}
-            toName={tooltipInfo.properties.toName}
-            certainCount={tooltipInfo.properties.certainCount}
-            linkQuality={linkQuality}
-            confidence={tooltipInfo.properties.confidence}
-            isBackbone={tooltipInfo.properties.isBackbone}
-            isLoopEdge={tooltipInfo.properties.isLoopEdge}
-            isDirectPath={tooltipInfo.properties.isDirectPath}
-            isHubConnection={tooltipInfo.properties.isHubConnection}
-            symmetryRatio={tooltipInfo.properties.symmetryRatio}
-            dominantDirection={tooltipInfo.properties.dominantDirection}
-          />
-        </Popup>
-      )}
+      {/* Note: Tooltips now handled at map level for proper interactivity */}
     </>
   );
 }
 
-// Export types needed by parent
+// Export types and constants needed by parent
 export type { EdgeFeatureProperties };
+
+// Layer IDs for interactiveLayerIds
+export const TOPOLOGY_EDGE_LAYER_IDS = [
+  'topology-validated-edges-hitarea',
+  'topology-validated-edges',
+] as const;
