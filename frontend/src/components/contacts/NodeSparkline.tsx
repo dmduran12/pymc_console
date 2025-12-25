@@ -13,14 +13,14 @@ import { ResponsiveContainer, LineChart, Line, Area, ComposedChart, Tooltip } fr
 import { packetCache } from '@/lib/packet-cache';
 import { usePacketCacheState } from '@/lib/stores/useStore';
 import type { Packet } from '@/types/api';
-import { getHashPrefix } from '@/lib/path-utils';
+import { getHashPrefix, prefixMatches } from '@/lib/path-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const BUCKET_HOURS = 6;  // 6-hour buckets
-const MAX_BUCKETS = 28;  // 7 days = 28 buckets
+const MAX_BUCKETS = 28;  // 7 days = 28 buckets (display window)
 const MS_PER_BUCKET = BUCKET_HOURS * 60 * 60 * 1000;
 
 // Color scale for activity health (CSS variable names)
@@ -46,11 +46,9 @@ export interface SparklineDataPoint {
 /**
  * Compute sparkline data for a node from cached packets.
  * 
- * Counts ALL packets where the node is involved:
- * - Is the source (src_hash matches)
- * - Is the destination (dest_hash matches)  
- * - Is in the forwarding path (original_path or forwarded_path)
- * - Was the last hop (direct RF contact indicator)
+ * Counts packets where the node appears in the forwarding path.
+ * This matches how topology's `frequency` is calculated - counting
+ * appearances in packet paths to show network activity.
  * 
  * @param nodeHash - Full hash of the node (e.g., "0x19ABCDEF")
  * @param packets - Array of packets to analyze
@@ -64,7 +62,7 @@ export function computeNodeSparkline(
   
   const prefix = getHashPrefix(nodeHash);
   const now = Date.now();
-  const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+  const displayStart = now - (7 * 24 * 60 * 60 * 1000); // 7 days for display buckets
   
   // Initialize buckets
   const buckets = new Map<number, number>();
@@ -77,27 +75,15 @@ export function computeNodeSparkline(
     const ts = packet.timestamp * 1000; // Convert to ms if needed
     const normalizedTs = ts > 1e12 ? ts : ts * 1000; // Handle both ms and seconds
     
-    // Skip packets older than 7 days
-    if (normalizedTs < sevenDaysAgo) continue;
-    
-    // Check if this node is involved in the packet
+    // Check if this node appears in the packet's forwarding path
+    // This matches topology's affinity.frequency counting
     let isInvolved = false;
     
-    // Check source hash
-    if (!isInvolved && packet.src_hash) {
-      const srcPrefix = getHashPrefix(packet.src_hash);
-      if (srcPrefix === prefix) isInvolved = true;
-    }
-    
-    // Check destination hash
-    if (!isInvolved && packet.dst_hash) {
-      const destPrefix = getHashPrefix(packet.dst_hash);
-      if (destPrefix === prefix) isInvolved = true;
-    }
-    
-    // Check original_path (forwarding chain)
-    if (!isInvolved && packet.original_path) {
-      for (const hop of packet.original_path) {
+    // Check forwarded_path first (preferred)
+    const path = packet.forwarded_path ?? packet.original_path;
+    if (path && Array.isArray(path)) {
+      for (const hop of path) {
+        // Path hops are 2-char prefixes, compare directly (case-insensitive)
         if (hop.toUpperCase() === prefix) {
           isInvolved = true;
           break;
@@ -105,38 +91,31 @@ export function computeNodeSparkline(
       }
     }
     
-    // Check forwarded_path
-    if (!isInvolved && packet.forwarded_path) {
-      for (const hop of packet.forwarded_path) {
-        if (hop.toUpperCase() === prefix) {
-          isInvolved = true;
-          break;
-        }
-      }
-    }
-    
-    // Check path_hash (may indicate involvement)
-    if (!isInvolved && packet.path_hash) {
-      const pathPrefix = getHashPrefix(packet.path_hash);
-      if (pathPrefix === prefix) isInvolved = true;
+    // Also check src_hash for direct packets (empty path)
+    if (!isInvolved && (!path || path.length === 0) && packet.src_hash) {
+      if (prefixMatches(prefix, packet.src_hash)) isInvolved = true;
     }
     
     if (isInvolved) {
       hasAnyData = true;
-      earliestPacketTs = Math.min(earliestPacketTs, normalizedTs);
       
-      // Calculate bucket index from the start of 7-day window
-      const bucketIdx = Math.floor((normalizedTs - sevenDaysAgo) / MS_PER_BUCKET);
-      const clampedIdx = Math.max(0, Math.min(MAX_BUCKETS - 1, bucketIdx));
-      
-      buckets.set(clampedIdx, (buckets.get(clampedIdx) || 0) + 1);
+      // Only bucket packets in the 7-day display window
+      if (normalizedTs >= displayStart) {
+        earliestPacketTs = Math.min(earliestPacketTs, normalizedTs);
+        
+        // Calculate bucket index from the start of 7-day display window
+        const bucketIdx = Math.floor((normalizedTs - displayStart) / MS_PER_BUCKET);
+        const clampedIdx = Math.max(0, Math.min(MAX_BUCKETS - 1, bucketIdx));
+        
+        buckets.set(clampedIdx, (buckets.get(clampedIdx) || 0) + 1);
+      }
     }
   }
   
   if (!hasAnyData) return [];
   
   // Determine the starting bucket (don't fill empty left side)
-  const startBucketIdx = Math.max(0, Math.floor((earliestPacketTs - sevenDaysAgo) / MS_PER_BUCKET));
+  const startBucketIdx = Math.max(0, Math.floor((earliestPacketTs - displayStart) / MS_PER_BUCKET));
   
   // Build result array from first data to now
   const result: SparklineDataPoint[] = [];
@@ -144,7 +123,7 @@ export function computeNodeSparkline(
     result.push({
       idx: i - startBucketIdx,  // Normalize to 0-based
       count: buckets.get(i) || 0,
-      timestamp: sevenDaysAgo + (i * MS_PER_BUCKET),
+      timestamp: displayStart + (i * MS_PER_BUCKET),
     });
   }
   
