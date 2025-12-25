@@ -46,9 +46,11 @@ export interface SparklineDataPoint {
 /**
  * Compute sparkline data for a node from cached packets.
  * 
- * Counts packets where the node:
+ * Counts ALL packets where the node is involved:
  * - Is the source (src_hash matches)
- * - Is in the forwarding path (path contains matching prefix)
+ * - Is the destination (dest_hash matches)  
+ * - Is in the forwarding path (original_path or forwarded_path)
+ * - Was the last hop (direct RF contact indicator)
  * 
  * @param nodeHash - Full hash of the node (e.g., "0x19ABCDEF")
  * @param packets - Array of packets to analyze
@@ -82,12 +84,18 @@ export function computeNodeSparkline(
     let isInvolved = false;
     
     // Check source hash
-    if (packet.src_hash) {
+    if (!isInvolved && packet.src_hash) {
       const srcPrefix = getHashPrefix(packet.src_hash);
       if (srcPrefix === prefix) isInvolved = true;
     }
     
-    // Check path (original_path contains forwarding chain)
+    // Check destination hash
+    if (!isInvolved && packet.dst_hash) {
+      const destPrefix = getHashPrefix(packet.dst_hash);
+      if (destPrefix === prefix) isInvolved = true;
+    }
+    
+    // Check original_path (forwarding chain)
     if (!isInvolved && packet.original_path) {
       for (const hop of packet.original_path) {
         if (hop.toUpperCase() === prefix) {
@@ -97,7 +105,7 @@ export function computeNodeSparkline(
       }
     }
     
-    // Also check forwarded_path
+    // Check forwarded_path
     if (!isInvolved && packet.forwarded_path) {
       for (const hop of packet.forwarded_path) {
         if (hop.toUpperCase() === prefix) {
@@ -105,6 +113,12 @@ export function computeNodeSparkline(
           break;
         }
       }
+    }
+    
+    // Check path_hash (may indicate involvement)
+    if (!isInvolved && packet.path_hash) {
+      const pathPrefix = getHashPrefix(packet.path_hash);
+      if (pathPrefix === prefix) isInvolved = true;
     }
     
     if (isInvolved) {
