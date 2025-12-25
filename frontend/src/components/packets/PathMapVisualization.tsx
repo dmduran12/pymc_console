@@ -36,8 +36,8 @@ function getProximityScore(distanceMeters: number): number {
   return 0.1;
 }
 
-// Lazy load Leaflet map component
-const PathMap = lazy(() => import('./PathMap'));
+// Lazy load MapLibre map component (replacing Leaflet)
+const PathMap = lazy(() => import('./PathMapMapLibre'));
 
 export interface LocalNode {
   latitude: number;
