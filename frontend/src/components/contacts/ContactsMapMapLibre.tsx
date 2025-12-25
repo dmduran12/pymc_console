@@ -655,11 +655,13 @@ export default function ContactsMapMapLibre({
           />
           
           {/* ─── EDGE TOOLTIP (rendered at map level for interactivity) ─────────── */}
+          {/* Offset upward to avoid cursor overlap and allow easy hover-off */}
           {edgeTooltip && (
             <Popup
               longitude={edgeTooltip.longitude}
               latitude={edgeTooltip.latitude}
               anchor="bottom"
+              offset={[0, -20] as [number, number]}
               closeButton={false}
               closeOnClick={false}
               className="maplibre-popup"

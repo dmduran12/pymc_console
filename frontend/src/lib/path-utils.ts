@@ -44,10 +44,11 @@ export interface ParsedPath {
 /**
  * Extract the 2-character prefix from a hash.
  * Handles both "0xNN" format (local hash) and full hex strings (neighbor hashes).
+ * Always returns exactly 2 uppercase hex characters.
  */
 export function getHashPrefix(hash: string): string {
   if (hash.startsWith('0x') || hash.startsWith('0X')) {
-    return hash.slice(2).toUpperCase();
+    return hash.slice(2, 4).toUpperCase();
   }
   return hash.slice(0, 2).toUpperCase();
 }
