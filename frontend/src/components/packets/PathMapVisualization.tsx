@@ -46,7 +46,7 @@ export interface LocalNode {
 }
 
 interface PathMapVisualizationProps {
-  /** Path prefixes from packet (original_path or forwarded_path) */
+  /** Path prefixes from packet (original_path or forwarded_path) - relay hops only */
   path: string[];
   /** All known neighbors with location data */
   neighbors: Record<string, NeighborInfo>;
@@ -54,8 +54,10 @@ interface PathMapVisualizationProps {
   localNode?: LocalNode;
   /** Local node's hash (for matching if we're in the path) */
   localHash?: string;
-  /** Packet source hash - shown as first hop with 100% confidence */
+  /** Packet source hash - shown as first node in path (100% confidence) */
   srcHash?: string;
+  /** Packet destination hash - shown as last node in path (100% confidence) */
+  dstHash?: string;
   /** Pre-computed affinity data for multi-factor scoring */
   neighborAffinity?: Map<string, NeighborAffinity>;
   /** Pre-computed prefix disambiguation lookup (preferred for confidence) */
@@ -81,7 +83,8 @@ export interface ResolvedHop {
   candidates: PathCandidate[];
   confidence: number;  // Max probability among candidates (0 if none)
   totalMatches: number;  // Total prefix matches (including those without coordinates)
-  isSource?: boolean;  // True if this is the packet source (not from path array)
+  isSource?: boolean;  // True if this is the packet source
+  isDestination?: boolean;  // True if this is the packet destination
 }
 
 /** Result of path resolution */
@@ -376,8 +379,8 @@ class MapErrorBoundary extends Component<{ children: ReactNode }, { hasError: bo
 
 /**
  * Path Map Visualization component
- * Shows packet path on a mini Leaflet map with prefix labels and confidence scoring
- * Includes source hash as first hop and interactive hover highlighting
+ * Shows complete packet path: Source → [relay hops] → Destination
+ * Interactive hover highlighting and confidence scoring
  */
 export function PathMapVisualization({
   path,
@@ -385,6 +388,7 @@ export function PathMapVisualization({
   localNode,
   localHash,
   srcHash,
+  dstHash,
   neighborAffinity,
   prefixLookup,
   hubNodes,
@@ -400,15 +404,18 @@ export function PathMapVisualization({
     const neighbor = neighbors[srcHash];
     
     // Check if we have location data for the source
-    if (neighbor?.latitude && neighbor?.longitude && 
-        !(neighbor.latitude === 0 && neighbor.longitude === 0)) {
+    const hasLocation = neighbor?.latitude && neighbor?.longitude && 
+        !(neighbor.latitude === 0 && neighbor.longitude === 0);
+    
+    if (hasLocation) {
+      // Source with location - full candidate
       return {
         prefix: srcPrefix,
         candidates: [{
           hash: srcHash,
           name: neighbor.node_name || neighbor.name || 'Source',
-          latitude: neighbor.latitude,
-          longitude: neighbor.longitude,
+          latitude: neighbor.latitude!,
+          longitude: neighbor.longitude!,
           probability: 1, // 100% - exact match
           isLocal: false,
           isDirectNeighbor: neighbor.zero_hop === true,
@@ -419,8 +426,89 @@ export function PathMapVisualization({
       };
     }
     
-    return null;
+    // Source without location - still show in path badges with name if available
+    // Include a "virtual" candidate with name only (no coordinates) for tooltip display
+    const sourceName = neighbor?.node_name || neighbor?.name || srcHash.slice(0, 8);
+    return {
+      prefix: srcPrefix,
+      candidates: [{
+        hash: srcHash,
+        name: sourceName,
+        latitude: 0, // No location
+        longitude: 0,
+        probability: 1,
+        isLocal: false,
+      }], // Virtual candidate for name display only
+      confidence: 1, // We still know exactly who it is
+      totalMatches: 1, // We matched the source
+      isSource: true,
+    };
   }, [srcHash, neighbors]);
+  
+  // Build destination hop from dstHash (100% confidence - we know exactly who it's for)
+  const destinationHop = useMemo((): ResolvedHop | null => {
+    if (!dstHash) return null;
+    
+    const dstPrefix = getHashPrefix(dstHash);
+    
+    // Check if destination is local node
+    if (localHash && dstHash === localHash && localNode) {
+      const hasLocation = localNode.latitude !== 0 || localNode.longitude !== 0;
+      return {
+        prefix: dstPrefix,
+        candidates: [{
+          hash: dstHash,
+          name: localNode.name || 'Local Node',
+          latitude: hasLocation ? localNode.latitude : 0,
+          longitude: hasLocation ? localNode.longitude : 0,
+          probability: 1,
+          isLocal: true,
+        }],
+        confidence: 1,
+        totalMatches: 1,
+        isDestination: true,
+      };
+    }
+    
+    const neighbor = neighbors[dstHash];
+    const hasLocation = neighbor?.latitude && neighbor?.longitude && 
+        !(neighbor.latitude === 0 && neighbor.longitude === 0);
+    
+    if (hasLocation) {
+      return {
+        prefix: dstPrefix,
+        candidates: [{
+          hash: dstHash,
+          name: neighbor.node_name || neighbor.name || 'Destination',
+          latitude: neighbor.latitude!,
+          longitude: neighbor.longitude!,
+          probability: 1,
+          isLocal: false,
+          isDirectNeighbor: neighbor.zero_hop === true,
+        }],
+        confidence: 1,
+        totalMatches: 1,
+        isDestination: true,
+      };
+    }
+    
+    // Destination without location - still show in badges
+    const dstName = neighbor?.node_name || neighbor?.name || dstHash.slice(0, 8);
+    return {
+      prefix: dstPrefix,
+      candidates: [{
+        hash: dstHash,
+        name: dstName,
+        latitude: 0,
+        longitude: 0,
+        probability: 1,
+        isLocal: false,
+      }],
+      confidence: 1,
+      totalMatches: 1,
+      isDestination: true,
+    };
+  }, [dstHash, neighbors, localNode, localHash]);
   
   // Resolve path prefixes to candidate nodes
   const resolvedPathHops = useMemo(
@@ -428,24 +516,42 @@ export function PathMapVisualization({
     [path, neighbors, localNode, localHash, neighborAffinity, prefixLookup]
   );
   
-  // Combine source hop with path hops
+  // Combine: Source → [relay hops] → Destination
   const resolvedPath = useMemo((): ResolvedPath => {
-    const hops = sourceHop 
-      ? [sourceHop, ...resolvedPathHops.hops]
-      : resolvedPathHops.hops;
+    const hops: ResolvedHop[] = [];
     
-    // Recalculate overall confidence including source
+    // Add source at beginning
+    if (sourceHop) {
+      hops.push(sourceHop);
+    }
+    
+    // Add relay hops from path
+    hops.push(...resolvedPathHops.hops);
+    
+    // Add destination at end
+    if (destinationHop) {
+      hops.push(destinationHop);
+    }
+    
+    // Recalculate overall confidence
     const overallConfidence = hops.reduce((acc, hop) => {
       if (hop.confidence === 0) return 0;
       return acc * hop.confidence;
     }, 1);
     
+    // hasValidPath: at least one hop has candidates with real coordinates (not 0,0)
+    const hasValidPath = hops.some(hop => 
+      hop.candidates.some(c => 
+        c.latitude !== 0 || c.longitude !== 0
+      )
+    );
+    
     return {
       hops,
       overallConfidence,
-      hasValidPath: hops.some(hop => hop.candidates.length > 0),
+      hasValidPath,
     };
-  }, [sourceHop, resolvedPathHops]);
+  }, [sourceHop, resolvedPathHops, destinationHop]);
   
   // Don't render if no path or no candidates have coordinates
   if (!resolvedPath.hasValidPath) {
@@ -510,11 +616,26 @@ export function PathMapVisualization({
         </MapErrorBoundary>
       </div>
       
-      {/* Per-hop breakdown - interactive */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* Per-hop breakdown - interactive: SRC → [hops] → DST */}
+      <div className="flex flex-wrap items-center gap-1.5">
         {resolvedPath.hops.map((hop, i) => {
-          const isSource = 'isSource' in hop && hop.isSource;
+          const isSource = hop.isSource === true;
+          const isDestination = hop.isDestination === true;
           const isHovered = hoveredHopIndex === i;
+          
+          // Build tooltip
+          let title: string;
+          if (isSource) {
+            title = `Source: ${hop.candidates[0]?.name || 'Unknown'}`;
+          } else if (isDestination) {
+            title = `Destination: ${hop.candidates[0]?.name || 'Unknown'}`;
+          } else if (hop.totalMatches === 0) {
+            title = 'No matching nodes found';
+          } else if (hop.totalMatches === 1) {
+            title = `Exact match: ${hop.candidates[0]?.name || 'Unknown'}`;
+          } else {
+            title = `${hop.totalMatches} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`;
+          }
           
           return (
             <div
@@ -524,30 +645,26 @@ export function PathMapVisualization({
                 isHovered 
                   ? 'bg-accent-primary/20 ring-1 ring-accent-primary/50' 
                   : 'bg-bg-elevated hover:bg-bg-subtle',
-                isSource && 'border border-accent-success/30'
+                isSource && 'border border-accent-success/30',
+                isDestination && 'border border-accent-primary/30'
               )}
-              title={
-                isSource
-                  ? `Source: ${hop.candidates[0]?.name || 'Unknown'}`
-                  : hop.totalMatches === 0
-                    ? 'No matching nodes found'
-                    : hop.totalMatches === 1
-                      ? `Exact match: ${hop.candidates[0]?.name || 'Unknown'}`
-                      : `${hop.totalMatches} possible matches (${(hop.confidence * 100).toFixed(0)}% confidence)`
-              }
+              title={title}
               onMouseEnter={() => setHoveredHopIndex(i)}
               onMouseLeave={() => setHoveredHopIndex(null)}
             >
               {isSource && (
                 <span className="text-accent-success text-[8px] mr-0.5">SRC</span>
               )}
+              {isDestination && (
+                <span className="text-accent-primary text-[8px] mr-0.5">DST</span>
+              )}
               <span style={getHopBadgeStyle(hop.confidence, hop.totalMatches)}>
                 {hop.prefix}
               </span>
-              {hop.totalMatches > 1 && (
+              {!isSource && !isDestination && hop.totalMatches > 1 && (
                 <span className="text-text-muted">×{hop.totalMatches}</span>
               )}
-              {hop.totalMatches === 0 && (
+              {!isSource && !isDestination && hop.totalMatches === 0 && (
                 <span className="text-text-muted">?</span>
               )}
             </div>

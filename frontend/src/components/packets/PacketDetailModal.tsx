@@ -262,6 +262,7 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
                     localNode={localNode}
                     localHash={stats?.local_hash}
                     srcHash={packet.src_hash}
+                    dstHash={packet.dst_hash}
                     neighborAffinity={neighborAffinity}
                     hubNodes={[...hubNodes]}
                   />
