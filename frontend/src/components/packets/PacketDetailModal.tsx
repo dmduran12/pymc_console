@@ -65,15 +65,22 @@ function tryDecodePayload(payload: string | undefined): { text: string | null; i
 
 /**
  * Full-featured packet detail modal
- * Mobile: Full screen drawer from bottom
+ * Mobile: Full screen drawer from bottom with proper scroll handling
  * Desktop: Centered modal
+ * 
+ * Cross-platform optimizations:
+ * - z-[10010] ensures modal is above all UI elements (sidebar uses 10001-10003)
+ * - Body scroll lock prevents background scrolling on mobile
+ * - -webkit-overflow-scrolling: touch for smooth iOS scrolling
+ * - overscroll-behavior: contain prevents scroll chaining
+ * - touch-action: pan-y allows vertical touch scrolling
  */
 function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps) {
   const [showRawHex, setShowRawHex] = useState(false);
   const [showPathMap, setShowPathMap] = useState(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   
-  // ESC key to close
+  // ESC key to close + body scroll lock
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -81,7 +88,30 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    
+    // Lock body scroll on mount (prevents background scrolling on mobile)
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalWidth = document.body.style.width;
+    const originalTop = document.body.style.top;
+    const scrollY = window.scrollY;
+    
+    // iOS requires position: fixed to truly prevent scroll
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = `-${scrollY}px`;
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      // Restore body scroll
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.width = originalWidth;
+      document.body.style.top = originalTop;
+      // Restore scroll position
+      window.scrollTo(0, scrollY);
+    };
   }, [onClose]);
   
   // Get neighbors and local node info from store for path visualization
@@ -134,15 +164,20 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-end sm:items-center justify-center"
+      className="fixed inset-0 bg-black/40 backdrop-blur-md z-[10010] flex items-end sm:items-center justify-center"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="packet-modal-title"
     >
       {/* Mobile: Bottom sheet / Desktop: Centered modal */}
       <div
         className={clsx(
           'glass-card w-full max-h-[90vh] overflow-hidden flex flex-col',
           'sm:max-w-xl sm:mx-4 sm:rounded-xl',
-          'rounded-t-2xl rounded-b-none sm:rounded-b-xl'
+          'rounded-t-2xl rounded-b-none sm:rounded-b-xl',
+          // Mobile safe area padding for notched devices
+          'pb-safe'
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -151,7 +186,10 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
           <div className="flex items-center gap-3">
             <PacketDirection packet={packet} showLabel size="md" />
             <div>
-              <h3 className={clsx('text-base font-semibold', getPacketTypeColor(payloadTypeName))}>
+              <h3 
+                id="packet-modal-title"
+                className={clsx('text-base font-semibold', getPacketTypeColor(payloadTypeName))}
+              >
                 {payloadTypeName}
               </h3>
               <p className="text-xs text-text-muted">{formatTimestamp(packet.timestamp)}</p>
@@ -165,8 +203,14 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
           </button>
         </div>
 
-        {/* Scrollable content */}
-        <div className="overflow-y-auto flex-1 p-4 space-y-4">
+        {/* Scrollable content - optimized for cross-platform touch scrolling */}
+        <div 
+          className="overflow-y-auto flex-1 p-4 space-y-4 overscroll-contain"
+          style={{ 
+            WebkitOverflowScrolling: 'touch',
+            touchAction: 'pan-y',
+          }}
+        >
           {/* Primary info grid */}
           <div className="grid grid-cols-2 gap-3">
             <InfoCard label="Packet Hash">

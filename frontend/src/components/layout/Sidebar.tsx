@@ -33,7 +33,9 @@ import {
 import { version } from '../../../package.json';
 import wifiIcon from '@/assets/WCM_Waves.gif';
 import clsx from 'clsx';
-import { useStore, usePrefetchForRoute } from '@/lib/stores/useStore';
+import { useStore, usePrefetchForRoute, usePacketCacheState } from '@/lib/stores/useStore';
+import { useIsComputingSparklines } from '@/lib/stores/useSparklineStore';
+import { useIsComputingTopology } from '@/lib/stores/useTopologyStore';
 import { formatUptime } from '@/lib/format';
 
 const navigation = [
@@ -53,6 +55,9 @@ export function Sidebar() {
   // NOTE: stats is updated by the centralized polling in useStore - no local polling needed
   const { stats, setMode, setDutyCycle, sendAdvert } = useStore();
   const prefetchForRoute = usePrefetchForRoute();
+  const packetCacheState = usePacketCacheState();
+  const isComputingSparklines = useIsComputingSparklines();
+  const isComputingTopology = useIsComputingTopology();
   const [isOpen, setIsOpen] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(true);
   const [sending, setSending] = useState(false);
@@ -131,6 +136,39 @@ export function Sidebar() {
 
   const handleDutyCycleToggle = () => {
     setDutyCycle(!dutyCycleEnabled);
+  };
+
+  // Determine if background analysis is running
+  const isAnalyzing = packetCacheState.isBackgroundLoading || 
+                      packetCacheState.isDeepLoading || 
+                      isComputingSparklines || 
+                      isComputingTopology;
+  
+  // Loading indicator renderer
+  const renderLoadingIndicator = () => {
+    if (!isAnalyzing) return null;
+    
+    return (
+      <div className="px-3 pb-2">
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          <div className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-primary opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-primary" />
+          </div>
+          <span className="type-data-xs text-text-muted">Analyzing database</span>
+        </div>
+        {/* Thin progress bar */}
+        <div className="mx-2 h-0.5 bg-white/5 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-accent-primary/60 rounded-full animate-pulse"
+            style={{ 
+              width: '100%',
+              animation: 'shimmer 1.5s ease-in-out infinite',
+            }}
+          />
+        </div>
+      </div>
+    );
   };
 
   // Navigation items renderer
@@ -363,14 +401,15 @@ export function Sidebar() {
         </div>
 
         {renderNavItems()}
+        {renderLoadingIndicator()}
         {renderControlPanel()}
         {renderStatusPanel()}
       </aside>
 
-      {/* ═══════════════════════════════════════════════════════════════════
+      {/* ═════════════════════════════════════════════════════════════════════
           DESKTOP: Static sidebar in document flow
           Visible at lg+ (≥ 1024px)
-          ═══════════════════════════════════════════════════════════════════ */}
+          ═════════════════════════════════════════════════════════════════════ */}
       <aside className="hidden lg:flex flex-col w-64 flex-shrink-0 h-screen sticky top-0 bg-bg-surface/70 backdrop-blur-2xl border-r border-white/10">
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-6 border-b border-white/5">
@@ -384,6 +423,7 @@ export function Sidebar() {
         </div>
 
         {renderNavItems()}
+        {renderLoadingIndicator()}
         {renderControlPanel()}
         {renderStatusPanel()}
       </aside>

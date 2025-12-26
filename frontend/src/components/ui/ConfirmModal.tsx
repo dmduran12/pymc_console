@@ -17,6 +17,10 @@ interface ConfirmModalProps {
 /**
  * Reusable confirmation modal with dark glass styling
  * Mobile: Bottom sheet / Desktop: Centered modal
+ * 
+ * Cross-platform optimizations:
+ * - z-[10010] ensures modal is above all UI elements (sidebar uses 10001-10003)
+ * - Body scroll lock prevents background scrolling on mobile
  */
 function ConfirmModalComponent({
   isOpen,
@@ -28,16 +32,37 @@ function ConfirmModalComponent({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
-  // ESC key to close
+  // ESC key to close + body scroll lock
   useEffect(() => {
     if (!isOpen) return;
+    
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onCancel();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    
+    // Lock body scroll on mount (prevents background scrolling on mobile)
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalWidth = document.body.style.width;
+    const originalTop = document.body.style.top;
+    const scrollY = window.scrollY;
+    
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = `-${scrollY}px`;
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.width = originalWidth;
+      document.body.style.top = originalTop;
+      window.scrollTo(0, scrollY);
+    };
   }, [isOpen, onCancel]);
 
   if (!isOpen) return null;
@@ -61,15 +86,19 @@ function ConfirmModalComponent({
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-end sm:items-center justify-center"
+      className="fixed inset-0 bg-black/40 backdrop-blur-md z-[10010] flex items-end sm:items-center justify-center"
       onClick={onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-modal-title"
     >
       {/* Mobile: Bottom sheet / Desktop: Centered modal */}
       <div
         className={clsx(
           'glass-card w-full max-w-sm overflow-hidden',
           'sm:mx-4 sm:rounded-xl',
-          'rounded-t-2xl rounded-b-none sm:rounded-b-xl'
+          'rounded-t-2xl rounded-b-none sm:rounded-b-xl',
+          'pb-safe' // Safe area for notched devices
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -79,7 +108,7 @@ function ConfirmModalComponent({
             <div className={clsx('p-2 rounded-lg bg-bg-subtle', styles.icon)}>
               <AlertTriangle className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+            <h3 id="confirm-modal-title" className="text-base font-semibold text-text-primary">{title}</h3>
           </div>
           <button
             onClick={onCancel}

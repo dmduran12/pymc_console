@@ -7,6 +7,10 @@
  * 3. Building Topology
  * 
  * Then shows "Ready!" with a big checkmark before closing.
+ * 
+ * Cross-platform optimizations:
+ * - z-[10010] ensures modal is above all UI elements (sidebar uses 10001-10003)
+ * - Body scroll lock prevents background scrolling on mobile
  */
 
 import { memo, useEffect } from 'react';
@@ -78,16 +82,37 @@ function StepIndicator({ label, icon, status, detail }: StepIndicatorProps) {
 }
 
 function DeepAnalysisModalComponent({ isOpen, currentStep, packetCount, onClose }: DeepAnalysisModalProps) {
-  // ESC key to close (only when onClose provided and modal is closeable)
+  // ESC key to close + body scroll lock
   useEffect(() => {
-    if (!isOpen || !onClose) return;
+    if (!isOpen) return;
+    
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && onClose) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    
+    // Lock body scroll on mount (prevents background scrolling on mobile)
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalWidth = document.body.style.width;
+    const originalTop = document.body.style.top;
+    const scrollY = window.scrollY;
+    
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = `-${scrollY}px`;
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.width = originalWidth;
+      document.body.style.top = originalTop;
+      window.scrollTo(0, scrollY);
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -106,7 +131,12 @@ function DeepAnalysisModalComponent({ isOpen, currentStep, packetCount, onClose 
   };
   
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+    <div 
+      className="fixed inset-0 z-[10010] flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="deep-analysis-modal-title"
+    >
       {/* Backdrop - subtle blur, not too dark */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       
