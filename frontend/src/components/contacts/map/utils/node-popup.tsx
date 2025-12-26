@@ -15,8 +15,16 @@ import { NodeSparkline } from '../../NodeSparkline';
 // Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** TX delay recommendation from topology */
+/** TX delay recommendation from topology (MeshCore slot-aligned) */
 export interface TxDelayRec {
+  // New MeshCore-aligned fields
+  floodDelaySec?: number;
+  directDelaySec?: number;
+  floodSlots?: number;
+  directSlots?: number;
+  networkRole?: 'edge' | 'relay' | 'hub' | 'backbone';
+  rationale?: string;
+  // Legacy fields (backward compat)
   txDelayFactor: number;
   directTxDelayFactor: number;
   trafficIntensity: number;
@@ -24,6 +32,9 @@ export interface TxDelayRec {
   collisionRisk: number;
   confidence: number;
   insufficientData?: boolean;
+  // Observer bias correction fields
+  observationSymmetry?: number;
+  dataConfidence?: 'insufficient' | 'low' | 'medium' | 'high';
 }
 
 /** Full affinity data from topology */
@@ -220,12 +231,65 @@ export function NodePopupContent({
       {/* ═══ ROW 6: Footer - TX Recs (left) + Remove (right) ═══ */}
       {(hasTxRecs || onRemove) && (
         <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/5">
-          {/* TX Recommendations */}
+          {/* TX Recommendations - MeshCore slot-aligned */}
           {hasTxRecs ? (
-            <div className="flex items-center gap-1.5 text-[10px] text-text-muted/60">
-              <span className="uppercase text-[8px] font-semibold tracking-wide text-text-muted/40">TX</span>
-              <span>F <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span></span>
-              <span>D <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span></span>
+            <div className="flex flex-col gap-0.5 text-[10px] text-text-muted/60">
+              <div className="flex items-center gap-1.5">
+                <span className="uppercase text-[8px] font-semibold tracking-wide text-text-muted/40">TX</span>
+                {/* Show slot counts if available, otherwise fall back to legacy values */}
+                {txDelayRec.floodSlots !== undefined ? (
+                  <>
+                    <span>
+                      F <span className={`font-semibold tabular-nums ${
+                        txDelayRec.dataConfidence === 'low' ? 'text-amber-400/50' : 'text-amber-400'
+                      }`}>
+                        {txDelayRec.floodDelaySec?.toFixed(1)}s
+                      </span>
+                      <span className="text-text-muted/40"> ({txDelayRec.floodSlots})</span>
+                    </span>
+                    <span>
+                      D <span className={`font-semibold tabular-nums ${
+                        txDelayRec.dataConfidence === 'low' ? 'text-amber-400/50' : 'text-amber-400'
+                      }`}>
+                        {txDelayRec.directDelaySec?.toFixed(1)}s
+                      </span>
+                      <span className="text-text-muted/40"> ({txDelayRec.directSlots})</span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>F <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.txDelayFactor.toFixed(2)}</span></span>
+                    <span>D <span className="font-semibold text-amber-400 tabular-nums">{txDelayRec.directTxDelayFactor.toFixed(2)}</span></span>
+                  </>
+                )}
+                {/* Data confidence indicator */}
+                {txDelayRec.dataConfidence === 'low' && (
+                  <span className="text-[9px] text-amber-500" title="Low confidence - limited data or asymmetric traffic">⚠️</span>
+                )}
+                {txDelayRec.dataConfidence === 'high' && (
+                  <span className="text-[9px] text-green-400" title="High confidence - good bidirectional visibility">✓</span>
+                )}
+              </div>
+              {/* Show network role and symmetry info */}
+              <div className="flex items-center gap-1">
+                {txDelayRec.networkRole && (
+                  <span className="text-[9px] text-text-muted/40 capitalize">
+                    {txDelayRec.networkRole}
+                  </span>
+                )}
+                {txDelayRec.observationSymmetry !== undefined && (
+                  <span className={`text-[9px] ${
+                    txDelayRec.observationSymmetry >= 0.5 
+                      ? 'text-green-400/60' 
+                      : txDelayRec.observationSymmetry < 0.3 
+                        ? 'text-amber-500/60' 
+                        : 'text-text-muted/40'
+                  }`} title={`Edge symmetry: ${Math.round(txDelayRec.observationSymmetry * 100)}% bidirectional`}>
+                    {txDelayRec.observationSymmetry >= 0.5 ? '↔' : txDelayRec.observationSymmetry < 0.3 ? '→' : '⇄'}
+                    {Math.round(txDelayRec.observationSymmetry * 100)}%
+                  </span>
+                )}
+              </div>
             </div>
           ) : (
             <div /> /* Spacer */

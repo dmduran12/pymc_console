@@ -14,6 +14,7 @@ import { NoiseFloorHeatmap } from '@/components/charts/NoiseFloorHeatmap';
 import { NetworkCompositionChart } from '@/components/charts/NetworkCompositionChart';
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 import { combineTxBuckets, toUtilSamples, type UtilSample } from '@/lib/spectrum-utils';
+import { DisambiguationCard } from '@/components/stats/DisambiguationCard';
 
 // ============================================================================
 // Airtime Utilization Data Processing
@@ -287,6 +288,9 @@ export default function Statistics() {
                 height={176}
               />
             </div>
+
+            {/* Prefix Disambiguation Stats */}
+            <DisambiguationCard />
           </div>
         </>
       )}
