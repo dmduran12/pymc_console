@@ -45,18 +45,24 @@ const useSparklineStoreBase = create<SparklineState>((set) => ({
 
 // Subscribe to sparkline service updates
 // This connects the worker results to the Zustand store
+// Deferred to avoid immediate notification during module initialization
 if (typeof window !== 'undefined') {
-  sparklineService.subscribe((sparklines, isComputing) => {
-    const state = useSparklineStoreBase.getState();
-    
-    if (isComputing && !state.isComputing) {
-      state.setComputing(true);
-    } else if (!isComputing && sparklines.size > 0) {
-      state.setSparklines(sparklines);
-    } else if (!isComputing && state.isComputing) {
-      state.setComputing(false);
-    }
-  });
+  // Use setTimeout to defer subscription until after initial React render
+  // This prevents the immediate notification from causing render issues
+  setTimeout(() => {
+    sparklineService.subscribe((sparklines, isComputing) => {
+      const state = useSparklineStoreBase.getState();
+      
+      // Batch state updates to avoid multiple re-renders
+      if (isComputing && !state.isComputing) {
+        state.setComputing(true);
+      } else if (!isComputing && sparklines.size > 0) {
+        state.setSparklines(sparklines);
+      } else if (!isComputing && state.isComputing) {
+        state.setComputing(false);
+      }
+    });
+  }, 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -85,6 +91,9 @@ export const useHasSparklines = () => useSparklineStoreBase((s) => s.sparklines.
 // Per-node selector (memoized via Zustand's equality check)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Stable empty array reference to avoid new references on every call
+const EMPTY_SPARKLINE: SparklineDataPoint[] = [];
+
 // Cache for individual sparkline selectors to maintain referential stability
 const sparklineSelectors = new Map<string, SparklineDataPoint[]>();
 
@@ -100,8 +109,8 @@ export function useSparkline(nodeHash: string): SparklineDataPoint[] {
     const data = s.sparklines.get(nodeHash);
     
     if (!data || data.length === 0) {
-      // Return stable empty array reference
-      return [];
+      // Return stable empty array reference (CRITICAL: must be same reference!)
+      return EMPTY_SPARKLINE;
     }
     
     // Check if we have a cached version with same reference
