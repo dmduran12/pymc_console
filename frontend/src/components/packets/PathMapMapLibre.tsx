@@ -60,6 +60,7 @@ const DESIGN = {
 
 const HIGHLIGHT_COLOR = '#B49DFF'; // Lavender accent for hovered nodes
 const SOURCE_COLOR = '#39D98A';    // Green for source node
+const DESTINATION_COLOR = '#B49DFF'; // Lavender for destination node
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Icon Creation
@@ -73,17 +74,20 @@ function createPathNodeIconHtml(
   isHub: boolean,
   isPrimary: boolean,
   isHighlighted: boolean = false,
-  isSource: boolean = false
+  isSource: boolean = false,
+  isDestination: boolean = false
 ): string {
   // Highlighted nodes get a ring around them
   const highlightRing = isHighlighted 
     ? `box-shadow: 0 0 0 3px ${HIGHLIGHT_COLOR}40, 0 0 8px ${HIGHLIGHT_COLOR}60;`
     : '';
   
-  // Source nodes are green, others follow normal logic
+  // Source/destination/local/hub get filled colors; others are rings
   let fillColor: string;
   if (isSource) {
     fillColor = SOURCE_COLOR;
+  } else if (isDestination) {
+    fillColor = DESTINATION_COLOR;
   } else if (isLocal) {
     fillColor = DESIGN.localColor;
   } else if (isHub) {
@@ -94,8 +98,9 @@ function createPathNodeIconHtml(
     fillColor = DESIGN.ambiguousColor;
   }
   
-  const borderColor = (isLocal || isHub || !isPrimary || isSource) ? 'transparent' : DESIGN.nodeColor;
-  const borderWidth = (isLocal || isHub || !isPrimary || isSource) ? 0 : RING_THICKNESS;
+  const isFilled = isLocal || isHub || !isPrimary || isSource || isDestination;
+  const borderColor = isFilled ? 'transparent' : DESIGN.nodeColor;
+  const borderWidth = isFilled ? 0 : RING_THICKNESS;
   
   return `<div style="
     width: ${MARKER_SIZE}px;
@@ -160,6 +165,7 @@ export default function PathMapMapLibre({
     isHub: boolean;
     isPrimary: boolean;
     isSource: boolean;
+    isDestination: boolean;
   }
   
   const { positions, markers, pathLineGeoJSON } = useMemo(() => {
@@ -167,22 +173,30 @@ export default function PathMapMapLibre({
     const markers: MarkerData[] = [];
     const pathLineCoords: [number, number][] = []; // [lng, lat] for GeoJSON
     
+    // Helper: check if coordinates are valid (not 0,0 which means "no location")
+    const hasValidCoords = (lat: number, lng: number): boolean => {
+      return lat !== 0 || lng !== 0;
+    };
+    
     resolvedPath.hops.forEach((hop, hopIndex) => {
-      if (hop.candidates.length === 0) return;
+      // Filter to only candidates with valid coordinates
+      const validCandidates = hop.candidates.filter(c => hasValidCoords(c.latitude, c.longitude));
+      if (validCandidates.length === 0) return;
       
       // Sort candidates by probability (highest first)
-      const sortedCandidates = [...hop.candidates].sort((a, b) => b.probability - a.probability);
+      const sortedCandidates = [...validCandidates].sort((a, b) => b.probability - a.probability);
       
-      // For path line, use the most likely candidate
+      // For path line, use the most likely candidate with valid coords
       const primaryCandidate = sortedCandidates[0];
       // GeoJSON uses [lng, lat] format
       pathLineCoords.push([primaryCandidate.longitude, primaryCandidate.latitude]);
       
-      // Check if this is a source hop
-      const isSourceHop = 'isSource' in hop && hop.isSource === true;
+      // Check if this is a source or destination hop
+      const isSourceHop = hop.isSource === true;
+      const isDestinationHop = hop.isDestination === true;
       
-      // Add markers for all candidates
-      hop.candidates.forEach((candidate, candidateIndex) => {
+      // Add markers for all valid candidates
+      validCandidates.forEach((candidate, candidateIndex) => {
         const pos: [number, number] = [candidate.latitude, candidate.longitude];
         positions.push(pos);
         const isPrimary = candidateIndex === 0;
@@ -190,12 +204,13 @@ export default function PathMapMapLibre({
           position: pos,
           prefix: hop.prefix,
           confidence: hop.confidence,
-          candidateCount: hop.candidates.length,
+          candidateCount: validCandidates.length,
           hopIndex,
           candidate,
           isHub: hubSet.has(candidate.hash),
           isPrimary,
           isSource: isSourceHop,
+          isDestination: isDestinationHop,
         });
       });
     });
@@ -341,7 +356,8 @@ export default function PathMapMapLibre({
                   marker.isHub,
                   marker.isPrimary,
                   isHighlighted,
-                  marker.isSource
+                  marker.isSource,
+                  marker.isDestination
                 )
               }}
             />
@@ -368,6 +384,12 @@ export default function PathMapMapLibre({
                   className="px-1 py-0.5 text-[8px] font-bold rounded"
                   style={{ backgroundColor: SOURCE_COLOR, color: '#000' }}
                 >SRC</span>
+              )}
+              {popupInfo.marker.isDestination && (
+                <span 
+                  className="px-1 py-0.5 text-[8px] font-bold rounded"
+                  style={{ backgroundColor: DESTINATION_COLOR, color: '#000' }}
+                >DST</span>
               )}
               {popupInfo.marker.isHub && (
                 <span 
