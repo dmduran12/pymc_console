@@ -14,10 +14,8 @@ import {
 import { SignalIndicator, getSignalQualityLabel } from './SignalIndicator';
 import { PacketDirection, getPacketStatusText, getPacketStatusColor } from './PacketDirection';
 import { PathMapVisualization } from './PathMapVisualization';
-import { useStats, usePackets } from '@/lib/stores/useStore';
-import { useHubNodeSet } from '@/lib/stores/useTopologyStore';
-import { buildNeighborAffinity } from '@/lib/mesh-topology';
-import { buildPrefixLookup } from '@/lib/prefix-disambiguation';
+import { useStats } from '@/lib/stores/useStore';
+import { useHubNodeSet, useFullAffinity } from '@/lib/stores/useTopologyStore';
 
 interface PacketDetailModalProps {
   packet: Packet;
@@ -86,10 +84,11 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
   
-  // Get neighbors, packets, and local node info from store for path visualization
+  // Get neighbors and local node info from store for path visualization
   const stats = useStats();
-  const packets = usePackets();
   const hubNodes = useHubNodeSet();
+  // Use pre-computed affinity from topology store (avoids expensive recomputation)
+  const fullAffinity = useFullAffinity();
 
   const payloadTypeName =
     packet.payload_type_name || getPayloadTypeName(packet.payload_type ?? packet.type);
@@ -115,33 +114,9 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
   
   const neighbors = stats?.neighbors ?? {};
   
-  // Build affinity data for multi-factor confidence scoring
-  const neighborAffinity = useMemo(() => {
-    if (!packets.length || !neighbors || Object.keys(neighbors).length === 0) {
-      return undefined;
-    }
-    return buildNeighborAffinity(
-      packets,
-      neighbors,
-      stats?.config?.repeater?.latitude,
-      stats?.config?.repeater?.longitude,
-      stats?.local_hash
-    );
-  }, [packets, neighbors, stats?.config?.repeater?.latitude, stats?.config?.repeater?.longitude, stats?.local_hash]);
-  
-  // Build prefix disambiguation lookup for accurate confidence scoring
-  const prefixLookup = useMemo(() => {
-    if (!packets.length || !neighbors || Object.keys(neighbors).length === 0) {
-      return undefined;
-    }
-    return buildPrefixLookup(
-      packets,
-      neighbors,
-      stats?.local_hash,
-      stats?.config?.repeater?.latitude,
-      stats?.config?.repeater?.longitude
-    );
-  }, [packets, neighbors, stats?.local_hash, stats?.config?.repeater?.latitude, stats?.config?.repeater?.longitude]);
+  // Use pre-computed affinity from topology store
+  // This avoids expensive recomputation on every modal open
+  const neighborAffinity = fullAffinity.size > 0 ? fullAffinity : undefined;
   
   const payloadDecoded = tryDecodePayload(packet.payload);
   const hasPayload = packet.payload && packet.payload.length > 0;
@@ -288,7 +263,6 @@ function PacketDetailModalComponent({ packet, onClose }: PacketDetailModalProps)
                     localHash={stats?.local_hash}
                     srcHash={packet.src_hash}
                     neighborAffinity={neighborAffinity}
-                    prefixLookup={prefixLookup}
                     hubNodes={[...hubNodes]}
                   />
                 </div>
