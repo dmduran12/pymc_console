@@ -2566,3 +2566,48 @@ body {
 .mini-widget-value.fair { color: var(--signal-fair); }
 .mini-widget-value.poor { color: var(--signal-poor); }
 .mini-widget-value.critical { color: var(--signal-critical); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SAFE AREA UTILITIES
+   For notched devices (iPhone X+, Android with cutouts)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Padding utilities for safe areas */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+/* Combined safe area padding */
+.p-safe {
+  padding-top: env(safe-area-inset-top, 0);
+  padding-right: env(safe-area-inset-right, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+/* Shimmer animation for loading indicators */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0.5;
+  }
+}

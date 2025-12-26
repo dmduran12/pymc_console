@@ -4,24 +4,19 @@
  * Shows at-a-glance traffic trend for a node based on packet appearances.
  * Uses 6-hour buckets (28 data points for 7 days).
  * 
- * If less than 7 days of data, the chart starts from the earliest packet
- * and doesn't artificially fill the left side.
+ * Data is pre-computed in a Web Worker (sparkline-service.ts) and stored
+ * in Zustand (useSparklineStore.ts). This component just renders the cached data.
  */
 
-import { useMemo } from 'react';
 import { ResponsiveContainer, LineChart, Line, Area, ComposedChart, Tooltip } from 'recharts';
-import { packetCache } from '@/lib/packet-cache';
-import { usePacketCacheState } from '@/lib/stores/useStore';
-import type { Packet } from '@/types/api';
-import { getHashPrefix, prefixMatches } from '@/lib/path-utils';
+import { useSparkline, useIsComputingSparklines, type SparklineDataPoint } from '@/lib/stores/useSparklineStore';
+
+// Re-export type for consumers
+export type { SparklineDataPoint };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════════
-
-const BUCKET_HOURS = 6;  // 6-hour buckets
-const MAX_BUCKETS = 28;  // 7 days = 28 buckets (display window)
-const MS_PER_BUCKET = BUCKET_HOURS * 60 * 60 * 1000;
 
 // Color scale for activity health (CSS variable names)
 const COLOR_CRITICAL = 'var(--signal-critical)';  // Red - no activity
@@ -29,119 +24,7 @@ const COLOR_POOR = 'var(--signal-poor)';          // Orange - very low
 const COLOR_FAIR = 'var(--signal-fair)';          // Yellow - low
 const COLOR_GOOD = 'var(--signal-good)';          // Green - normal
 const COLOR_EXCELLENT = 'var(--signal-excellent)';// Bright green - high
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Data Computation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export interface SparklineDataPoint {
-  /** Bucket index (0 = oldest) */
-  idx: number;
-  /** Packet count in this bucket */
-  count: number;
-  /** Timestamp of bucket start */
-  timestamp: number;
-}
-
-/**
- * Compute sparkline data for a node from cached packets.
- * 
- * Counts packets where the node appears in the forwarding path.
- * This matches how topology's `frequency` is calculated - counting
- * appearances in packet paths to show network activity.
- * 
- * @param nodeHash - Full hash of the node (e.g., "0x19ABCDEF")
- * @param packets - Array of packets to analyze
- * @returns Array of data points for the sparkline
- */
-export function computeNodeSparkline(
-  nodeHash: string,
-  packets: Packet[]
-): SparklineDataPoint[] {
-  if (!nodeHash || packets.length === 0) return [];
-  
-  const prefix = getHashPrefix(nodeHash);
-  const now = Date.now();
-  const displayStart = now - (7 * 24 * 60 * 60 * 1000); // 7 days for display buckets
-  
-  // Initialize buckets
-  const buckets = new Map<number, number>();
-  
-  // Track earliest packet timestamp to avoid filling empty left side
-  let earliestPacketTs = now;
-  let hasAnyData = false;
-  
-  for (const packet of packets) {
-    const ts = packet.timestamp * 1000; // Convert to ms if needed
-    const normalizedTs = ts > 1e12 ? ts : ts * 1000; // Handle both ms and seconds
-    
-    // Check if this node appears in the packet's forwarding path
-    // This matches topology's affinity.frequency counting
-    let isInvolved = false;
-    
-    // Get path - may be array or JSON string
-    const rawPath: string | string[] | undefined = packet.forwarded_path ?? packet.original_path;
-    let path: string[] | null = null;
-    
-    // Handle JSON string format (common from API)
-    if (typeof rawPath === 'string') {
-      try {
-        path = JSON.parse(rawPath);
-      } catch {
-        path = null;
-      }
-    } else if (Array.isArray(rawPath)) {
-      path = rawPath;
-    }
-    
-    if (path && Array.isArray(path) && path.length > 0) {
-      for (const hop of path) {
-        // Path hops are 2-char prefixes, compare directly (case-insensitive)
-        if (String(hop).toUpperCase() === prefix) {
-          isInvolved = true;
-          break;
-        }
-      }
-    }
-    
-    // Also check src_hash for direct packets (empty path)
-    if (!isInvolved && (!path || !Array.isArray(path) || path.length === 0) && packet.src_hash) {
-      if (prefixMatches(prefix, packet.src_hash)) isInvolved = true;
-    }
-    
-    if (isInvolved) {
-      hasAnyData = true;
-      
-      // Only bucket packets in the 7-day display window
-      if (normalizedTs >= displayStart) {
-        earliestPacketTs = Math.min(earliestPacketTs, normalizedTs);
-        
-        // Calculate bucket index from the start of 7-day display window
-        const bucketIdx = Math.floor((normalizedTs - displayStart) / MS_PER_BUCKET);
-        const clampedIdx = Math.max(0, Math.min(MAX_BUCKETS - 1, bucketIdx));
-        
-        buckets.set(clampedIdx, (buckets.get(clampedIdx) || 0) + 1);
-      }
-    }
-  }
-  
-  if (!hasAnyData) return [];
-  
-  // Determine the starting bucket (don't fill empty left side)
-  const startBucketIdx = Math.max(0, Math.floor((earliestPacketTs - displayStart) / MS_PER_BUCKET));
-  
-  // Build result array from first data to now
-  const result: SparklineDataPoint[] = [];
-  for (let i = startBucketIdx; i < MAX_BUCKETS; i++) {
-    result.push({
-      idx: i - startBucketIdx,  // Normalize to 0-based
-      count: buckets.get(i) || 0,
-      timestamp: displayStart + (i * MS_PER_BUCKET),
-    });
-  }
-  
-  return result;
-}
+const COLOR_LOADING = 'var(--text-muted)';        // Gray - loading state
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Component
@@ -221,13 +104,14 @@ function SparklineTooltip({ active, payload }: { active?: boolean; payload?: Arr
 
 /**
  * Compact sparkline showing 7-day packet activity trend for a node.
- * Automatically fetches data from the packet cache.
+ * Data is pre-computed by sparkline worker - this component just renders.
  * 
  * Color coding:
  * - Green: Normal/high activity
  * - Yellow: Below average activity  
  * - Orange: Very low activity
  * - Red: No recent activity (last 24h)
+ * - Gray dashed: Loading/computing
  */
 export function NodeSparkline({
   nodeHash,
@@ -238,20 +122,12 @@ export function NodeSparkline({
   showTooltip = false,
   className = '',
 }: NodeSparklineProps) {
-  // Subscribe to cache state to trigger re-render when packets load
-  const cacheState = usePacketCacheState();
-  
-  // Get packets from cache and compute sparkline data
-  // Re-compute when cache state changes (background/deep load completion)
-  // Note: cacheState triggers re-render, packetCount access is inside useMemo
-  const data = useMemo(() => {
-    const packets = packetCache.getPackets();
-    return computeNodeSparkline(nodeHash, packets);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeHash, cacheState]);
+  // Get pre-computed sparkline data from store (instant, no computation)
+  const data = useSparkline(nodeHash);
+  const isComputing = useIsComputingSparklines();
   
   // Determine color based on health (or use provided color)
-  const lineColor = color ?? getHealthColor(data);
+  const lineColor = color ?? (data.length > 0 ? getHealthColor(data) : COLOR_LOADING);
   
   // Style object handles both number and string widths
   const containerStyle = {
@@ -259,13 +135,14 @@ export function NodeSparkline({
     height,
   };
   
-  // No data - render red dashed line (critical)
+  // No data - render dashed line (gray if loading, red if critical)
   if (data.length < 2) {
     const svgWidth = typeof width === 'number' ? width : 60;
+    const noDataColor = isComputing ? COLOR_LOADING : COLOR_CRITICAL;
     return (
       <div 
         className={`flex items-center justify-center ${className}`}
-        style={{ ...containerStyle, color: COLOR_CRITICAL }}
+        style={{ ...containerStyle, color: noDataColor }}
       >
         <svg width="100%" height={height} viewBox={`0 0 ${svgWidth} ${height}`} preserveAspectRatio="none">
           <line 
@@ -276,6 +153,7 @@ export function NodeSparkline({
             stroke="currentColor" 
             strokeWidth={1.5} 
             strokeDasharray="3,2"
+            className={isComputing ? 'animate-pulse' : ''}
           />
         </svg>
       </div>

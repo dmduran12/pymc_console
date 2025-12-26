@@ -17,6 +17,7 @@ import type { Stats, Packet, LogEntry, NeighborInfo } from '@/types/api';
 import * as api from '@/lib/api';
 import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
 import { topologyService } from '@/lib/topology-service';
+import { sparklineService } from '@/lib/sparkline-service';
 import { parsePacketPath, getHashPrefix } from '@/lib/path-utils';
 import { POLLING_INTERVALS } from '@/lib/constants';
 
@@ -361,6 +362,7 @@ interface StoreState {
   triggerTopologyCompute: () => void;
   triggerDeepAnalysis: () => Promise<void>;
   updateQuickNeighbors: () => void;
+  triggerSparklineCompute: () => void;
 }
 
 const store = create<StoreState>((set, get) => ({
@@ -413,6 +415,8 @@ const store = create<StoreState>((set, get) => ({
           // Recompute topology with full packet set AND update quick neighbors
           get().triggerTopologyCompute();
           get().updateQuickNeighbors();
+          // Recompute sparklines with full packet set
+          get().triggerSparklineCompute();
         }
       }
       wasBackgroundLoading = cacheState.isBackgroundLoading;
@@ -425,6 +429,8 @@ const store = create<StoreState>((set, get) => ({
           // Recompute topology with full packet set AND update quick neighbors
           get().triggerTopologyCompute();
           get().updateQuickNeighbors();
+          // Recompute sparklines with full packet set
+          get().triggerSparklineCompute();
         }
       }
       wasDeepLoading = cacheState.isDeepLoading;
@@ -446,9 +452,10 @@ const store = create<StoreState>((set, get) => ({
           packetsLoading: false,
           lastPacketTimestamp: newestTimestamp,
         });
-        // Trigger initial topology computation and quick neighbor detection
+        // Trigger initial topology computation, quick neighbor detection, and sparklines
         get().triggerTopologyCompute();
         get().updateQuickNeighbors();
+        get().triggerSparklineCompute();
       } else {
         set({ packetsLoading: false });
       }
@@ -734,6 +741,20 @@ const store = create<StoreState>((set, get) => ({
       set({ quickNeighbors });
       saveQuickNeighbors(quickNeighbors);
     }
+  },
+  
+  triggerSparklineCompute: () => {
+    const { packets, stats, hiddenContacts } = get();
+    if (packets.length === 0 || !stats) return;
+    
+    // Get all visible neighbor hashes for sparkline computation
+    const neighbors = stats.neighbors ?? {};
+    const visibleHashes = Object.keys(neighbors).filter(hash => !hiddenContacts.has(hash));
+    
+    if (visibleHashes.length === 0) return;
+    
+    // Trigger async computation in sparkline worker
+    sparklineService.compute(packets, visibleHashes);
   },
 }));
 
