@@ -99,9 +99,9 @@ export function useEdgeAnimation({
   // Track the last edge set signature to detect changes
   const lastEdgeSetRef = useRef<string>('');
   
-  // Snapshot refs for animation interpolation
-  const animStartWeightsRef = useRef<Map<string, number>>(new Map());
-  const animTargetWeightsRef = useRef<Map<string, number>>(new Map());
+  // Animation weight snapshots (state so they can be passed to children for render)
+  const [animStartWeights, setAnimStartWeights] = useState<Map<string, number>>(new Map());
+  const [animTargetWeights, setAnimTargetWeights] = useState<Map<string, number>>(new Map());
   
   // Track previous weights for next update cycle
   const prevWeightsRef = useRef<Map<string, number>>(new Map());
@@ -119,11 +119,12 @@ export function useEdgeAnimation({
     setEdgeAnimProgress(new Map());
     knownEdgesRef.current = new Set();
     lastEdgeSetRef.current = '';
-    animStartWeightsRef.current = new Map();
-    animTargetWeightsRef.current = new Map();
+    setAnimStartWeights(new Map());
+    setAnimTargetWeights(new Map());
   }, []);
   
   // Handle topology toggle - detect changes and trigger exit animation
+  // Note: setState calls in this effect are intentional for animation state machine transitions
   useEffect(() => {
     const wasShowing = prevShowTopologyRef.current;
     const isShowing = showTopology;
@@ -131,6 +132,7 @@ export function useEdgeAnimation({
     
     // Toggling OFF: start exit animation (retract edges toward nodes)
     if (wasShowing && !isShowing && !isExiting) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Animation state machine: trigger exit mode
       setIsExiting(true);
       
       // Capture current edge progress values as starting points for retraction
@@ -160,8 +162,8 @@ export function useEdgeAnimation({
           setEdgeAnimProgress(new Map());
           knownEdgesRef.current = new Set();
           lastEdgeSetRef.current = '';
-          animStartWeightsRef.current = new Map();
-          animTargetWeightsRef.current = new Map();
+          setAnimStartWeights(new Map());
+          setAnimTargetWeights(new Map());
         }
       };
       
@@ -213,12 +215,14 @@ export function useEdgeAnimation({
       if (edgesChanged && existingEdgeKeys.length > 0) {
         const startWeights = new Map<string, number>();
         for (const key of existingEdgeKeys) {
+          // Use the previously stored weight (from last render cycle)
           const prevWeight = prevWeightsRef.current.get(key);
           if (prevWeight !== undefined) {
             startWeights.set(key, prevWeight);
           }
         }
-        animStartWeightsRef.current = startWeights;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: initialize animation interpolation state
+        setAnimStartWeights(startWeights);
         setWeightAnimProgress(0);
       }
       
@@ -228,8 +232,7 @@ export function useEdgeAnimation({
         const weight = getWeight(edge.certainCount, maxCertainCount);
         targetWeights.set(edge.key, weight);
       }
-      animTargetWeightsRef.current = targetWeights;
-      
+      setAnimTargetWeights(targetWeights);
       // Initialize new edges at progress 0
       setEdgeAnimProgress(prev => {
         const next = new Map(prev);
@@ -317,8 +320,8 @@ export function useEdgeAnimation({
     edgeAnimProgress,
     weightAnimProgress,
     isExiting,
-    animStartWeights: animStartWeightsRef.current,
-    animTargetWeights: animTargetWeightsRef.current,
+    animStartWeights,
+    animTargetWeights,
     resetAnimationState,
   };
 }

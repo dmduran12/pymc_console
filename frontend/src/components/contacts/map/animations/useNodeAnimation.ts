@@ -155,6 +155,7 @@ export function useNodeAnimation({
     if (animationTargets.length === 0) return;
     
     // Initialize animating nodes to their start opacity
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: initialize animation starting positions
     setNodeOpacities(prev => {
       const next = new Map(prev);
       for (const { hash, startOpacity } of animationTargets) {
@@ -211,7 +212,7 @@ export function useNodeAnimation({
         nodeAnimationFrameRef.current = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Intentionally depends only on mode changes. Refs handle other values.
   }, [soloDirect, soloHubs, neighborHashes]);
   
   // Helper to get effective opacity for a node

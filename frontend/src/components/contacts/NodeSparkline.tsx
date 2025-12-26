@@ -80,7 +80,7 @@ export function computeNodeSparkline(
     let isInvolved = false;
     
     // Get path - may be array or JSON string
-    let rawPath: string | string[] | undefined = packet.forwarded_path ?? packet.original_path;
+    const rawPath: string | string[] | undefined = packet.forwarded_path ?? packet.original_path;
     let path: string[] | null = null;
     
     // Handle JSON string format (common from API)
@@ -242,11 +242,13 @@ export function NodeSparkline({
   const cacheState = usePacketCacheState();
   
   // Get packets from cache and compute sparkline data
-  // Re-compute when packet count changes (background/deep load completion)
+  // Re-compute when cache state changes (background/deep load completion)
+  // Note: cacheState triggers re-render, packetCount access is inside useMemo
   const data = useMemo(() => {
     const packets = packetCache.getPackets();
     return computeNodeSparkline(nodeHash, packets);
-  }, [nodeHash, cacheState.packetCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeHash, cacheState]);
   
   // Determine color based on health (or use provided color)
   const lineColor = color ?? getHealthColor(data);

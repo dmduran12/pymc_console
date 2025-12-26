@@ -901,11 +901,13 @@ export function findNetworkLoops(
  * - Edge packet count (total packets flowing through edges connected to this node)
  * - Number of direct neighbors (topology edges connected to this node)
  * - Edge validation strength (how well-validated the node's connections are)
+ * - Edge symmetry ratio (symmetric traffic = more likely a true hub)
  * 
  * Phase 6 enhancements:
  * - Path position tracking (first hop = higher delay needed)
  * - Flood participation rate (congestion indicator)
  * - Path diversity (routing importance)
+ * - Airtime-aware position delays (MeshCore-aligned)
  * 
  * Nodes with <100 packets get an "insufficient data" result.
  * 
@@ -914,6 +916,7 @@ export function findNetworkLoops(
  * @param packets - All packets for timing analysis
  * @param pathRegistry - Registry of observed paths for Phase 6 metrics
  * @param neighbors - Neighbor map for prefix matching (reserved for future use)
+ * @param airtimeMs - Estimated airtime in ms for a typical packet (for position delays)
  * @returns Map of node hash -> TxDelayRecommendation
  */
 function calculateNodeTxDelays(
@@ -921,7 +924,8 @@ function calculateNodeTxDelays(
   nodePathCounts: Map<string, number>,
   packets: Packet[],
   pathRegistry: PathRegistry,
-  _neighbors: Record<string, NeighborInfo>
+  _neighbors: Record<string, NeighborInfo>,
+  airtimeMs?: number
 ): Map<string, TxDelayRecommendation> {
   const recommendations = new Map<string, TxDelayRecommendation>();
   
@@ -953,6 +957,7 @@ function calculateNodeTxDelays(
     avgEdgeValidation: number;    // Average certainCount of connected edges
     maxEdgeValidation: number;    // Max certainCount of connected edges
     pathCount: number;            // Paths this node appeared in
+    avgSymmetryRatio: number;     // Average edge symmetry (0-1, 1 = perfectly bidirectional)
   }>();
   
   // Find max values across all nodes for relative comparison
@@ -966,11 +971,12 @@ function calculateNodeTxDelays(
       e => e.fromHash === nodeHash || e.toHash === nodeHash
     );
     
-    // Count unique neighbors from edges
+    // Count unique neighbors from edges and calculate symmetry
     const neighborHashes = new Set<string>();
     let totalPacketCount = 0;
     let totalCertainCount = 0;
     let maxCertain = 0;
+    let symmetrySum = 0;
     
     for (const edge of connectedEdges) {
       const otherHash = edge.fromHash === nodeHash ? edge.toHash : edge.fromHash;
@@ -978,11 +984,16 @@ function calculateNodeTxDelays(
       totalPacketCount += edge.packetCount;
       totalCertainCount += edge.certainCount;
       maxCertain = Math.max(maxCertain, edge.certainCount);
+      // Accumulate symmetry ratios (0 = unidirectional, 1 = perfectly symmetric)
+      symmetrySum += edge.symmetryRatio;
     }
     
     const directNeighborCount = neighborHashes.size;
     const avgValidation = connectedEdges.length > 0 
       ? totalCertainCount / connectedEdges.length 
+      : 0;
+    const avgSymmetryRatio = connectedEdges.length > 0
+      ? symmetrySum / connectedEdges.length
       : 0;
     const pathCount = nodePathCounts.get(nodeHash) || 0;
     
@@ -992,6 +1003,7 @@ function calculateNodeTxDelays(
       avgEdgeValidation: avgValidation,
       maxEdgeValidation: maxCertain,
       pathCount,
+      avgSymmetryRatio,
     });
     
     // Track maximums (only from nodes with sufficient data)
@@ -1085,12 +1097,20 @@ function calculateNodeTxDelays(
       ? metrics.pathCount / maxPathCount 
       : 0;
     
+    // Symmetry factor: symmetric traffic = more likely a true hub (not observer bias)
+    // High symmetry (>0.7) suggests this node sees traffic in both directions,
+    // indicating it's genuinely central to the network, not just on our path.
+    // We use symmetry as a confidence-booster for collision risk.
+    const symmetryBoost = metrics.avgSymmetryRatio;
+    
     // Collision risk based on this node's actual metrics
-    // Weight: neighbors (40%), traffic (35%), path centrality (25%)
+    // Weight: neighbors (35%), traffic (30%), path centrality (20%), symmetry (15%)
+    // Symmetry factor validates that traffic patterns are real (bidirectional = true hub)
     const collisionRisk = (
-      relativeNeighbors * 0.40 + 
-      relativeTraffic * 0.35 + 
-      relativePaths * 0.25
+      relativeNeighbors * 0.35 + 
+      relativeTraffic * 0.30 + 
+      relativePaths * 0.20 +
+      symmetryBoost * 0.15
     );
     
     // Calculate recommended tx_delay_factor
@@ -1111,28 +1131,36 @@ function calculateNodeTxDelays(
     // Round to 2 decimal places
     txDelayFactor = Math.round(txDelayFactor * 100) / 100;
     
-    // Direct TX delay is typically 30-40% of flood delay
-    const directTxDelayFactor = Math.round(txDelayFactor * 0.35 * 100) / 100;
+    // Direct TX delay is ~20% of flood delay
+    // Direct routing has pre-computed paths and lower collision risk than flood routing
+    const directTxDelayFactor = Math.round(txDelayFactor * 0.20 * 100) / 100;
     
     // Confidence based on edge validation strength for THIS node
     const validationConfidence = Math.min(metrics.avgEdgeValidation / 10, 1);
     const sampleConfidence = Math.min(packets.length / 500, 1);
     const confidence = Math.round((validationConfidence * 0.6 + sampleConfidence * 0.4) * 100) / 100;
     
-    // Phase 6: Position-based delay adjustment
+    // Phase 6: Position-based delay adjustment (airtime-aware)
+    // MeshCore calculates delay based on airtime: (airtime * 1.04) / 2
+    // We use this as a base unit and scale by path position.
     // Nodes early in paths (position 1-2) need HIGHER delays (more collision potential)
-    // Nodes later in paths can use lower delays
+    // Nodes later in paths can use lower delays.
+    //
+    // Default airtime ~100ms if not provided (typical for SF10 BW125)
+    const effectiveAirtimeMs = airtimeMs ?? 100;
+    const baseDelayUnit = (effectiveAirtimeMs * 1.04) / 2; // MeshCore formula
+    
     let positionDelayMs = 0;
     if (avgPathPosition > 0) {
       if (avgPathPosition <= 1.5) {
-        // First hop position - highest delay
-        positionDelayMs = 50;
+        // First hop position - highest delay (~1x base unit)
+        positionDelayMs = Math.round(baseDelayUnit * 1.0);
       } else if (avgPathPosition <= 2.5) {
-        // Second hop
-        positionDelayMs = 30;
+        // Second hop (~0.6x base unit)
+        positionDelayMs = Math.round(baseDelayUnit * 0.6);
       } else if (avgPathPosition <= 3.5) {
-        // Third hop
-        positionDelayMs = 15;
+        // Third hop (~0.3x base unit)
+        positionDelayMs = Math.round(baseDelayUnit * 0.3);
       }
       // Further hops get no additional delay
     }
@@ -1614,6 +1642,7 @@ function calculatePathHealth(
  * @param confidenceThreshold - Minimum per-hop confidence to include (default 0.5)
  * @param localLat - Local node latitude (for proximity calculations)
  * @param localLon - Local node longitude (for proximity calculations)
+ * @param airtimeMs - Estimated airtime in ms for a typical packet (for TX delay calculations)
  * @returns MeshTopology with edges, centrality, and hub nodes
  */
 export function buildMeshTopology(
@@ -1622,7 +1651,8 @@ export function buildMeshTopology(
   localHash?: string,
   confidenceThreshold: number = 0.5, // Lower threshold to capture more topology
   localLat?: number,
-  localLon?: number
+  localLon?: number,
+  airtimeMs?: number
 ): MeshTopology {
   // IMPORTANT: Sort packets by timestamp for deterministic processing
   // This ensures the same packet data produces the same topology regardless of fetch order
@@ -2024,23 +2054,55 @@ export function buildMeshTopology(
     }
   }
   
-  // Identify hub nodes using TWO criteria:
+  // Identify hub nodes using THREE criteria:
   // 1. Bridge hubs: nodes that appear in the MIDDLE of many paths (high betweenness centrality)
   // 2. Gateway hubs: nodes at position 1 (last hop to local) with high traffic volume
+  // 3. Symmetry boost: nodes with symmetric traffic are more likely true hubs (not observer bias)
   //
   // The second criterion fixes a bug where gateway nodes that forward lots of traffic
   // to local but never appear in the middle of paths were not identified as hubs.
+  // The third criterion uses edge symmetry as a confidence booster for hub status.
   const minPathsForHub = Math.max(MIN_EDGE_VALIDATIONS, Math.floor(packets.length * 0.01)); // At least 3 or 1% of packets
   const hubNodesSet = new Set<string>();
   
+  // Pre-compute average symmetry per node from accumulators
+  // Symmetry = bidirectional traffic, indicates true hub vs observer bias
+  const nodeSymmetry = new Map<string, { sum: number; count: number }>();
+  for (const acc of accumulators.values()) {
+    const totalDir = acc.forwardCount + acc.reverseCount;
+    const symRatio = totalDir > 0 
+      ? Math.min(acc.forwardCount, acc.reverseCount) / Math.max(acc.forwardCount, acc.reverseCount)
+      : 0;
+    
+    // Add to both endpoints
+    for (const hash of [acc.fromHash, acc.toHash]) {
+      const existing = nodeSymmetry.get(hash) || { sum: 0, count: 0 };
+      existing.sum += symRatio;
+      existing.count++;
+      nodeSymmetry.set(hash, existing);
+    }
+  }
+  
   // === BRIDGE HUBS: High betweenness centrality ===
+  // Symmetry boosts the effective centrality score: symmetric nodes are more likely true hubs
   const sortedByCentrality = [...centrality.entries()]
     .filter(([hash, _]) => (nodePathCounts.get(hash) || 0) >= minPathsForHub)
-    .sort((a, b) => b[1] - a[1]);
+    .map(([hash, centralityScore]) => {
+      const sym = nodeSymmetry.get(hash);
+      const avgSymmetry = sym && sym.count > 0 ? sym.sum / sym.count : 0;
+      // Boost centrality by up to 20% for highly symmetric nodes
+      const symmetryBoost = avgSymmetry * 0.2;
+      return { hash, effectiveScore: centralityScore + symmetryBoost, rawScore: centralityScore, avgSymmetry };
+    })
+    .sort((a, b) => b.effectiveScore - a.effectiveScore);
   
-  // Take nodes with centrality >= 0.5 (normalized) as bridge hubs
-  for (const [hash, score] of sortedByCentrality) {
-    if (score >= 0.5) {
+  // Take nodes with effective centrality >= 0.5 as bridge hubs
+  // Also include nodes with lower centrality (>=0.35) if they have high symmetry (>=0.7)
+  for (const { hash, effectiveScore, rawScore, avgSymmetry } of sortedByCentrality) {
+    if (effectiveScore >= 0.5) {
+      hubNodesSet.add(hash);
+    } else if (rawScore >= 0.35 && avgSymmetry >= 0.7) {
+      // High symmetry compensates for lower centrality - this node sees bidirectional traffic
       hubNodesSet.add(hash);
     }
   }
@@ -2051,6 +2113,7 @@ export function buildMeshTopology(
   //
   // Gateway hub threshold: forwarded at least 5% of all packets as last hop
   // OR forwarded at least 100 packets as last hop (whichever is lower)
+  // Symmetry boost: nodes with bidirectional traffic get a lower threshold
   const minGatewayPackets = Math.min(100, Math.floor(packets.length * 0.05));
   const maxGatewayCount = Math.max(...nodeGatewayCounts.values(), 1);
   
@@ -2061,11 +2124,20 @@ export function buildMeshTopology(
     // Already identified as a bridge hub
     if (hubNodesSet.has(hash)) continue;
     
+    // Calculate symmetry for this node
+    const sym = nodeSymmetry.get(hash);
+    const avgSymmetry = sym && sym.count > 0 ? sym.sum / sym.count : 0;
+    
     // Gateway hub if:
     // 1. Forwarded significant traffic as last hop, OR
     // 2. Is the dominant gateway (handles >50% of last-hop traffic)
+    // 3. High symmetry nodes get a 30% lower threshold (they're more likely true hubs)
     const gatewayRatio = gatewayCount / maxGatewayCount;
-    if (gatewayCount >= minGatewayPackets || gatewayRatio >= 0.5) {
+    const effectiveThreshold = avgSymmetry >= 0.6 
+      ? Math.floor(minGatewayPackets * 0.7)  // 30% lower threshold for symmetric nodes
+      : minGatewayPackets;
+    
+    if (gatewayCount >= effectiveThreshold || gatewayRatio >= 0.5) {
       hubNodesSet.add(hash);
       // Also set centrality for gateway hubs based on gateway traffic share
       // This ensures they appear properly in centrality-based UI elements
@@ -2205,13 +2277,14 @@ export function buildMeshTopology(
   
   // === TX DELAY RECOMMENDATIONS FOR ALL NODES ===
   // Calculate recommended tx_delay and direct.tx_delay for all nodes with sufficient data
-  // Phase 6: Now includes path position metrics from pathRegistry
+  // Phase 6: Now includes path position metrics from pathRegistry and airtime-aware delays
   const txDelayRecommendations = calculateNodeTxDelays(
     edges,
     nodePathCounts,
     sortedPackets,
     pathRegistry,
-    neighbors
+    neighbors,
+    airtimeMs
   );
   
   // === PHASE 4: EDGE BETWEENNESS CENTRALITY ===

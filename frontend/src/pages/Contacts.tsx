@@ -70,7 +70,8 @@ export default function Contacts() {
   // Highlighted topology edge (from PathHealth panel)
   const [highlightedEdgeKey, setHighlightedEdgeKey] = useState<string | null>(null);
   
-  const contacts = stats?.neighbors ?? {};
+  // Memoize contacts to prevent unnecessary downstream re-renders
+  const contacts = useMemo(() => stats?.neighbors ?? {}, [stats?.neighbors]);
   
   // Filter out hidden contacts
   const visibleContacts = useMemo(() => {
@@ -79,12 +80,14 @@ export default function Contacts() {
     );
   }, [contacts, hiddenContacts]);
   
-  // Get local node info from config
-  const localNode = stats?.config?.repeater ? {
-    latitude: stats.config.repeater.latitude,
-    longitude: stats.config.repeater.longitude,
-    name: stats.config.node_name || 'Local Node'
-  } : undefined;
+  // Get local node info from config (memoized to prevent object recreation)
+  const localNode = useMemo(() => {
+    return stats?.config?.repeater ? {
+      latitude: stats.config.repeater.latitude,
+      longitude: stats.config.repeater.longitude,
+      name: stats.config.node_name || 'Local Node'
+    } : undefined;
+  }, [stats]);
   
   // Get local hash for zero-hop detection
   const localHash = stats?.local_hash;

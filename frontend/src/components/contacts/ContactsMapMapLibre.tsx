@@ -198,7 +198,7 @@ export default function ContactsMapMapLibre({
   // Neighbors with location
   const neighborsWithLocation = useMemo(() => {
     return Object.entries(neighbors).filter(
-      ([_, n]) => n.latitude && n.longitude
+      ([, n]) => n.latitude && n.longitude
     ) as [string, NeighborInfo][];
   }, [neighbors]);
   
@@ -210,7 +210,7 @@ export default function ContactsMapMapLibre({
       positions.push([localNode.latitude, localNode.longitude]);
     }
     
-    for (const [_, neighbor] of neighborsWithLocation) {
+    for (const [, neighbor] of neighborsWithLocation) {
       if (neighbor.latitude && neighbor.longitude) {
         positions.push([neighbor.latitude, neighbor.longitude]);
       }

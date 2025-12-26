@@ -178,13 +178,17 @@ class TopologyService {
   /**
    * Request topology computation.
    * Automatically debounces rapid calls and queues if worker is busy.
+   * 
+   * @param airtimeMs - Estimated airtime in ms for a typical packet (from radio config).
+   *                    Used to calculate MeshCore-aligned TX delay recommendations.
    */
   compute(
     packets: Packet[],
     neighbors: Record<string, NeighborInfo>,
     localHash?: string,
     localLat?: number,
-    localLon?: number
+    localLon?: number,
+    airtimeMs?: number
   ): void {
     const payload: TopologyWorkerRequest['payload'] = {
       packets,
@@ -192,6 +196,7 @@ class TopologyService {
       localHash,
       localLat,
       localLon,
+      airtimeMs,
     };
     
     // Clear existing debounce timer

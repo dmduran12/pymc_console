@@ -146,10 +146,6 @@ function detectQuickNeighbors(
     lastSeen: number;
   }>();
   
-  let packetsWithPath = 0;
-  let packetsResolved = 0;
-  let advertPackets = 0;
-  
   for (const packet of packets) {
     // Only use ADVERT packets (type=4) for neighbor detection
     const packetType = packet.type ?? packet.payload_type;
@@ -158,12 +154,8 @@ function detectQuickNeighbors(
     // Skip transmitted packets - we want received ADVERTs
     if (packet.transmitted === true) continue;
     
-    advertPackets++;
-    
     const parsed = parsePacketPath(packet, localHash);
     if (!parsed || parsed.effectiveLength === 0) continue;
-    
-    packetsWithPath++;
     
     // Last element in effective path is the last forwarder (transmitted directly to us)
     const lastHopPrefix = parsed.effective[parsed.effectiveLength - 1];
@@ -173,8 +165,6 @@ function detectQuickNeighbors(
     
     // Skip if prefix not found in our neighbors
     if (!resolvedHash) continue;
-    
-    packetsResolved++;
     
     // Accumulate stats
     const existing = lastHopStats.get(resolvedHash) || {

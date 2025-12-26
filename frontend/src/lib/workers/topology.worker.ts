@@ -18,6 +18,8 @@ export interface TopologyWorkerRequest {
     localHash?: string;
     localLat?: number;
     localLon?: number;
+    /** Estimated airtime in ms for a typical packet (from radio config) */
+    airtimeMs?: number;
   };
 }
 
@@ -81,7 +83,7 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
   const startTime = performance.now();
   
   try {
-    const { packets, neighbors, localHash, localLat, localLon } = payload;
+    const { packets, neighbors, localHash, localLat, localLon, airtimeMs } = payload;
     
     // Run the expensive computation
     // Use default confidence threshold (0.5) to capture more topology
@@ -92,7 +94,8 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
       localHash,
       0.5, // confidenceThreshold - lower to capture uncertain edges too
       localLat,
-      localLon
+      localLon,
+      airtimeMs
     );
     
     // Serialize Maps/Sets for postMessage (Maps/Sets aren't transferable)
