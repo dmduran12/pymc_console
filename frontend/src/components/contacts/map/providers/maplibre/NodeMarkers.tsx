@@ -108,6 +108,12 @@ interface NodeMarkerProps {
   isHovered: boolean;
   onHover: (hash: string | null) => void;
   onRequestRemove?: (hash: string, name: string) => void;
+  /** Whether this node's popup is currently open */
+  isPopupOpen: boolean;
+  /** Callback to open this node's popup (closes any other) */
+  onOpenPopup: (hash: string) => void;
+  /** Callback to close popup */
+  onClosePopup: () => void;
 }
 
 function NodeMarker({
@@ -125,8 +131,10 @@ function NodeMarker({
   isHovered,
   onHover,
   onRequestRemove,
+  isPopupOpen,
+  onOpenPopup,
+  onClosePopup,
 }: NodeMarkerProps) {
-  const [showPopup, setShowPopup] = useState(false);
   
   const name = neighbor.node_name || neighbor.name || 'Unknown';
   const hashPrefix = getHashPrefix(hash);
@@ -162,8 +170,8 @@ function NodeMarker({
   // Click/tap handler on the wrapper div for cross-platform support
   const handleInteraction = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation(); // Prevent map click
-    setShowPopup(true);
-  }, []);
+    onOpenPopup(hash);
+  }, [hash, onOpenPopup]);
   
   if (!neighbor.latitude || !neighbor.longitude) return null;
   
@@ -194,7 +202,7 @@ function NodeMarker({
           onTouchEnd={handleInteraction}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          onKeyDown={(e) => e.key === 'Enter' && setShowPopup(true)}
+          onKeyDown={(e) => e.key === 'Enter' && onOpenPopup(hash)}
         >
           {/* Visual marker content */}
           <div 
@@ -204,14 +212,14 @@ function NodeMarker({
         </div>
       </Marker>
       
-      {showPopup && (
+      {isPopupOpen && (
         <Popup
           longitude={neighbor.longitude}
           latitude={neighbor.latitude}
           anchor="bottom"
           offset={[0, -markerSize / 2] as [number, number]}
           closeOnClick={true}
-          onClose={() => setShowPopup(false)}
+          onClose={onClosePopup}
           className="maplibre-popup"
         >
           <NodePopupContent
@@ -245,10 +253,15 @@ interface LocalMarkerProps {
   localHash?: string;
   isHovered: boolean;
   onHover: (key: string | null) => void;
+  /** Whether this node's popup is currently open */
+  isPopupOpen: boolean;
+  /** Callback to open this node's popup (closes any other) */
+  onOpenPopup: () => void;
+  /** Callback to close popup */
+  onClosePopup: () => void;
 }
 
-function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerProps) {
-  const [showPopup, setShowPopup] = useState(false);
+function LocalMarker({ localNode, localHash, isHovered, onHover, isPopupOpen, onOpenPopup, onClosePopup }: LocalMarkerProps) {
   
   const iconHtml = useMemo(() => createLocalIconHtml(isHovered), [isHovered]);
   
@@ -258,8 +271,8 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
   // Click/tap handler on the wrapper div for cross-platform support
   const handleInteraction = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation(); // Prevent map click
-    setShowPopup(true);
-  }, []);
+    onOpenPopup();
+  }, [onOpenPopup]);
   
   if (!localNode.latitude || !localNode.longitude) return null;
   
@@ -292,7 +305,7 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
           onTouchEnd={handleInteraction}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          onKeyDown={(e) => e.key === 'Enter' && setShowPopup(true)}
+          onKeyDown={(e) => e.key === 'Enter' && onOpenPopup()}
         >
           {/* Visual marker content */}
           <div 
@@ -302,14 +315,14 @@ function LocalMarker({ localNode, localHash, isHovered, onHover }: LocalMarkerPr
         </div>
       </Marker>
       
-      {showPopup && (
+      {isPopupOpen && (
         <Popup
           longitude={localNode.longitude}
           latitude={localNode.latitude}
           anchor="bottom"
           offset={[0, -markerSize / 2] as [number, number]}
           closeOnClick={true}
-          onClose={() => setShowPopup(false)}
+          onClose={onClosePopup}
           className="maplibre-popup"
         >
           <div className="text-sm">
@@ -359,6 +372,19 @@ export function NodeMarkers({
   shouldShowNode,
   onRequestRemove,
 }: NodeMarkersProps) {
+  // ─── POPUP STATE ──────────────────────────────────────────────────────────
+  // Only one popup can be open at a time. Opening a new one closes the previous.
+  // 'local' = local node popup, any other string = neighbor hash
+  const [openPopupId, setOpenPopupId] = useState<string | null>(null);
+  
+  const handleOpenPopup = useCallback((id: string) => {
+    setOpenPopupId(id);
+  }, []);
+  
+  const handleClosePopup = useCallback(() => {
+    setOpenPopupId(null);
+  }, []);
+  
   // Sort neighbors by z-index priority (standard < hub < neighbor < room server)
   const sortedNeighbors = useMemo(() => {
     return [...neighborsWithLocation].sort(([hashA, neighborA], [hashB, neighborB]) => {
@@ -415,6 +441,9 @@ export function NodeMarkers({
             isHovered={hoveredMarker === hash}
             onHover={onMarkerHover}
             onRequestRemove={onRequestRemove}
+            isPopupOpen={openPopupId === hash}
+            onOpenPopup={handleOpenPopup}
+            onClosePopup={handleClosePopup}
           />
         );
       })}
@@ -427,6 +456,9 @@ export function NodeMarkers({
           localHash={localHash}
           isHovered={hoveredMarker === 'local'}
           onHover={onMarkerHover}
+          isPopupOpen={openPopupId === 'local'}
+          onOpenPopup={() => handleOpenPopup('local')}
+          onClosePopup={handleClosePopup}
         />
       )}
     </>
