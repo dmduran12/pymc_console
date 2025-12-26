@@ -131,14 +131,20 @@ export interface ResolutionContext {
 
 /** 
  * Weights for combining scores.
- * Geographic + Recency weighted highest as they provide candidate-specific evidence.
- * Position/co-occurrence data is shared among all candidates matching the same prefix.
+ * 
+ * TUNING RATIONALE (v0.6.40):
+ * - Geographic + Recency are candidate-specific evidence (differentiate collisions)
+ * - Position/co-occurrence are shared among all candidates matching same prefix
+ * - Balanced 35/35 split between geographic and recency:
+ *   - Dense urban networks: many nodes are geographically close, recency helps differentiate
+ *   - Rural networks: geography is strong signal, but recency still matters for active nodes
+ * - Position and co-occurrence provide structural constraints
  */
 const SCORE_WEIGHTS = {
   position: 0.15,      // Shared across collision candidates
   cooccurrence: 0.15,  // Shared across collision candidates
-  geographic: 0.40,    // Candidate-specific - distance to local
-  recency: 0.30,       // Candidate-specific - when last seen
+  geographic: 0.35,    // Candidate-specific - distance to local (reduced from 0.40)
+  recency: 0.35,       // Candidate-specific - when last seen (increased from 0.30)
 };
 
 /** Maximum hop positions to track */

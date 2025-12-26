@@ -8,7 +8,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, NodeMobility, PathHealth, LastHopNeighbor } from '@/lib/mesh-topology';
+import type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, NodeMobility, PathHealth, LastHopNeighbor, DisambiguationStats } from '@/lib/mesh-topology';
 import { deserializePathRegistry, createEmptyPathRegistry, type PathRegistry, type ObservedPath } from '@/lib/path-registry';
 import type { 
   TopologyWorkerRequest, 
@@ -17,7 +17,7 @@ import type {
 } from '@/lib/workers/topology.worker';
 
 // Re-export for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth, LastHopNeighbor };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth, LastHopNeighbor, DisambiguationStats };
 
 /** Listener for topology changes */
 export type TopologyListener = (topology: MeshTopology, computeTimeMs: number) => void;
@@ -55,6 +55,22 @@ function deserializeTopology(serialized: SerializedTopology): MeshTopology {
     pathHealth: serialized.pathHealth ?? [],
     // Last-hop neighbors (ground truth from packet paths)
     lastHopNeighbors: serialized.lastHopNeighbors ?? [],
+    // Disambiguation statistics
+    disambiguationStats: serialized.disambiguationStats ?? createEmptyDisambiguationStats(),
+  };
+}
+
+/** Empty disambiguation stats for initial state */
+function createEmptyDisambiguationStats(): DisambiguationStats {
+  return {
+    totalPrefixes: 0,
+    unambiguousPrefixes: 0,
+    collisionPrefixes: 0,
+    collisionRate: 0,
+    avgConfidence: 0,
+    lowConfidencePrefixes: [],
+    highCollisionPrefixes: [],
+    totalResolutions: 0,
   };
 }
 
@@ -89,6 +105,8 @@ function createEmptyTopology(): MeshTopology {
     pathHealth: [],
     // Last-hop neighbors (ground truth from packet paths)
     lastHopNeighbors: [],
+    // Disambiguation statistics
+    disambiguationStats: createEmptyDisambiguationStats(),
   };
 }
 

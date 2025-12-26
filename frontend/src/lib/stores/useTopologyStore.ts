@@ -6,11 +6,11 @@
  */
 
 import { create } from 'zustand';
-import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation, type PathRegistry, type ObservedPath, type NodeMobility, type PathHealth, type LastHopNeighbor } from '@/lib/topology-service';
+import { topologyService, type MeshTopology, type NeighborAffinity, type TopologyEdge, type NetworkLoop, type TxDelayRecommendation, type PathRegistry, type ObservedPath, type NodeMobility, type PathHealth, type LastHopNeighbor, type DisambiguationStats } from '@/lib/topology-service';
 import { createEmptyPathRegistry } from '@/lib/path-registry';
 
 // Re-export types for consumers
-export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth, LastHopNeighbor };
+export type { MeshTopology, NeighborAffinity, TopologyEdge, NetworkLoop, TxDelayRecommendation, PathRegistry, ObservedPath, NodeMobility, PathHealth, LastHopNeighbor, DisambiguationStats };
 
 interface TopologyState {
   // Topology data
@@ -57,6 +57,17 @@ function createEmptyTopology(): MeshTopology {
     pathHealth: [],
     // Last-hop neighbors (ground truth from packet paths)
     lastHopNeighbors: [],
+    // Disambiguation statistics
+    disambiguationStats: {
+      totalPrefixes: 0,
+      unambiguousPrefixes: 0,
+      collisionPrefixes: 0,
+      collisionRate: 0,
+      avgConfidence: 0,
+      lowConfidencePrefixes: [],
+      highCollisionPrefixes: [],
+      totalResolutions: 0,
+    },
   };
 }
 
@@ -238,3 +249,28 @@ export const useLastHopNeighbors = () => useTopologyStoreBase((s) => s.topology.
 
 /** Number of last-hop neighbors */
 export const useLastHopNeighborCount = () => useTopologyStoreBase((s) => s.topology.lastHopNeighbors.length);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Disambiguation Statistics Selectors
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Full disambiguation statistics */
+export const useDisambiguationStats = () => useTopologyStoreBase((s) => s.topology.disambiguationStats);
+
+/** Collision rate as percentage (0-100) */
+export const useCollisionRate = () => useTopologyStoreBase((s) => s.topology.disambiguationStats.collisionRate);
+
+/** Average disambiguation confidence (0-1) */
+export const useAvgDisambiguationConfidence = () => useTopologyStoreBase((s) => s.topology.disambiguationStats.avgConfidence);
+
+/** Number of prefixes with collisions */
+export const useCollisionPrefixCount = () => useTopologyStoreBase((s) => s.topology.disambiguationStats.collisionPrefixes);
+
+/** Prefixes with low confidence (< 0.5) */
+export const useLowConfidencePrefixes = () => useTopologyStoreBase((s) => s.topology.disambiguationStats.lowConfidencePrefixes);
+
+/** Top 5 prefixes with most candidates (worst collisions) */
+export const useHighCollisionPrefixes = () => useTopologyStoreBase((s) => s.topology.disambiguationStats.highCollisionPrefixes);
+
+/** Whether disambiguation data is available (non-zero prefixes) */
+export const useHasDisambiguationData = () => useTopologyStoreBase((s) => s.topology.disambiguationStats.totalPrefixes > 0);

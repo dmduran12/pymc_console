@@ -6,7 +6,7 @@
  */
 
 import type { Packet, NeighborInfo } from '@/types/api';
-import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop, type TxDelayRecommendation, type NodeMobility, type PathHealth, type LastHopNeighbor } from '@/lib/mesh-topology';
+import { buildMeshTopology, type MeshTopology, type NeighborAffinity, type NetworkLoop, type TxDelayRecommendation, type NodeMobility, type PathHealth, type LastHopNeighbor, type DisambiguationStats } from '@/lib/mesh-topology';
 import { serializePathRegistry, type SerializedPathRegistry } from '@/lib/path-registry';
 
 // Message types
@@ -56,6 +56,8 @@ export interface SerializedTopology {
   pathHealth: PathHealth[];
   // Last-hop neighbors (ground truth from packet paths)
   lastHopNeighbors: LastHopNeighbor[];
+  // Disambiguation statistics
+  disambiguationStats: DisambiguationStats;
 }
 
 export interface TopologyWorkerResponse {
@@ -128,6 +130,8 @@ self.onmessage = (event: MessageEvent<TopologyWorkerRequest>) => {
       pathHealth: topology.pathHealth,
       // Last-hop neighbors (ground truth from packet paths)
       lastHopNeighbors: topology.lastHopNeighbors,
+      // Disambiguation statistics
+      disambiguationStats: topology.disambiguationStats,
     };
     
     const computeTimeMs = performance.now() - startTime;
