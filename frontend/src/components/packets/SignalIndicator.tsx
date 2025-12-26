@@ -104,9 +104,17 @@ export function getSignalIconComponent(rssi: number): React.ComponentType<Lucide
 export function SignalIcon({ rssi, className = 'w-4 h-4' }: { rssi: number; className?: string }): ReactNode {
   const level = getSignalLevel(rssi);
   const colorClass = getSignalColor(level);
-  const IconComponent = getSignalIconComponent(rssi);
+  const classes = clsx(colorClass, className);
   
-  return <IconComponent className={clsx(colorClass, className)} />;
+  // Render icon directly based on level to avoid creating component during render
+  switch (level) {
+    case 'excellent': return <Signal className={classes} />;
+    case 'good': return <SignalHigh className={classes} />;
+    case 'fair': return <SignalMedium className={classes} />;
+    case 'weak': return <SignalLow className={classes} />;
+    case 'poor': 
+    default: return <SignalZero className={classes} />;
+  }
 }
 
 /**

@@ -1087,6 +1087,51 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   const nodeAnimationFrameRef = useRef<number | null>(null);
   
   // ═══════════════════════════════════════════════════════════════════════════════
+  // Edge Animation System (state declarations - must be before Deep Analysis effects)
+  // - "Trace" effect: lines draw from point A to B
+  // - Thickness growth: existing edges animate to new weight when data changes
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  const ANIMATION_DURATION = 2000; // 2 seconds
+  
+  // Track animation progress per edge (0 = not started, 1 = complete)
+  const [edgeAnimProgress, setEdgeAnimProgress] = useState<Map<string, number>>(new Map());
+  
+  // Hover state for edge highlighting
+  // When hovering an edge: brighten it, dim all others
+  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
+  
+  // Track previous weights for thickness animation
+  const prevWeightsRef = useRef<Map<string, number>>(new Map());
+  const [weightAnimProgress, setWeightAnimProgress] = useState(1); // 0-1 for weight interpolation
+  
+  // Track which edges we've seen before (for detecting new edges)
+  const knownEdgesRef = useRef<Set<string>>(new Set());
+  
+  // Track the last edge set to detect changes (for "pull more data" scenario)
+  const lastEdgeSetRef = useRef<string>('');
+  
+  // Exit animation state - retract edges when topology is toggled off
+  const [isExiting, setIsExiting] = useState(false);
+  const prevShowTopologyRef = useRef(showTopology);
+  const edgeAnimProgressRef = useRef<Map<string, number>>(new Map());
+  const EXIT_ANIMATION_DURATION = 500; // 0.5s quick "zip" retraction
+  
+  // "Snapshot" of weights at animation start for smooth interpolation (state, not refs, because read during render)
+  const [animStartWeights, setAnimStartWeights] = useState<Map<string, number>>(new Map());
+  const [animTargetWeights, setAnimTargetWeights] = useState<Map<string, number>>(new Map());
+  
+  // Keep ref in sync with state (for capturing in animation)
+  useEffect(() => {
+    edgeAnimProgressRef.current = edgeAnimProgress;
+  }, [edgeAnimProgress]);
+  
+  // Cubic ease-out for snappy retraction
+  const easeOutCubic = useCallback((t: number): number => {
+    return 1 - Math.pow(1 - t, 3);
+  }, []);
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
   // Deep Analysis System
   // ═══════════════════════════════════════════════════════════════════════════════
   
@@ -1124,6 +1169,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     // Step 1 → 2: Fetching complete, start analyzing
     if (wasDeepLoadingRef.current && !isDeepLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- State machine: transition analyzing step
       setAnalysisStep('analyzing');
       // Brief pause to show "analyzing" before topology compute starts
       setTimeout(() => {
@@ -1159,6 +1205,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   }, [showDeepAnalysisModal, isDeepLoading, isComputingTopology, analysisStep]);
   
   // Trigger topology animation AFTER modal has closed
+  // Note: Ref mutations in setTimeout are intentional for animation reset
   useEffect(() => {
     if (pendingTopologyReveal && !showDeepAnalysisModal) {
       // Small delay to let the modal fully unmount and user see the map
@@ -1199,37 +1246,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     setPendingTopologyReveal(false);
   }, []);
   
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // Edge Animation System (state declarations - effect is after filteredCertainPolylines)
-  // - "Trace" effect: lines draw from point A to B
-  // - Thickness growth: existing edges animate to new weight when data changes
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  const ANIMATION_DURATION = 2000; // 2 seconds
-  
-  // Track animation progress per edge (0 = not started, 1 = complete)
-  const [edgeAnimProgress, setEdgeAnimProgress] = useState<Map<string, number>>(new Map());
-  
-  // Hover state for edge highlighting
-  // When hovering an edge: brighten it, dim all others
-  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
-  
-  // Track previous weights for thickness animation
-  const prevWeightsRef = useRef<Map<string, number>>(new Map());
-  const [weightAnimProgress, setWeightAnimProgress] = useState(1); // 0-1 for weight interpolation
-  
-  // Track which edges we've seen before (for detecting new edges)
-  const knownEdgesRef = useRef<Set<string>>(new Set());
-  
-  // Track the last edge set to detect changes (for "pull more data" scenario)
-  const lastEdgeSetRef = useRef<string>('');
-  
-  // Cubic ease-in-out helper
-  const easeInOutCubic = (t: number): number => {
+  // Cubic ease-in-out helper (memoized to prevent dependency issues)
+  const easeInOutCubic = useCallback((t: number): number => {
     return t < 0.5
       ? 4 * t * t * t
       : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  };
+  }, []);
   
   // Build set of hub nodes and zero-hop nodes for filtering
   const hubNodeSet = useMemo(() => new Set(meshTopology.hubNodes), [meshTopology.hubNodes]);
@@ -1431,6 +1453,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     if (animationTargets.length === 0) return;
     
     // Initialize animating nodes to their start opacity
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Animation: set initial node positions
     setNodeOpacities(prev => {
       const next = new Map(prev);
       for (const { hash, startOpacity } of animationTargets) {
@@ -1487,31 +1510,12 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         nodeAnimationFrameRef.current = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soloDirect, soloHubs]);
+  }, [soloDirect, soloHubs, easeInOutCubic]);
   
-  // ─── Edge Animation Effect (must be after filteredCertainPolylines) ───
-  // Track "snapshot" of weights at animation start for smooth interpolation
-  const animStartWeightsRef = useRef<Map<string, number>>(new Map());
-  const animTargetWeightsRef = useRef<Map<string, number>>(new Map());
-  
-  // Exit animation state - retract edges when topology is toggled off
-  const [isExiting, setIsExiting] = useState(false);
-  const prevShowTopologyRef = useRef(showTopology);
-  const edgeAnimProgressRef = useRef<Map<string, number>>(new Map());
-  const EXIT_ANIMATION_DURATION = 500; // 0.5s quick "zip" retraction
-  
-  // Keep ref in sync with state (for capturing in animation)
-  useEffect(() => {
-    edgeAnimProgressRef.current = edgeAnimProgress;
-  }, [edgeAnimProgress]);
-  
-  // Cubic ease-out for snappy retraction
-  const easeOutCubic = useCallback((t: number): number => {
-    return 1 - Math.pow(1 - t, 3);
-  }, []);
+  // ─── Edge Animation Effect ───
   
   // Handle topology toggle - detect changes and trigger exit animation
+  // Note: setState in requestAnimationFrame callbacks is the standard pattern for animations
   useEffect(() => {
     const wasShowing = prevShowTopologyRef.current;
     const isShowing = showTopology;
@@ -1519,6 +1523,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
     
     // Toggling OFF: start exit animation (retract edges toward nodes)
     if (wasShowing && !isShowing && !isExiting) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Animation state machine: trigger exit mode
       setIsExiting(true);
       
       // Capture current edge progress values as starting points for retraction
@@ -1549,8 +1554,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           setEdgeAnimProgress(new Map());
           knownEdgesRef.current = new Set();
           lastEdgeSetRef.current = '';
-          animStartWeightsRef.current = new Map();
-          animTargetWeightsRef.current = new Map();
+          setAnimStartWeights(new Map());
+          setAnimTargetWeights(new Map());
         }
       };
       
@@ -1609,7 +1614,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
             startWeights.set(key, prevWeight);
           }
         }
-        animStartWeightsRef.current = startWeights;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Animation: capture start weights for interpolation
+        setAnimStartWeights(startWeights);
         setWeightAnimProgress(0);
       }
       
@@ -1619,7 +1625,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
         const weight = getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
         targetWeights.set(edge.key, weight);
       }
-      animTargetWeightsRef.current = targetWeights;
+      setAnimTargetWeights(targetWeights);
       
       // Initialize new edges at progress 0
       setEdgeAnimProgress(prev => {
@@ -1953,9 +1959,9 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           if (traceProgress <= 0) return null;
           
           // Calculate weight with smooth interpolation during weight animation
-          const targetWeight = animTargetWeightsRef.current.get(edge.key) 
+          const targetWeight = animTargetWeights.get(edge.key) 
             ?? getLinkQualityWeight(edge.certainCount, meshTopology.maxCertainCount);
-          const startWeight = animStartWeightsRef.current.get(edge.key) ?? targetWeight;
+          const startWeight = animStartWeights.get(edge.key) ?? targetWeight;
           // Interpolate from start to target based on weight animation progress
           const animatedWeight = startWeight + (targetWeight - startWeight) * weightAnimProgress;
           

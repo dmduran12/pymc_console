@@ -12,6 +12,11 @@
  * MIT License
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Note: This file uses `any` extensively because Leaflet's Handler.extend() pattern
+// creates dynamic objects with internal properties that don't have public type definitions.
+// Properly typing all of Leaflet's internal APIs would be complex and brittle.
+
 import L from 'leaflet';
 
 // Extend Leaflet's MapOptions interface
@@ -102,7 +107,7 @@ const SUPPORTS_PASSIVE = (() => {
     });
     window.addEventListener('testPassive', null as any, opts);
     window.removeEventListener('testPassive', null as any, opts);
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
   return passive;
 })();
 
