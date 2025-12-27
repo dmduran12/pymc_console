@@ -19,10 +19,12 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 ![Dashboard](docs/images/dashboard.png)
 
 ### Statistics
-- **Traffic flow chart** — Stacked area showing RX/forwarded/dropped over time
-- **Link quality polar** — Neighbor signal strength by compass bearing
-- **Packet types treemap** — Distribution of ADVERT, TXT_MSG, ACK, etc.
-- **Noise floor heatmap** — RF interference patterns over time
+- **Airtime utilization** — RX/TX utilization spectrum with peak and mean metrics
+- **Link quality polar** — Neighbor signal strength plotted by compass bearing
+- **Network composition** — Breakdown of repeaters, companions, and room servers
+- **Packet types treemap** — Distribution of ADVERT, TXT_MSG, ACK, RESPONSE, etc.
+- **RF noise floor** — Noise floor heatmap showing interference patterns over time
+- **Prefix disambiguation** — Health metrics for the topology inference system
 
 ![Statistics](docs/images/statistics.png)
 
@@ -39,7 +41,7 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 - **Path health panel** — Health scores, weakest links, and latency estimates for observed routes
 - **Mobile node detection** — Identifies volatile nodes that appear/disappear frequently
 
-![Contacts](docs/images/neighbors.png)
+![Topology Map](docs/images/topology.png)
 
 ### Packets
 - **Searchable history** — Filter by type, route, time range
@@ -54,8 +56,10 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 ![Settings](docs/images/settings.png)
 
 ### System & Logs
-- **Hardware stats** — CPU, memory, disk, temperature
-- **Live logs** — Stream from repeater daemon
+- **System resources** — 20-minute rolling CPU and memory utilization chart
+- **Disk usage** — Storage utilization with progress bar
+- **Temperature** — Multi-sensor temperature gauges with threshold coloring
+- **Live logs** — Stream from repeater daemon with DEBUG/INFO toggle
 
 ![System](docs/images/system.png)
 
@@ -238,6 +242,8 @@ Packet path: ["FA", "79", "24", "19"]
 - **Source-geographic correlation** — Position-1 prefixes scored by distance from packet origin
 
 The system loads up to 20,000 packets (~7 days of traffic) to build comprehensive topology evidence.
+
+![Prefix Disambiguation](docs/images/disambiguation.png)
 
 ### Edge Rendering
 
