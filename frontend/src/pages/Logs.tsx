@@ -155,7 +155,7 @@ export default function Logs() {
       </div>
 
       {/* Logs */}
-      <div className="glass-card p-4">
+      <div className="glass-card card-padding">
         <div className="space-y-2 max-h-[calc(100vh-300px)] sm:max-h-[calc(100vh-250px)] overflow-y-auto font-mono text-sm">
           {logsLoading && logs.length === 0 ? (
             <LogsSkeleton count={10} />

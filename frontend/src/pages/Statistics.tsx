@@ -250,9 +250,9 @@ export default function Statistics() {
           </div>
 
           {/* Row: Network Composition + Packet Types + Noise Floor (3-up on desktop) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-space-6">
+          <div className="grid-12">
             {/* Network Composition - Node type distribution */}
-            <div className="glass-card card-padding">
+            <div className="col-span-full md:col-span-6 lg:col-span-4 glass-card card-padding">
               <div className="flex items-center gap-2 mb-4">
                 <Network className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Network Composition</h2>
@@ -261,7 +261,7 @@ export default function Statistics() {
             </div>
 
             {/* Packet Types - Treemap Chart */}
-            <div className="glass-card card-padding">
+            <div className="col-span-full md:col-span-6 lg:col-span-4 glass-card card-padding">
               <div className="flex items-center gap-2 mb-4">
                 <PieChart className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Packet Types</h2>
@@ -276,7 +276,7 @@ export default function Statistics() {
             </div>
 
             {/* Noise Floor Heatmap */}
-            <div className="glass-card card-padding">
+            <div className="col-span-full md:col-span-6 lg:col-span-4 glass-card card-padding">
               <div className="flex items-center gap-2 mb-4">
                 <Radio className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">RF Noise Floor</h2>
@@ -290,7 +290,9 @@ export default function Statistics() {
             </div>
 
             {/* Prefix Disambiguation Stats */}
-            <DisambiguationCard />
+            <div className="col-span-full md:col-span-6 lg:col-span-4">
+              <DisambiguationCard />
+            </div>
           </div>
         </>
       )}
