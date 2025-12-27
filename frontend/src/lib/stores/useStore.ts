@@ -165,6 +165,27 @@ function buildPrefixLookup(neighbors: Record<string, NeighborInfo>): Map<string,
 }
 
 /**
+ * Parse a path value that may be an array or a JSON string.
+ * The API sometimes returns original_path as a JSON string like '["61", "96"]'
+ * instead of an actual array.
+ * 
+ * @param path - Path value from packet (array, string, null, or undefined)
+ * @returns Parsed array, or empty array if null/undefined/invalid
+ */
+function parsePath(path: unknown): string[] {
+  if (Array.isArray(path)) return path;
+  if (typeof path === 'string' && path.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(path);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
  * Check if a packet is a zero-hop ADVERT (MeshCore neighbor criteria).
  * 
  * @param packet - Packet to check
@@ -179,9 +200,9 @@ function isZeroHopAdvert(packet: Packet): boolean {
   if (packet.transmitted === true) return false;
   
   // Must have path_len == 0 (zero-hop, direct RF contact)
-  const path = packet.original_path;
-  const pathLen = Array.isArray(path) ? path.length : 0;
-  return pathLen === 0;
+  // Note: API may return path as JSON string, so we parse it first
+  const path = parsePath(packet.original_path);
+  return path.length === 0;
 }
 
 /**
