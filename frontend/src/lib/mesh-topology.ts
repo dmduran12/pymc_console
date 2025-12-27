@@ -1067,32 +1067,40 @@ export function findNetworkLoops(
 }
 
 /**
- * Calculate TX delay recommendations for all nodes using MeshCore's slot-based system.
+ * Calculate TX delay recommendations using deep topology integration.
  * 
- * MESH-WIDE OPTIMIZATION:
- * This function optimizes delays across the ENTIRE mesh, not individual nodes in isolation.
- * Key principles:
- * 1. Network role determines base delay (edge/relay/hub/backbone)
- * 2. Slot staggering prevents collision cascades when multiple nodes transmit
- * 3. High-traffic nodes (hubs/backbone) get conservative delays
- * 4. Edge nodes can be more aggressive to reduce latency
+ * TOPOLOGY-DRIVEN DELAY SYSTEM:
+ * Instead of role-based lookup tables, this system derives delays from actual
+ * mesh behavior observed in the topology data:
+ * 
+ * 1. FORWARDING BURDEN: How much traffic does this node actually forward?
+ *    - Measured by edge packet counts and path participation
+ *    - High forwarders need more delay to reduce collision probability
+ * 
+ * 2. COLLISION POTENTIAL: What's the likelihood of simultaneous TX?
+ *    - Based on neighbor count, edge density, and loop participation
+ *    - Dense clusters need higher delays; sparse areas can be aggressive
+ * 
+ * 3. PATH CRITICALITY: Is this node on canonical (most-used) paths?
+ *    - Critical path nodes get moderate delays (reliability > speed)
+ *    - Peripheral nodes can be more aggressive
+ * 
+ * 4. REDUNDANCY BENEFIT: Does this node participate in loops?
+ *    - Loop nodes have alternate paths, can afford slightly higher delay
+ *    - Non-loop nodes are single points of failure, keep delay moderate
+ * 
+ * 5. MESH POSITION: Relative position in the traffic distribution
+ *    - Uses percentile-based scaling across the full 0-3s range
+ *    - Ensures natural spread without artificial clustering
  * 
  * MeshCore Formula: t(txdelay) = trunc(Af * 5 * txdelay)
- * - Af = 1.0 (airtime factor)
+ * - Af = 1.0 (airtime factor)  
  * - Increments <0.2s have NO EFFECT (slot quantization)
- * - All outputs aligned to 0.2s boundaries
- * 
- * @param edges - All topology edges
- * @param nodePathCounts - Map of node hash -> number of paths it appeared in
- * @param packets - All packets for timing analysis
- * @param pathRegistry - Registry of observed paths for Phase 6 metrics
- * @param neighbors - Neighbor map for prefix matching (reserved for future use)
- * @param _airtimeMs - Estimated airtime in ms (legacy, not used in slot-based system)
- * @returns Map of node hash -> TxDelayRecommendation
+ * - Full range: 0.0s (0 slots) to 3.0s (15 slots)
  */
 function calculateNodeTxDelays(
   edges: TopologyEdge[],
-  nodePathCounts: Map<string, number>,
+  _nodePathCounts: Map<string, number>,
   packets: Packet[],
   pathRegistry: PathRegistry,
   _neighbors: Record<string, NeighborInfo>,
@@ -1105,20 +1113,14 @@ function calculateNodeTxDelays(
   }
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // MeshCore TX Constants (from meshcore-tx-constants.ts)
+  // MeshCore TX Constants
   // ═══════════════════════════════════════════════════════════════════════════
   const SLOT_MULTIPLIER = 5;            // MeshCore formula multiplier
-  const RESOLUTION_SECONDS = 0.2;       // Minimum meaningful change
-  const DEFAULT_FLOOD_DELAY_SEC = 0.7;  // MeshCore default
+  const RESOLUTION_SECONDS = 0.2;       // Minimum meaningful change (1 slot)
+  const DEFAULT_FLOOD_DELAY_SEC = 0.7;  // MeshCore default (for reference)
   const DIRECT_TO_FLOOD_RATIO = 0.28;   // MeshCore default ratio (~28%)
-  const MIN_TX_DELAY_SEC = 0.0;
-  const MAX_TX_DELAY_SEC = 3.0;
-  
-  // Network role thresholds (observer-independent)
-  const HUB_NEIGHBOR_THRESHOLD = 4;  // Neighbor count threshold for hub detection
-  // Note: BACKBONE_BETWEENNESS_THRESHOLD and HIGH_FLOOD_PARTICIPATION_THRESHOLD
-  // were removed because they relied on observer-biased metrics.
-  // Network role now uses neighbor count + symmetry (bidirectional traffic).
+  const MIN_TX_DELAY_SEC = 0.0;         // Aggressive edge nodes
+  const MAX_TX_DELAY_SEC = 3.0;         // Conservative backbone nodes
   
   /** Align to 0.2s slot boundary */
   const alignToSlotBoundary = (delaySec: number): number => {
@@ -1132,17 +1134,17 @@ function calculateNodeTxDelays(
   };
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 1: Collect Node Metrics
+  // Phase 1: Build Comprehensive Node Metrics from Topology
   // ═══════════════════════════════════════════════════════════════════════════
   
-  // Collect all unique node hashes from edges
+  // Collect all unique node hashes
   const allNodes = new Set<string>();
   for (const edge of edges) {
     allNodes.add(edge.fromHash);
     allNodes.add(edge.toHash);
   }
   
-  // Calculate time span of packet data (for packets/minute calculation)
+  // Calculate time span of packet data
   const timestamps = packets
     .map(p => p.timestamp)
     .filter((t): t is number => t !== undefined && t > 0)
@@ -1152,98 +1154,179 @@ function calculateNodeTxDelays(
     ? (timestamps[timestamps.length - 1] - timestamps[0]) / 60
     : 1;
   
-  // Pre-compute per-node metrics
-  interface NodeMetrics {
-    edgePacketCount: number;
-    directNeighborCount: number;
-    avgEdgeValidation: number;
-    maxEdgeValidation: number;
-    pathCount: number;
-    avgSymmetryRatio: number;
-    avgBetweenness: number;  // Average betweenness of connected edges
-    // MENTOR-inspired: utilization tracking
-    directPathEdgeCount: number;  // Edges with >50% direct-routed traffic (ground truth)
-    trafficRate: number;          // packets/minute through this node
+  // Build edge lookup by node
+  const edgesByNode = new Map<string, TopologyEdge[]>();
+  for (const edge of edges) {
+    if (!edgesByNode.has(edge.fromHash)) edgesByNode.set(edge.fromHash, []);
+    if (!edgesByNode.has(edge.toHash)) edgesByNode.set(edge.toHash, []);
+    edgesByNode.get(edge.fromHash)!.push(edge);
+    edgesByNode.get(edge.toHash)!.push(edge);
   }
-  const nodeMetrics = new Map<string, NodeMetrics>();
   
-  // Find max values across all nodes for relative comparison
-  let maxEdgePacketCount = 0;
-  let maxPathCount = 0;
-  let maxNeighborCount = 0;
-  let maxTrafficRate = 0;
+  // Find which edges are part of loops (from loop detection in main topology)
+  const loopEdgeSet = new Set<string>();
+  for (const edge of edges) {
+    if (edge.isLoopEdge) loopEdgeSet.add(edge.key);
+  }
   
-  for (const nodeHash of allNodes) {
-    // Find all edges connected to this node
-    const connectedEdges = edges.filter(
-      e => e.fromHash === nodeHash || e.toHash === nodeHash
-    );
+  // Build canonical path set for criticality detection
+  const canonicalPathNodes = new Set<string>();
+  for (const [, path] of pathRegistry.canonicalPaths) {
+    for (const hop of path.hops) {
+      canonicalPathNodes.add(hop.toUpperCase());
+    }
+  }
+  
+  // Per-node topology metrics
+  interface TopologyMetrics {
+    // Basic edge metrics
+    neighborCount: number;
+    totalEdgePackets: number;
+    maxEdgeCertainCount: number;
+    avgEdgeCertainCount: number;
+    avgSymmetry: number;
     
-    // Count unique neighbors from edges and calculate metrics
+    // Forwarding analysis
+    forwardingBurden: number;     // 0-1: how much traffic flows through this node
+    floodForwardRatio: number;    // 0-1: what % of traffic is flood vs direct
+    
+    // Path analysis
+    pathCount: number;            // How many paths include this node
+    canonicalPathCount: number;   // How many canonical paths include this node
+    avgPathLength: number;        // Average length of paths through this node
+    
+    // Structural analysis
+    loopParticipation: number;    // 0-1: what % of edges are loop edges
+    isInLoop: boolean;            // Does this node have any loop edges
+    edgeDensity: number;          // neighbors / max possible (mesh density)
+    
+    // Traffic patterns
+    trafficRate: number;          // packets/minute
+    directPathEdgeRatio: number;  // % of edges with direct-routed traffic
+  }
+  const nodeMetrics = new Map<string, TopologyMetrics>();
+  
+  // Calculate metrics for each node
+  for (const nodeHash of allNodes) {
+    const connectedEdges = edgesByNode.get(nodeHash) || [];
+    if (connectedEdges.length === 0) continue;
+    
+    const nodePrefix = nodeHash.startsWith('0x')
+      ? nodeHash.slice(2, 4).toUpperCase()
+      : nodeHash.slice(0, 2).toUpperCase();
+    
+    // Basic edge metrics
     const neighborHashes = new Set<string>();
-    let totalPacketCount = 0;
-    let totalCertainCount = 0;
+    let totalPackets = 0;
+    let totalCertain = 0;
     let maxCertain = 0;
     let symmetrySum = 0;
-    let directPathEdgeCount = 0;  // MENTOR: count direct-routed edges (ground truth)
+    let floodPackets = 0;
+    let directPathEdges = 0;
+    let loopEdgeCount = 0;
     
     for (const edge of connectedEdges) {
-      const otherHash = edge.fromHash === nodeHash ? edge.toHash : edge.fromHash;
-      neighborHashes.add(otherHash);
-      totalPacketCount += edge.packetCount;
-      totalCertainCount += edge.certainCount;
+      const other = edge.fromHash === nodeHash ? edge.toHash : edge.fromHash;
+      neighborHashes.add(other);
+      totalPackets += edge.packetCount;
+      totalCertain += edge.certainCount;
       maxCertain = Math.max(maxCertain, edge.certainCount);
       symmetrySum += edge.symmetryRatio;
-      // MENTOR principle: "paths will tend to be direct, not circuitous"
-      // Direct-routed edges are ground truth - explicitly chosen routes
-      if (edge.isDirectPathEdge) {
-        directPathEdgeCount++;
+      floodPackets += edge.floodCount;
+      if (edge.isDirectPathEdge) directPathEdges++;
+      if (loopEdgeSet.has(edge.key)) loopEdgeCount++;
+    }
+    
+    const neighborCount = neighborHashes.size;
+    const avgSymmetry = connectedEdges.length > 0 ? symmetrySum / connectedEdges.length : 0;
+    const avgCertain = connectedEdges.length > 0 ? totalCertain / connectedEdges.length : 0;
+    
+    // Path analysis
+    const pathsWithNode = pathRegistry.paths.filter(p => 
+      p.hops.some(hop => hop.toUpperCase() === nodePrefix)
+    );
+    const pathCount = pathsWithNode.length;
+    
+    // Count canonical paths
+    let canonicalCount = 0;
+    for (const [, path] of pathRegistry.canonicalPaths) {
+      if (path.hops.some(hop => hop.toUpperCase() === nodePrefix)) {
+        canonicalCount++;
       }
     }
     
-    const directNeighborCount = neighborHashes.size;
-    const avgValidation = connectedEdges.length > 0 
-      ? totalCertainCount / connectedEdges.length 
+    // Average path length for paths through this node
+    const avgPathLength = pathsWithNode.length > 0
+      ? pathsWithNode.reduce((sum, p) => sum + p.hopCount, 0) / pathsWithNode.length
       : 0;
-    const avgSymmetryRatio = connectedEdges.length > 0
-      ? symmetrySum / connectedEdges.length
-      : 0;
-    const pathCount = nodePathCounts.get(nodeHash) || 0;
-    
-    // MENTOR-inspired: traffic rate (packets/minute) for utilization calculation
-    const trafficRate = timeSpanMinutes > 0 ? totalPacketCount / timeSpanMinutes : 0;
     
     nodeMetrics.set(nodeHash, {
-      edgePacketCount: totalPacketCount,
-      directNeighborCount,
-      avgEdgeValidation: avgValidation,
-      maxEdgeValidation: maxCertain,
+      neighborCount,
+      totalEdgePackets: totalPackets,
+      maxEdgeCertainCount: maxCertain,
+      avgEdgeCertainCount: avgCertain,
+      avgSymmetry,
+      forwardingBurden: 0,  // Will normalize after all nodes processed
+      floodForwardRatio: totalPackets > 0 ? floodPackets / totalPackets : 0,
       pathCount,
-      avgSymmetryRatio,
-      avgBetweenness: 0,  // Will be computed in Phase 2 if betweenness data available
-      directPathEdgeCount,
-      trafficRate,
+      canonicalPathCount: canonicalCount,
+      avgPathLength,
+      loopParticipation: connectedEdges.length > 0 ? loopEdgeCount / connectedEdges.length : 0,
+      isInLoop: loopEdgeCount > 0,
+      edgeDensity: 0,  // Will calculate after knowing max neighbors
+      trafficRate: timeSpanMinutes > 0 ? totalPackets / timeSpanMinutes : 0,
+      directPathEdgeRatio: connectedEdges.length > 0 ? directPathEdges / connectedEdges.length : 0,
     });
-    
-    // Track maximums (only from nodes with sufficient data)
-    if (totalPacketCount >= MIN_PACKETS_FOR_TX_DELAY) {
-      maxEdgePacketCount = Math.max(maxEdgePacketCount, totalPacketCount);
-      maxPathCount = Math.max(maxPathCount, pathCount);
-      maxNeighborCount = Math.max(maxNeighborCount, directNeighborCount);
-      maxTrafficRate = Math.max(maxTrafficRate, trafficRate);
-    }
   }
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 2: Calculate Initial Slot Assignments (Pre-Stagger)
+  // Phase 2: Normalize Metrics Across Mesh (Percentile-Based)
   // ═══════════════════════════════════════════════════════════════════════════
   
-  // Track slot distribution for staggering
-  const slotDistribution = new Map<number, string[]>();  // slot -> [nodeHashes]
+  // Collect metric arrays for percentile calculation
+  const allPacketCounts: number[] = [];
+  const allNeighborCounts: number[] = [];
+  const allPathCounts: number[] = [];
+  const allTrafficRates: number[] = [];
   
-  // First pass: calculate raw delays and count nodes per slot
+  for (const [, metrics] of nodeMetrics) {
+    if (metrics.totalEdgePackets >= MIN_PACKETS_FOR_TX_DELAY) {
+      allPacketCounts.push(metrics.totalEdgePackets);
+      allNeighborCounts.push(metrics.neighborCount);
+      allPathCounts.push(metrics.pathCount);
+      allTrafficRates.push(metrics.trafficRate);
+    }
+  }
+  
+  // Sort for percentile calculation
+  allPacketCounts.sort((a, b) => a - b);
+  allNeighborCounts.sort((a, b) => a - b);
+  allPathCounts.sort((a, b) => a - b);
+  allTrafficRates.sort((a, b) => a - b);
+  
+  /** Get percentile rank (0-1) of a value in a sorted array */
+  const getPercentile = (sortedArr: number[], value: number): number => {
+    if (sortedArr.length === 0) return 0.5;
+    const idx = sortedArr.findIndex(v => v >= value);
+    if (idx === -1) return 1.0;  // Larger than all
+    if (idx === 0) return 0.0;   // Smaller than all
+    return idx / sortedArr.length;
+  };
+  
+  // Update normalized metrics
+  const maxNeighbors = allNeighborCounts.length > 0 ? Math.max(...allNeighborCounts) : 1;
+  for (const [, metrics] of nodeMetrics) {
+    metrics.forwardingBurden = getPercentile(allPacketCounts, metrics.totalEdgePackets);
+    metrics.edgeDensity = maxNeighbors > 0 ? metrics.neighborCount / maxNeighbors : 0;
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Phase 3: Calculate Topology-Driven Delay Scores
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   interface RawRecommendation {
-    rawFloodDelay: number;
+    compositeScore: number;       // 0-1: higher = needs more delay
+    rawFloodDelay: number;        // Delay in seconds (0-3)
     networkRole: 'edge' | 'relay' | 'hub' | 'backbone';
     collisionRisk: number;
     floodParticipationRate: number;
@@ -1254,271 +1337,177 @@ function calculateNodeTxDelays(
     confidence: number;
     observationSymmetry: number;
     dataConfidence: 'insufficient' | 'low' | 'medium' | 'high';
+    // Topology factors (for rationale)
+    factors: {
+      forwarding: number;
+      collision: number;
+      criticality: number;
+      redundancy: number;
+    };
   }
   const rawRecommendations = new Map<string, RawRecommendation>();
   
   for (const nodeHash of allNodes) {
-    const metrics = nodeMetrics.get(nodeHash)!;
-    
-    // Check if insufficient data
-    if (metrics.edgePacketCount < MIN_PACKETS_FOR_TX_DELAY) {
-      // Insufficient data - will be handled in final pass
+    const metrics = nodeMetrics.get(nodeHash);
+    if (!metrics || metrics.totalEdgePackets < MIN_PACKETS_FOR_TX_DELAY) {
       continue;
     }
     
-    // === Calculate path position metrics ===
     const nodePrefix = nodeHash.startsWith('0x')
       ? nodeHash.slice(2, 4).toUpperCase()
       : nodeHash.slice(0, 2).toUpperCase();
     
-    const positions: number[] = [];
-    let floodPathCount = 0;
-    let totalPathsWithNode = 0;
+    // ─────────────────────────────────────────────────────────────────────────
+    // Factor 1: FORWARDING BURDEN (30% weight)
+    // High traffic nodes need more backoff time
+    // ─────────────────────────────────────────────────────────────────────────
+    const forwardingFactor = metrics.forwardingBurden;
     
-    for (const path of pathRegistry.paths) {
-      const posInPath = path.hops.findIndex(hop => hop.toUpperCase() === nodePrefix);
-      if (posInPath >= 0) {
-        positions.push(posInPath + 1);
-        totalPathsWithNode++;
-        if (path.routeType === 'flood') {
-          floodPathCount++;
-        }
-      }
+    // ─────────────────────────────────────────────────────────────────────────
+    // Factor 2: COLLISION POTENTIAL (30% weight)  
+    // Based on neighbor density and local mesh structure
+    // More neighbors = higher collision chance = need more delay
+    // ─────────────────────────────────────────────────────────────────────────
+    const neighborPercentile = getPercentile(allNeighborCounts, metrics.neighborCount);
+    // Boost for high symmetry (we see traffic both ways = central position)
+    const symmetryBoost = metrics.avgSymmetry * 0.3;
+    const collisionFactor = Math.min(1, neighborPercentile + symmetryBoost);
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // Factor 3: PATH CRITICALITY (20% weight)
+    // Nodes on canonical paths should be reliable, not aggressive
+    // ─────────────────────────────────────────────────────────────────────────
+    const canonicalRatio = pathRegistry.canonicalPaths.size > 0
+      ? metrics.canonicalPathCount / pathRegistry.canonicalPaths.size
+      : 0;
+    // Paths through node as percentile
+    const pathPercentile = getPercentile(allPathCounts, metrics.pathCount);
+    const criticalityFactor = (canonicalRatio * 0.6) + (pathPercentile * 0.4);
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // Factor 4: REDUNDANCY BENEFIT (20% weight)
+    // Loop nodes have backup paths, can afford higher delay
+    // Non-loop nodes should be more responsive
+    // ─────────────────────────────────────────────────────────────────────────
+    // Loop participation: 0 = no loops, 1 = all edges are loop edges
+    const redundancyFactor = metrics.loopParticipation;
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // COMPOSITE SCORE: Weighted combination of factors
+    // Higher score = more delay needed
+    // ─────────────────────────────────────────────────────────────────────────
+    const compositeScore = (
+      forwardingFactor * 0.30 +
+      collisionFactor * 0.30 +
+      criticalityFactor * 0.20 +
+      redundancyFactor * 0.20
+    );
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // MAP SCORE TO DELAY: Use full 0-3s range
+    // ─────────────────────────────────────────────────────────────────────────
+    // Base: linear mapping from score to delay
+    // Score 0.0 → 0.0s (aggressive edge)
+    // Score 0.5 → 1.5s (balanced relay)  
+    // Score 1.0 → 3.0s (conservative backbone)
+    let rawFloodDelay = compositeScore * MAX_TX_DELAY_SEC;
+    
+    // Apply minimum floor for very low scores to avoid 0.0s recommendations
+    // unless the node is truly peripheral (low neighbors, low paths)
+    if (compositeScore < 0.1 && metrics.neighborCount <= 2) {
+      rawFloodDelay = 0.0;  // True edge node: be aggressive
+    } else if (rawFloodDelay < 0.2) {
+      rawFloodDelay = 0.2;  // Minimum 1 slot for safety
     }
     
-    const avgPathPosition = positions.length > 0
-      ? positions.reduce((a, b) => a + b, 0) / positions.length
-      : 0;
-    
-    let pathPositionVariance = 0;
-    if (positions.length > 1) {
-      const sumSquaredDiff = positions.reduce((sum, pos) => sum + Math.pow(pos - avgPathPosition, 2), 0);
-      pathPositionVariance = sumSquaredDiff / positions.length;
-    }
-    
-    const floodParticipationRate = totalPathsWithNode > 0
-      ? floodPathCount / totalPathsWithNode
-      : 0;
-    
-    const pathDiversity = totalPathsWithNode;
-    const trafficIntensity = timeSpanMinutes > 0 
-      ? metrics.edgePacketCount / timeSpanMinutes 
-      : 0;
-    
-    // === Classify network role (OBSERVER-INDEPENDENT) ===
-    // Uses only topology-derived metrics that don't depend on local observer position:
-    // - directNeighborCount: number of edges connected to this node
-    // - avgSymmetryRatio: bidirectional traffic indicator (high = seen from both directions)
-    // 
-    // NOTE: We deliberately do NOT use floodParticipationRate for role classification
-    // because it's observer-biased (counts paths as seen by local node only).
+    // ─────────────────────────────────────────────────────────────────────────
+    // Derive network role from topology (for display, not calculation)
+    // ─────────────────────────────────────────────────────────────────────────
     let networkRole: 'edge' | 'relay' | 'hub' | 'backbone';
-    
-    // Symmetry thresholds for role classification
-    const SYMMETRY_BACKBONE = 0.5;  // High bidirectional traffic
-    const SYMMETRY_RELAY = 0.3;     // Moderate bidirectional traffic
-    
-    if (metrics.directNeighborCount >= HUB_NEIGHBOR_THRESHOLD && 
-        metrics.avgSymmetryRatio >= SYMMETRY_BACKBONE) {
-      // High connectivity + symmetric traffic = backbone (critical path)
+    if (compositeScore >= 0.7 && metrics.neighborCount >= 4) {
       networkRole = 'backbone';
-    } else if (metrics.directNeighborCount >= HUB_NEIGHBOR_THRESHOLD) {
-      // Many neighbors = hub (local aggregation point)
+    } else if (metrics.neighborCount >= 4) {
       networkRole = 'hub';
-    } else if (metrics.avgSymmetryRatio >= SYMMETRY_RELAY && metrics.directNeighborCount >= 2) {
-      // Moderate symmetry + some connectivity = relay (forwarding role)
-      // Using symmetry instead of floodParticipationRate removes observer bias
+    } else if (compositeScore >= 0.3 && metrics.neighborCount >= 2) {
       networkRole = 'relay';
     } else {
-      // Low connectivity or asymmetric traffic = edge node
       networkRole = 'edge';
     }
     
-    // === Calculate base delay from network role ===
-    let baseDelay: number;
-    switch (networkRole) {
-      case 'backbone':
-        baseDelay = 0.6;  // Backbone: moderate, balanced for throughput
-        break;
-      case 'hub':
-        baseDelay = 0.8;  // Hub: higher to reduce collision cascade
-        break;
-      case 'relay':
-        baseDelay = DEFAULT_FLOOD_DELAY_SEC;  // Relay: MeshCore default
-        break;
-      case 'edge':
-        baseDelay = 0.4;  // Edge: more aggressive, reduce latency
-        break;
-    }
-    
-    // === Apply mesh-wide adjustments ===
-    
-    // Relative load factors (0-1, relative to busiest node)
-    const relativeTraffic = maxEdgePacketCount > 0 
-      ? metrics.edgePacketCount / maxEdgePacketCount 
-      : 0;
-    const relativeNeighbors = maxNeighborCount > 0 
-      ? metrics.directNeighborCount / maxNeighborCount 
-      : 0;
-    const relativePaths = maxPathCount > 0 
-      ? metrics.pathCount / maxPathCount 
-      : 0;
-    
-    // Collision risk: combines traffic, connectivity, and path centrality
-    const collisionRisk = (
-      relativeNeighbors * 0.35 + 
-      relativeTraffic * 0.30 + 
-      relativePaths * 0.20 +
-      metrics.avgSymmetryRatio * 0.15
+    // Calculate path position metrics (for legacy compatibility)
+    const pathsWithNode = pathRegistry.paths.filter(p => 
+      p.hops.some(hop => hop.toUpperCase() === nodePrefix)
     );
-    
-    // Adjust base delay by collision risk (up to +0.4s for highest risk)
-    let rawFloodDelay = baseDelay + (collisionRisk * 0.4);
-    
-    // === OBSERVER BIAS NOTE ===
-    // We deliberately do NOT apply position-based adjustments because:
-    // 1. Path position is local-centric: "first hop" from our view might be "third hop"
-    //    from another node's perspective
-    // 2. Bidirectional mesh traffic means nodes serve different roles depending on
-    //    traffic direction
-    // 3. Using position would create inconsistent recommendations across the mesh
-    //
-    // Instead, we rely on observer-independent metrics:
-    // - Neighbor count (topological)
-    // - Edge symmetry (indicates bidirectional traffic visibility)
-    // - Relative traffic load (normalized across mesh)
-    
-    // High symmetry nodes see bidirectional traffic - they're likely true relays/hubs
-    // and should be more conservative. Low symmetry suggests we only see one direction.
-    if (metrics.avgSymmetryRatio >= 0.6) {
-      // High symmetry = confident in this node's centrality, add small delay
-      rawFloodDelay += 0.2;  // +1 slot for high-confidence central nodes
+    const positions = pathsWithNode.flatMap(p => {
+      const idx = p.hops.findIndex(h => h.toUpperCase() === nodePrefix);
+      return idx >= 0 ? [idx + 1] : [];
+    });
+    const avgPathPosition = positions.length > 0
+      ? positions.reduce((a, b) => a + b, 0) / positions.length
+      : 0;
+    let pathPositionVariance = 0;
+    if (positions.length > 1) {
+      pathPositionVariance = positions.reduce((sum, pos) => 
+        sum + Math.pow(pos - avgPathPosition, 2), 0) / positions.length;
     }
     
-    // === Confidence calculation with observer bias awareness ===
-    // Four factors:
-    // 1. Edge validation (how well-confirmed are the edges)
-    // 2. Sample size (do we have enough data)
-    // 3. Symmetry (do we see bidirectional traffic - less observer bias)
-    // 4. Direct path edges (MENTOR: "paths will tend to be direct" - ground truth)
-    const validationConfidence = Math.min(metrics.avgEdgeValidation / 10, 1);
-    const sampleConfidence = Math.min(packets.length / MIN_PACKETS_FOR_CONFIDENT_TOPOLOGY, 1);
-    const symmetryConfidence = metrics.avgSymmetryRatio; // 0-1, higher = less bias
-    // MENTOR principle: direct-routed edges are ground truth (explicitly chosen routes)
-    const directPathRatio = metrics.directNeighborCount > 0
-      ? metrics.directPathEdgeCount / metrics.directNeighborCount
-      : 0;
+    // Confidence based on data quality
+    const validationConf = Math.min(metrics.avgEdgeCertainCount / 10, 1);
+    const sampleConf = Math.min(packets.length / MIN_PACKETS_FOR_CONFIDENT_TOPOLOGY, 1);
+    const symmetryConf = metrics.avgSymmetry;
+    const confidence = (validationConf * 0.3 + sampleConf * 0.3 + symmetryConf * 0.4);
     
-    // Weight symmetry heavily, but also reward direct path evidence
-    const confidence = Math.round(
-      (validationConfidence * 0.25 + sampleConfidence * 0.25 + symmetryConfidence * 0.35 + directPathRatio * 0.15) * 100
-    ) / 100;
-    
-    // Determine data confidence level
     let dataConfidence: 'insufficient' | 'low' | 'medium' | 'high';
     if (packets.length < MIN_PACKETS_FOR_TX_DELAY) {
       dataConfidence = 'insufficient';
-    } else if (packets.length < MIN_PACKETS_FOR_CONFIDENT_TOPOLOGY || metrics.avgSymmetryRatio < LOW_SYMMETRY_THRESHOLD) {
-      dataConfidence = 'low';  // Either not enough data OR high observer bias
-    } else if (packets.length < MIN_PACKETS_FOR_CONFIDENT_TOPOLOGY * 2 || metrics.avgSymmetryRatio < HIGH_SYMMETRY_THRESHOLD) {
+    } else if (packets.length < MIN_PACKETS_FOR_CONFIDENT_TOPOLOGY || metrics.avgSymmetry < LOW_SYMMETRY_THRESHOLD) {
+      dataConfidence = 'low';
+    } else if (packets.length < MIN_PACKETS_FOR_CONFIDENT_TOPOLOGY * 2 || metrics.avgSymmetry < HIGH_SYMMETRY_THRESHOLD) {
       dataConfidence = 'medium';
     } else {
-      dataConfidence = 'high';  // Enough data AND good bidirectional visibility
+      dataConfidence = 'high';
     }
     
     rawRecommendations.set(nodeHash, {
+      compositeScore,
       rawFloodDelay,
       networkRole,
-      collisionRisk,
-      floodParticipationRate,
+      collisionRisk: collisionFactor,
+      floodParticipationRate: metrics.floodForwardRatio,
       avgPathPosition,
       pathPositionVariance,
-      pathDiversity,
-      trafficIntensity,
+      pathDiversity: metrics.pathCount,
+      trafficIntensity: metrics.trafficRate,
       confidence,
-      observationSymmetry: metrics.avgSymmetryRatio,
+      observationSymmetry: metrics.avgSymmetry,
       dataConfidence,
+      factors: {
+        forwarding: forwardingFactor,
+        collision: collisionFactor,
+        criticality: criticalityFactor,
+        redundancy: redundancyFactor,
+      },
     });
-    
-    // Track slot distribution for staggering
-    const initialSlots = calculateSlots(alignToSlotBoundary(rawFloodDelay));
-    if (!slotDistribution.has(initialSlots)) {
-      slotDistribution.set(initialSlots, []);
-    }
-    slotDistribution.get(initialSlots)!.push(nodeHash);
   }
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 2.5: MENTOR-Inspired Utilization Balancing
+  // Phase 4: Mesh-Wide Balancing (Reduce Clustering)
   // ═══════════════════════════════════════════════════════════════════════════
-  // 
-  // MENTOR principle: "uses utilization as a figure of merit"
-  // Research shows "performances of MENTOR strongly depend on 'slack', a design
-  // parameter represented the different between maximum and minimum utilization."
-  // 
-  // Goal: Balance utilization across the mesh by adjusting slots:
-  // - High-utilization nodes → +slots (reduce their TX rate)
-  // - Low-utilization nodes → -slots (allow more TX opportunities)
-  // - This reduces mesh-wide utilization variance ("slack")
+  // Spread out nodes that land on the same slot
   
-  // Calculate mesh-wide utilization statistics
-  const utilizationValues: number[] = [];
-  for (const [nodeHash] of rawRecommendations) {
-    const metrics = nodeMetrics.get(nodeHash)!;
-    const utilization = maxTrafficRate > 0 ? metrics.trafficRate / maxTrafficRate : 0;
-    utilizationValues.push(utilization);
+  // Group by slot
+  const slotDistribution = new Map<number, string[]>();
+  for (const [nodeHash, raw] of rawRecommendations) {
+    const slot = calculateSlots(alignToSlotBoundary(raw.rawFloodDelay));
+    if (!slotDistribution.has(slot)) slotDistribution.set(slot, []);
+    slotDistribution.get(slot)!.push(nodeHash);
   }
   
-  // Calculate mean and variance (MENTOR "slack")
-  const meanUtilization = utilizationValues.length > 0
-    ? utilizationValues.reduce((a, b) => a + b, 0) / utilizationValues.length
-    : 0;
-  const utilizationVariance = utilizationValues.length > 1
-    ? utilizationValues.reduce((sum, u) => sum + Math.pow(u - meanUtilization, 2), 0) / utilizationValues.length
-    : 0;
-  const utilizationSlack = utilizationValues.length > 0
-    ? Math.max(...utilizationValues) - Math.min(...utilizationValues)
-    : 0;
-  
-  // Apply utilization-based adjustment when slack is significant
-  // Only adjust if slack > 0.3 (30% difference between busiest and quietest)
-  // AND variance is significant (>0.05) - MENTOR research shows low variance = already balanced
-  const UTILIZATION_ADJUSTMENT_THRESHOLD = 0.3;
-  const VARIANCE_THRESHOLD = 0.05;
-  
-  if (utilizationSlack > UTILIZATION_ADJUSTMENT_THRESHOLD && utilizationVariance > VARIANCE_THRESHOLD) {
-    for (const [nodeHash, raw] of rawRecommendations) {
-      const metrics = nodeMetrics.get(nodeHash)!;
-      const utilization = maxTrafficRate > 0 ? metrics.trafficRate / maxTrafficRate : 0;
-      
-      // Calculate deviation from mean
-      const deviationFromMean = utilization - meanUtilization;
-      
-      // MENTOR balancing: adjust toward mean utilization
-      // High utilization → increase delay (reduce TX rate) → +slots
-      // Low utilization → decrease delay (increase TX rate) → -slots
-      // Scale: ±0.2s (1 slot) per 0.3 deviation from mean
-      if (Math.abs(deviationFromMean) >= 0.15) {
-        const adjustment = Math.sign(deviationFromMean) * RESOLUTION_SECONDS;
-        raw.rawFloodDelay = alignToSlotBoundary(raw.rawFloodDelay + adjustment);
-      }
-    }
-  }
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 3: Apply Slot Staggering for Mesh-Wide Collision Avoidance
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 
-  // When multiple nodes would have the same slot count, we stagger them
-  // to reduce collision probability. This is the key mesh-wide optimization:
-  // instead of all nodes at the same slot count transmitting simultaneously,
-  // we spread them across adjacent slots.
-  
+  // Stagger nodes within same slot
   const staggeredDelays = new Map<string, number>();
   
   for (const [, nodeHashes] of slotDistribution) {
     if (nodeHashes.length <= 1) {
-      // Single node at this slot, no staggering needed
       if (nodeHashes.length === 1) {
         const hash = nodeHashes[0];
         const raw = rawRecommendations.get(hash)!;
@@ -1527,24 +1516,19 @@ function calculateNodeTxDelays(
       continue;
     }
     
-    // Multiple nodes at same slot - stagger them
-    // Sort by traffic intensity (highest traffic gets original slot)
-    const sortedByTraffic = [...nodeHashes].sort((a, b) => {
+    // Sort by composite score (spread based on how different they actually are)
+    const sorted = [...nodeHashes].sort((a, b) => {
       const aRaw = rawRecommendations.get(a)!;
       const bRaw = rawRecommendations.get(b)!;
-      return bRaw.trafficIntensity - aRaw.trafficIntensity;
+      return aRaw.compositeScore - bRaw.compositeScore;
     });
     
-    for (let i = 0; i < sortedByTraffic.length; i++) {
-      const hash = sortedByTraffic[i];
+    for (let i = 0; i < sorted.length; i++) {
+      const hash = sorted[i];
       const raw = rawRecommendations.get(hash)!;
-      
-      // Stagger: every 3rd node gets +0.2s, every 3rd+1 gets +0.4s
-      // This spreads nodes across 3 adjacent slots
+      // Spread across 3 adjacent slots
       const staggerOffset = (i % 3) * RESOLUTION_SECONDS;
-      const staggeredDelay = alignToSlotBoundary(raw.rawFloodDelay + staggerOffset);
-      
-      staggeredDelays.set(hash, staggeredDelay);
+      staggeredDelays.set(hash, alignToSlotBoundary(raw.rawFloodDelay + staggerOffset));
     }
   }
   
@@ -1556,7 +1540,7 @@ function calculateNodeTxDelays(
     const metrics = nodeMetrics.get(nodeHash)!;
     
     // Check if insufficient data
-    if (metrics.edgePacketCount < MIN_PACKETS_FOR_TX_DELAY) {
+    if (!metrics || metrics.totalEdgePackets < MIN_PACKETS_FOR_TX_DELAY) {
       recommendations.set(nodeHash, {
         // New MeshCore-aligned fields
         floodDelaySec: 0,
@@ -1568,7 +1552,7 @@ function calculateNodeTxDelays(
         directTxDelayFactor: 0,
         // Metrics
         trafficIntensity: 0,
-        directNeighborCount: metrics.directNeighborCount,
+        directNeighborCount: metrics?.neighborCount ?? 0,
         collisionRisk: 0,
         confidence: 0,
         insufficientData: true,
@@ -1583,7 +1567,7 @@ function calculateNodeTxDelays(
         pathDiversity: 0,
         positionDelayMs: 0,
         // Observer bias fields
-        observationSymmetry: metrics.avgSymmetryRatio,
+        observationSymmetry: metrics?.avgSymmetry ?? 0,
         dataConfidence: 'insufficient',
       });
       continue;
@@ -1602,9 +1586,9 @@ function calculateNodeTxDelays(
     
     // Generate rationale (observer-independent factors only)
     const roleDescriptions: Record<string, string> = {
-      backbone: `Backbone: ${metrics.directNeighborCount} neighbors, ${Math.round(metrics.avgSymmetryRatio * 100)}% symmetric`,
-      hub: `Hub: ${metrics.directNeighborCount} neighbors`,
-      relay: `Relay: ${Math.round(metrics.avgSymmetryRatio * 100)}% symmetric traffic`,
+      backbone: `Backbone: ${metrics.neighborCount} neighbors, ${Math.round(metrics.avgSymmetry * 100)}% symmetric`,
+      hub: `Hub: ${metrics.neighborCount} neighbors`,
+      relay: `Relay: ${Math.round(metrics.avgSymmetry * 100)}% symmetric traffic`,
       edge: 'Edge node',
     };
     
@@ -1647,7 +1631,7 @@ function calculateNodeTxDelays(
       directTxDelayFactor: directDelaySec,
       // Metrics
       trafficIntensity: Math.round(raw.trafficIntensity * 10) / 10,
-      directNeighborCount: metrics.directNeighborCount,
+      directNeighborCount: metrics.neighborCount,
       collisionRisk: Math.round(raw.collisionRisk * 100) / 100,
       confidence: raw.confidence,
       insufficientData: false,

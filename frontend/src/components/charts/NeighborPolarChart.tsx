@@ -52,21 +52,31 @@ function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): 
   return R * c;
 }
 
-// Get SNR-based color
+// Get SNR-based color with finer gradient steps
+// Range: +12 dB (excellent) to -12 dB (critical)
+// Colors: Green -> YellowGreen -> Yellow -> Orange -> Amber -> Red -> Deep Red
 function getSnrColor(snr: number): string {
-  if (snr >= 5) return '#4CFFB5'; // excellent
-  if (snr >= 0) return '#39D98A'; // good
-  if (snr >= -5) return '#F9D26F'; // fair
-  if (snr >= -10) return '#FF8A5C'; // poor
-  return '#FF5C7A'; // critical
+  if (snr >= 10) return '#4CFFB5';  // Excellent - bright teal/green
+  if (snr >= 7) return '#39D98A';   // Very good - green
+  if (snr >= 4) return '#7DD87D';   // Good - yellow-green
+  if (snr >= 1) return '#A3E635';   // Fair+ - lime
+  if (snr >= -2) return '#F9D26F';  // Fair - yellow/gold
+  if (snr >= -5) return '#FBBF24';  // Fair- - amber
+  if (snr >= -8) return '#FF8A5C';  // Poor - orange
+  if (snr >= -11) return '#EF4444'; // Bad - red
+  return '#B91C1C';                 // Critical - deep red
 }
 
-// Get SNR quality label
+// Get SNR quality label with finer gradations
 function getSnrQuality(snr: number): string {
-  if (snr >= 5) return 'Excellent';
-  if (snr >= 0) return 'Good';
-  if (snr >= -5) return 'Fair';
-  if (snr >= -10) return 'Poor';
+  if (snr >= 10) return 'Excellent';
+  if (snr >= 7) return 'Very Good';
+  if (snr >= 4) return 'Good';
+  if (snr >= 1) return 'Fair+';
+  if (snr >= -2) return 'Fair';
+  if (snr >= -5) return 'Fair-';
+  if (snr >= -8) return 'Poor';
+  if (snr >= -11) return 'Bad';
   return 'Critical';
 }
 

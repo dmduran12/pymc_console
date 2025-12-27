@@ -617,12 +617,6 @@ export default function ContactsMapMapLibre({
             />
           )}
           
-          <NeighborEdges
-            neighborPolylines={neighborPolylines}
-            hoveredEdgeKey={hoveredEdgeKey}
-            onEdgeHover={setHoveredEdgeKey}
-          />
-          
           <TopologyEdges
             showTopology={showTopology}
             isExiting={isExiting}
@@ -653,6 +647,13 @@ export default function ContactsMapMapLibre({
             getNodeOpacity={getNodeOpacity}
             shouldShowNode={shouldShowNode}
             onRequestRemove={onRemoveNode ? handleRequestRemove : undefined}
+          />
+          
+          {/* Neighbor edges ABOVE nodes for visibility */}
+          <NeighborEdges
+            neighborPolylines={neighborPolylines}
+            hoveredEdgeKey={hoveredEdgeKey}
+            onEdgeHover={setHoveredEdgeKey}
           />
           
           {/* ─── EDGE TOOLTIP (rendered at map level for interactivity) ─────────── */}
