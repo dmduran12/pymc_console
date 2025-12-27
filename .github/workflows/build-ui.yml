@@ -1,3 +1,9 @@
+# Package and Release UI
+#
+# NOTE: This workflow packages pre-built dist/ from the repo.
+# Building from source is done locally because proprietary files are gitignored.
+# The minified/bundled dist/ is committed and safe to distribute.
+
 name: Build and Release UI
 
 on:
@@ -13,43 +19,35 @@ on:
       - dev
 
 jobs:
-  build:
+  package:
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: frontend
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      
-      - name: Install dependencies
-        run: npm ci --prefer-offline --legacy-peer-deps
-      
-      - name: Typecheck and build
+      - name: Verify dist exists
         run: |
-          npm run typecheck &
-          TYPECHECK_PID=$!
-          npm run build:static
-          wait $TYPECHECK_PID
+          if [ ! -d "frontend/dist" ] || [ ! -f "frontend/dist/index.html" ]; then
+            echo "ERROR: frontend/dist/ not found or incomplete."
+            echo "Build locally with 'npm run build:static' before pushing."
+            exit 1
+          fi
+          echo "✓ Pre-built dist/ found"
+          ls -la frontend/dist/
       
-      - name: Add version file and create archives
+      - name: Create archives
+        working-directory: frontend
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "$VERSION" > dist/VERSION
+          echo "Packaging v$VERSION..."
           cd dist
           tar -czf ../pymc-ui-${{ github.ref_name }}.tar.gz .
-          zip -r ../pymc-ui-${{ github.ref_name }}.zip .
+          zip -rq ../pymc-ui-${{ github.ref_name }}.zip .
           tar -czf ../pymc-ui-latest.tar.gz .
-          zip -r ../pymc-ui-latest.zip .
+          zip -rq ../pymc-ui-latest.zip .
+          echo "✓ Archives created"
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -62,7 +60,7 @@ jobs:
           retention-days: 30
   
   release:
-    needs: build
+    needs: package
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
@@ -88,7 +86,6 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           generate_release_notes: true
-          # Mark as latest release (allows /latest/ download URL)
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
