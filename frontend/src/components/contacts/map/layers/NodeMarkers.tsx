@@ -132,6 +132,8 @@ export function NodeMarkers({
         const lastHopData = lastHopNeighborMap.get(hash);
         const meanSnr = lastHopData?.avgSnr ?? undefined;
         const meanRssi = lastHopData?.avgRssi ?? undefined;
+        const isStale = lastHopData?.status === 'stale';
+        const lastSeenTimestamp = lastHopData?.lastSeen ?? undefined;
         
         const name = neighbor.node_name || neighbor.name || 'Unknown';
         const hashPrefix = getHashPrefix(hash);
@@ -187,6 +189,8 @@ export function NodeMarkers({
                 isZeroHop={isZeroHop}
                 isMobile={isMobile}
                 isRoomServer={isRoomServer}
+                isStale={isStale}
+                lastSeenTimestamp={lastSeenTimestamp}
                 centrality={centrality}
                 affinity={affinity}
                 meanSnr={meanSnr}

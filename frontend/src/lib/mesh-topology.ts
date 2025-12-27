@@ -323,6 +323,14 @@ export interface PathHealth {
 }
 
 /**
+ * Neighbor freshness status for UI indicators.
+ * - 'active': Heard within last 7 days (full neighbor status)
+ * - 'stale': Heard 7-14 days ago (show "last heard" indicator)
+ * - 'expired': Not heard in 14+ days (excluded from neighbor list)
+ */
+export type NeighborStatus = 'active' | 'stale' | 'expired';
+
+/**
  * A neighbor identified by forwarding ADVERT packets directly to our local node.
  * 
  * Only ADVERT packets (type=4) are used for neighbor detection because:
@@ -345,6 +353,8 @@ export interface LastHopNeighbor {
   avgSnr: number | null;
   /** Most recent ADVERT timestamp from this neighbor */
   lastSeen: number;
+  /** Neighbor freshness status (active/stale/expired) */
+  status?: NeighborStatus;
 }
 
 /**
