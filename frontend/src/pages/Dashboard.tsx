@@ -243,40 +243,48 @@ export default function Dashboard() {
       <WidgetRow />
 
       {/* Stats Grid - Secondary Row (4 cards) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-        <StatsCard
-          title="FORWARDED"
-          value={bucketTotals.forwarded}
-          subtitle={`${bucketTotals.fwdPerHour}/hr rate`}
-          color="forwarded"
-          buckets={bucketedStats?.forwarded}
-          timeRangeLabel={currentRange.label}
-          icon={<ArrowUpRight className="w-4 h-4" />}
-        />
-        <StatsCard
-          title="DROPPED"
-          value={bucketTotals.dropped}
-          subtitle="Filtered or duplicate"
-          color="dropped"
-          buckets={bucketedStats?.dropped}
-          timeRangeLabel={currentRange.label}
-          icon={<XCircle className="w-4 h-4" />}
-        />
-        <TxDelayCard 
-          stats={stats}
-          receivedBuckets={bucketedStats?.received}
-          droppedBuckets={bucketedStats?.dropped}
-          forwardedBuckets={bucketedStats?.forwarded}
-          bucketDurationSeconds={bucketedStats?.bucket_duration_seconds}
-          timeRangeLabel={currentRange.label}
-        />
-        <StatsCard
-          title="UPTIME"
-          value={uptime}
-          subtitle="Since last restart"
-          color="neutral"
-          icon={<Clock className="w-4 h-4" />}
-        />
+      <div className="grid-12">
+        <div className="col-span-6 md:col-span-3">
+          <StatsCard
+            title="FORWARDED"
+            value={bucketTotals.forwarded}
+            subtitle={`${bucketTotals.fwdPerHour}/hr rate`}
+            color="forwarded"
+            buckets={bucketedStats?.forwarded}
+            timeRangeLabel={currentRange.label}
+            icon={<ArrowUpRight className="w-4 h-4" />}
+          />
+        </div>
+        <div className="col-span-6 md:col-span-3">
+          <StatsCard
+            title="DROPPED"
+            value={bucketTotals.dropped}
+            subtitle="Filtered or duplicate"
+            color="dropped"
+            buckets={bucketedStats?.dropped}
+            timeRangeLabel={currentRange.label}
+            icon={<XCircle className="w-4 h-4" />}
+          />
+        </div>
+        <div className="col-span-6 md:col-span-3">
+          <TxDelayCard 
+            stats={stats}
+            receivedBuckets={bucketedStats?.received}
+            droppedBuckets={bucketedStats?.dropped}
+            forwardedBuckets={bucketedStats?.forwarded}
+            bucketDurationSeconds={bucketedStats?.bucket_duration_seconds}
+            timeRangeLabel={currentRange.label}
+          />
+        </div>
+        <div className="col-span-6 md:col-span-3">
+          <StatsCard
+            title="UPTIME"
+            value={uptime}
+            subtitle="Since last restart"
+            color="neutral"
+            icon={<Clock className="w-4 h-4" />}
+          />
+        </div>
       </div>
 
       {/* Recent Packets - full width now that controls moved to sidebar */}
@@ -289,20 +297,20 @@ export default function Dashboard() {
             <Radio className="w-5 h-5 text-accent-primary" />
             Node Information
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div>
+          <div className="grid-12">
+            <div className="col-span-full sm:col-span-6 lg:col-span-3">
               <span className="type-label text-text-muted">Node Name</span>
               <p className="type-body text-text-primary mt-1">{nodeName}</p>
             </div>
-            <div>
+            <div className="col-span-full sm:col-span-6 lg:col-span-3">
               <span className="type-label text-text-muted">Version</span>
               <p className="type-data text-text-primary mt-1">v{stats.version}</p>
             </div>
-            <div>
+            <div className="col-span-full sm:col-span-6 lg:col-span-3">
               <span className="type-label text-text-muted">Core Version</span>
               <p className="type-data text-text-primary mt-1">v{stats.core_version}</p>
             </div>
-            <div>
+            <div className="col-span-full sm:col-span-6 lg:col-span-3">
               <span className="type-label text-text-muted">Local Hash</span>
               <div className="mt-1">
                 {stats.local_hash ? (
