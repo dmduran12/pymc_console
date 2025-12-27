@@ -25,7 +25,7 @@ pymc_console is a **dashboard that plugs into** [pyMC_Repeater](https://github.c
 - **Build**: SWC (via `@vitejs/plugin-react-swc`) for fast React transforms
 - **State Management**: Zustand
 - **Charts**: Recharts
-- **Maps**: Leaflet 1.9 / react-leaflet 4.2 (React 18 compatible)
+- **Maps**: MapLibre GL JS 5.x (contacts/topology), Leaflet 1.9 / react-leaflet 4.2 (path visualization)
 - **Icons**: lucide-react
 - **Installer**: Bash with whiptail/dialog TUI
 
@@ -190,7 +190,7 @@ const { stats } = useStore();       // Avoid
 
 **Polling**: Use `usePolling` hook from `src/lib/hooks/` for live data updates.
 
-### LBT Insights Widget Suite (`components/widgets/`)
+### Mesh Health Widget Suite (`components/widgets/`) (v0.6.43+)
 
 Compact dashboard widgets displaying channel health, LBT metrics, and link quality. Located in the top row of the Dashboard, below the hero card.
 
@@ -200,14 +200,14 @@ Compact dashboard widgets displaying channel health, LBT metrics, and link quali
 - Mobile (<768px): 2 columns, 4 rows
 
 **Widgets (left to right):**
-1. **ChannelHealthWidget** - Composite health score (0-100) combining LBT, noise, link quality
-2. **LBTRetryWidget** - % of TX requiring CAD backoff retries
-3. **ChannelBusyWidget** - Count of channel busy events (max CAD attempts exceeded)
-4. **CollisionWidget** - Estimated collision risk from LBT patterns
+1. **ChannelHealthWidget** - Composite health score (0-100) combining LBT, noise, link quality; click → Contacts page; trend indicator
+2. **LBTRetryWidget** - % of TX requiring CAD backoff retries; click → Packets page
+3. **ChannelBusyWidget** - Count of channel busy events (max CAD attempts exceeded); click → Packets page
+4. **CollisionWidget** - Estimated collision risk using logarithmic scaling (capped at 85%); click → Packets page
 5. **NoiseFloorWidget** - Current noise floor (dBm) with trend indicator
-6. **NetworkScoreWidget** - Average link quality across all neighbors
-7. **BestWorstLinkWidget** - Shows best and worst neighbor links
-8. **CADTunerWidget** - Auto-tuner toggle (placeholder for future feature)
+6. **NetworkScoreWidget** - Average link quality across QuickNeighbors (true zero-hop only); click → Contacts page; trend indicator
+7. **BestWorstLinkWidget** - Shows best and worst QuickNeighbor links; click → Contacts page
+8. **DutyCycleWidget** - Duty cycle status toggle (CAD tuner infrastructure preserved, set `showCADTuner=true` when backend ready)
 
 **Base Component** (`MiniWidget.tsx`):
 ```typescript
@@ -297,6 +297,26 @@ Edges are marked "certain" when:
 - MEDIUM (<5km) = 0.6
 - FAR (<10km) = 0.4
 - VERY_FAR (<20km) = 0.2
+
+**Companion Device Filtering** (v0.6.45+):
+Companion devices (clients, room servers) don't participate in packet forwarding, so they're excluded from topology analysis to prevent false prefix collisions.
+
+*Helper Functions* (`prefix-disambiguation.ts`):
+```typescript
+import { isRepeater, filterRepeatersOnly } from '@/lib/prefix-disambiguation';
+
+// Check if a neighbor is a repeater (not companion/client/room server)
+isRepeater(neighbor)  // true for 'repeater'/'rep', false for 'companion'/'client'/'room server'
+
+// Filter neighbors dict to repeaters only
+const repeaters = filterRepeatersOnly(neighbors);
+```
+
+*Contact Type Detection*:
+- Returns `true` for: `'repeater'`, `'rep'`
+- Returns `false` for: `'companion'`, `'client'`, `'cli'`, `'room server'`, `'room_server'`, `'room'`, `'server'`
+- Falls back to `is_repeater` boolean field if `contact_type` is unknown
+- Returns `false` for unknown types (conservative)
 
 ### Neighbor Detection (v0.6.14+)
 

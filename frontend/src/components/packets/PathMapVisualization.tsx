@@ -3,7 +3,7 @@ import { NeighborInfo } from '@/types/api';
 import { MapPin, AlertTriangle, HelpCircle } from 'lucide-react';
 import clsx from 'clsx';
 import { matchPrefix, prefixMatches, NeighborAffinity } from '@/lib/mesh-topology';
-import { resolvePrefix, type PrefixLookup } from '@/lib/prefix-disambiguation';
+import { resolvePrefix, filterRepeatersOnly, type PrefixLookup } from '@/lib/prefix-disambiguation';
 import { getHashPrefix } from '@/lib/path-utils';
 
 /**
@@ -121,6 +121,9 @@ function matchPrefixToNodes(
   prefixLookup?: PrefixLookup,
   position?: number
 ): PrefixMatchResult {
+  // Filter to repeaters only - companions don't participate in path forwarding
+  const repeatersOnly = filterRepeatersOnly(neighbors);
+  
   // If we have a prefix lookup, use it for confidence (includes dominant forwarder boost)
   let lookupConfidence: number | undefined;
   if (prefixLookup) {
@@ -132,7 +135,8 @@ function matchPrefixToNodes(
   }
   
   // Use shared matching logic from mesh-topology (pass affinity for tiebreaking)
-  const { matches, probability } = matchPrefix(prefix, neighbors, localHash, neighborAffinity, isLastHop);
+  // Pass filtered repeaters only - companions don't forward packets
+  const { matches, probability } = matchPrefix(prefix, repeatersOnly, localHash, neighborAffinity, isLastHop);
   
   // Store total matches BEFORE filtering by coordinates
   const totalMatches = matches.length;
@@ -163,8 +167,8 @@ function matchPrefixToNodes(
       }
     }
     
-    // Check neighbors for coordinates
-    const neighbor = neighbors[hash];
+    // Check repeaters for coordinates (filtered to exclude companions)
+    const neighbor = repeatersOnly[hash];
     if (neighbor?.latitude && neighbor?.longitude && 
         !(neighbor.latitude === 0 && neighbor.longitude === 0)) {
       candidates.push({

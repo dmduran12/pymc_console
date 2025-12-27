@@ -27,7 +27,7 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 ![Statistics](docs/images/statistics.png)
 
 ### Contacts & Topology
-- **Interactive map** — OpenStreetMap with dark theme and neighbor positions
+- **Interactive map** — MapLibre GL with dark theme, neighbor positions, and smooth animations
 - **Mesh topology graph** — Network connections inferred from packet paths
 - **Deep Analysis** — One-click full topology rebuild from 20K+ packets
 - **Intelligent disambiguation** — Four-factor scoring resolves prefix collisions
