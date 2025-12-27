@@ -15,6 +15,7 @@ import { NetworkCompositionChart } from '@/components/charts/NetworkCompositionC
 import { STATISTICS_TIME_RANGES } from '@/lib/constants';
 import { combineTxBuckets, toUtilSamples, type UtilSample } from '@/lib/spectrum-utils';
 import { DisambiguationCard } from '@/components/stats/DisambiguationCard';
+import { PageContainer, PageHeader, Grid12, GridCell, Card } from '@/components/layout/PageLayout';
 
 // ============================================================================
 // Airtime Utilization Data Processing
@@ -183,36 +184,36 @@ export default function Statistics() {
   }, [utilSamples]);
 
   return (
-    <div className="section-gap">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <BarChart3 className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          Statistics
-        </h1>
-        <TimeRangeSelector
-          ranges={STATISTICS_TIME_RANGES}
-          selectedIndex={selectedRange}
-          onSelect={setSelectedRange}
-        />
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Statistics"
+        icon={<BarChart3 />}
+        controls={
+          <TimeRangeSelector
+            ranges={STATISTICS_TIME_RANGES}
+            selectedIndex={selectedRange}
+            onSelect={setSelectedRange}
+          />
+        }
+      />
 
       {error && (
-        <div className="glass-card p-4 border border-accent-red/50 bg-accent-red/10">
+        <Card className="border border-accent-red/50 bg-accent-red/10">
           <p className="text-accent-red">{error}</p>
-        </div>
+        </Card>
       )}
 
       {initialLoading ? (
-        <div className="glass-card card-padding text-center">
+        <Card className="text-center">
           <div className="animate-pulse text-text-muted">Loading statistics...</div>
-        </div>
+        </Card>
       ) : (
         <>
           {/* Row: Traffic Flow (2/3) + Link Quality (1/3) */}
-          <div className="grid-12">
+          <Grid12>
             {/* Traffic Flow - Airtime Utilization Chart */}
-            <div className="col-span-full lg:col-span-8 glass-card card-padding">
+            <GridCell lg={8}>
+              <Card>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
@@ -233,10 +234,12 @@ export default function Statistics() {
                 startTs={startTs}
                 endTs={endTs}
               />
-            </div>
+              </Card>
+            </GridCell>
 
             {/* Neighbor Link Quality Polar Chart */}
-            <div className="col-span-full lg:col-span-4 glass-card card-padding">
+            <GridCell lg={4}>
+              <Card>
               <div className="flex items-center gap-2 mb-4">
                 <Compass className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Link Quality</h2>
@@ -246,22 +249,26 @@ export default function Statistics() {
                 localLat={stats?.config?.repeater?.latitude ?? 0}
                 localLon={stats?.config?.repeater?.longitude ?? 0}
               />
-            </div>
-          </div>
+              </Card>
+            </GridCell>
+          </Grid12>
 
           {/* Row: Network Composition + Packet Types + Noise Floor (3-up on desktop) */}
-          <div className="grid-12">
+          <Grid12>
             {/* Network Composition - Node type distribution */}
-            <div className="col-span-full md:col-span-6 lg:col-span-4 glass-card card-padding">
+            <GridCell md={6} lg={4}>
+              <Card>
               <div className="flex items-center gap-2 mb-4">
                 <Network className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Network Composition</h2>
               </div>
               <NetworkCompositionChart neighbors={stats?.neighbors ?? {}} />
-            </div>
+              </Card>
+            </GridCell>
 
             {/* Packet Types - Treemap Chart */}
-            <div className="col-span-full md:col-span-6 lg:col-span-4 glass-card card-padding">
+            <GridCell md={6} lg={4}>
+              <Card>
               <div className="flex items-center gap-2 mb-4">
                 <PieChart className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">Packet Types</h2>
@@ -273,10 +280,12 @@ export default function Statistics() {
                   No packet type data available
                 </div>
               )}
-            </div>
+              </Card>
+            </GridCell>
 
             {/* Noise Floor Heatmap */}
-            <div className="col-span-full md:col-span-6 lg:col-span-4 glass-card card-padding">
+            <GridCell md={6} lg={4}>
+              <Card>
               <div className="flex items-center gap-2 mb-4">
                 <Radio className="w-5 h-5 text-accent-primary" />
                 <h2 className="type-subheading text-text-primary">RF Noise Floor</h2>
@@ -287,15 +296,16 @@ export default function Statistics() {
                 values={noiseFloorHeatmapData.values}
                 height={176}
               />
-            </div>
+              </Card>
+            </GridCell>
 
             {/* Prefix Disambiguation Stats */}
-            <div className="col-span-full md:col-span-6 lg:col-span-4">
+            <GridCell md={6} lg={4}>
               <DisambiguationCard />
-            </div>
-          </div>
+            </GridCell>
+          </Grid12>
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }

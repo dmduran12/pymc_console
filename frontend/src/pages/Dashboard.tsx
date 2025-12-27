@@ -12,6 +12,7 @@ import { Home, Radio, TrendingUp, ArrowUpRight, XCircle, Clock } from 'lucide-re
 import { HashBadge } from '@/components/ui/HashBadge';
 import { TxDelayCard } from '@/components/stats/TxDelayCard';
 import { WidgetRow } from '@/components/widgets';
+import { PageContainer, PageHeader, Grid12, GridCell, Card } from '@/components/layout/PageLayout';
 import {
   AreaChart,
   Area,
@@ -136,34 +137,32 @@ export default function Dashboard() {
 
   if (statsError) {
     return (
-      <div className="glass-card p-8 text-center">
+      <Card className="p-8 text-center">
         <p className="type-subheading text-accent-red mb-2">Failed to connect to backend</p>
         <p className="type-body text-white/50">{statsError}</p>
         <p className="type-data-sm text-white/40 mt-4">
           Make sure the Python backend is running on port 8000
         </p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="section-gap">
-      {/* Page Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Home className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          <span className="truncate">{nodeName}</span>
-        </h1>
-        {/* Time Range Selector */}
-        <TimeRangeSelector
-          ranges={DASHBOARD_TIME_RANGES}
-          selectedIndex={selectedRange}
-          onSelect={setSelectedRange}
-        />
-      </div>
+    <PageContainer>
+      <PageHeader
+        title={nodeName}
+        icon={<Home />}
+        controls={
+          <TimeRangeSelector
+            ranges={DASHBOARD_TIME_RANGES}
+            selectedIndex={selectedRange}
+            onSelect={setSelectedRange}
+          />
+        }
+      />
       
       {/* Hero Received Card - Full Width */}
-      <div className="glass-card card-padding">
+      <Card>
         {isFlashing && <div className="flash-overlay" />}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 mb-4">
           <div>
@@ -237,14 +236,14 @@ export default function Dashboard() {
             No data available for this time range
           </div>
         )}
-      </div>
+      </Card>
 
       {/* LBT Insights Widget Row */}
       <WidgetRow />
 
       {/* Stats Grid - Secondary Row (4 cards) */}
-      <div className="grid-12">
-        <div className="col-span-6 md:col-span-3">
+      <Grid12>
+        <GridCell span={6} md={3}>
           <StatsCard
             title="FORWARDED"
             value={bucketTotals.forwarded}
@@ -254,8 +253,8 @@ export default function Dashboard() {
             timeRangeLabel={currentRange.label}
             icon={<ArrowUpRight className="w-4 h-4" />}
           />
-        </div>
-        <div className="col-span-6 md:col-span-3">
+        </GridCell>
+        <GridCell span={6} md={3}>
           <StatsCard
             title="DROPPED"
             value={bucketTotals.dropped}
@@ -265,8 +264,8 @@ export default function Dashboard() {
             timeRangeLabel={currentRange.label}
             icon={<XCircle className="w-4 h-4" />}
           />
-        </div>
-        <div className="col-span-6 md:col-span-3">
+        </GridCell>
+        <GridCell span={6} md={3}>
           <TxDelayCard 
             stats={stats}
             receivedBuckets={bucketedStats?.received}
@@ -275,8 +274,8 @@ export default function Dashboard() {
             bucketDurationSeconds={bucketedStats?.bucket_duration_seconds}
             timeRangeLabel={currentRange.label}
           />
-        </div>
-        <div className="col-span-6 md:col-span-3">
+        </GridCell>
+        <GridCell span={6} md={3}>
           <StatsCard
             title="UPTIME"
             value={uptime}
@@ -284,33 +283,33 @@ export default function Dashboard() {
             color="neutral"
             icon={<Clock className="w-4 h-4" />}
           />
-        </div>
-      </div>
+        </GridCell>
+      </Grid12>
 
       {/* Recent Packets - full width now that controls moved to sidebar */}
       <RecentPackets />
 
       {/* Node Info */}
       {stats && (
-        <div className="glass-card card-padding">
+        <Card>
           <h3 className="type-subheading text-text-primary mb-4 flex items-center gap-2">
             <Radio className="w-5 h-5 text-accent-primary" />
             Node Information
           </h3>
-          <div className="grid-12">
-            <div className="col-span-full sm:col-span-6 lg:col-span-3">
+          <Grid12>
+            <GridCell sm={6} lg={3}>
               <span className="type-label text-text-muted">Node Name</span>
               <p className="type-body text-text-primary mt-1">{nodeName}</p>
-            </div>
-            <div className="col-span-full sm:col-span-6 lg:col-span-3">
+            </GridCell>
+            <GridCell sm={6} lg={3}>
               <span className="type-label text-text-muted">Version</span>
               <p className="type-data text-text-primary mt-1">v{stats.version}</p>
-            </div>
-            <div className="col-span-full sm:col-span-6 lg:col-span-3">
+            </GridCell>
+            <GridCell sm={6} lg={3}>
               <span className="type-label text-text-muted">Core Version</span>
               <p className="type-data text-text-primary mt-1">v{stats.core_version}</p>
-            </div>
-            <div className="col-span-full sm:col-span-6 lg:col-span-3">
+            </GridCell>
+            <GridCell sm={6} lg={3}>
               <span className="type-label text-text-muted">Local Hash</span>
               <div className="mt-1">
                 {stats.local_hash ? (
@@ -319,8 +318,8 @@ export default function Dashboard() {
                   <span className="type-data-sm text-text-muted">N/A</span>
                 )}
               </div>
-            </div>
-          </div>
+            </GridCell>
+          </Grid12>
           {/* Public Key - full width row */}
           {stats.public_key && (
             <div className="mt-4 pt-4 border-t border-border-subtle">
@@ -330,8 +329,8 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-        </div>
+        </Card>
       )}
-    </div>
+    </PageContainer>
   );
 }

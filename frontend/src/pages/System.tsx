@@ -15,6 +15,7 @@ import type { HardwareStats } from '@/types/api';
 import clsx from 'clsx';
 import { POLLING_INTERVALS } from '@/lib/constants';
 import { useResourceHistory, useAddResourceDataPoint, type ResourceDataPoint } from '@/lib/stores/useStore';
+import { PageContainer, PageHeader, Grid12, GridCell, Card } from '@/components/layout/PageLayout';
 
 interface ProgressBarProps {
   value: number;
@@ -443,37 +444,37 @@ export default function System() {
   };
 
   return (
-    <div className="section-gap">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Cpu className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          System Stats
-        </h1>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-bg-subtle hover:bg-bg-elevated rounded-lg transition-colors text-sm text-text-muted hover:text-text-primary self-start sm:self-auto"
-        >
-          <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
-          Refresh
-        </button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="System Stats"
+        icon={<Cpu />}
+        controls={
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-bg-subtle hover:bg-bg-elevated rounded-lg transition-colors text-sm text-text-muted hover:text-text-primary self-start sm:self-auto"
+          >
+            <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
+            Refresh
+          </button>
+        }
+      />
 
       {error && (
-        <div className="glass-card p-4 border border-accent-danger/50 bg-accent-danger/10">
+        <Card className="border border-accent-danger/50 bg-accent-danger/10">
           <p className="text-accent-danger">{error}</p>
-        </div>
+        </Card>
       )}
 
       {loading ? (
-        <div className="glass-card p-12 text-center">
+        <Card className="p-12 text-center">
           <div className="animate-pulse text-text-muted">Loading system stats...</div>
-        </div>
+        </Card>
       ) : stats ? (
-        <div className="grid-12">
+        <Grid12>
           {/* System Resources - Full width time-series chart */}
-          <div className="col-span-full glass-card card-padding">
+          <GridCell>
+            <Card>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-accent-tertiary/20 flex items-center justify-center flex-shrink-0">
@@ -515,10 +516,12 @@ export default function System() {
                 {(stats.memory.used / (1024 * 1024)).toFixed(0)} / {(stats.memory.total / (1024 * 1024)).toFixed(0)} MB
               </span>
             </div>
-          </div>
+            </Card>
+          </GridCell>
 
           {/* Disk Usage */}
-          <div className="col-span-full md:col-span-6 glass-card card-padding">
+          <GridCell md={6}>
+            <Card>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-lg bg-accent-success/20 flex items-center justify-center">
                 <HardDrive className="w-6 h-6 text-accent-success" />
@@ -543,10 +546,12 @@ export default function System() {
                 </span>
               </div>
             </div>
-          </div>
+            </Card>
+          </GridCell>
 
           {/* Temperature */}
-          <div className="col-span-full md:col-span-6 glass-card card-padding">
+          <GridCell md={6}>
+            <Card>
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-accent-secondary/20 flex items-center justify-center">
                 <Thermometer className="w-5 h-5 text-accent-secondary" />
@@ -586,9 +591,10 @@ export default function System() {
                 No sensors available
               </div>
             )}
-          </div>
-        </div>
+            </Card>
+          </GridCell>
+        </Grid12>
       ) : null}
-    </div>
+    </PageContainer>
   );
 }

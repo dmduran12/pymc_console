@@ -12,6 +12,7 @@ import { PacketRow, PacketCard } from '@/components/packets/PacketRow';
 import { PacketDetailModal } from '@/components/packets/PacketDetailModal';
 import { PacketStats } from '@/components/packets/PacketStats';
 import { getPacketDirection } from '@/components/packets/PacketDirection';
+import { PageContainer, PageHeader, Card } from '@/components/layout/PageLayout';
 
 /** Extended filters including status, signal, and time range */
 interface ExtendedFilters extends PacketFilters {
@@ -134,55 +135,57 @@ export default function Packets() {
     (filters.timeRange && filters.timeRange > 0);
 
   return (
-    <div className="section-gap">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Radio className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          Packet History
-        </h1>
-        <div className="flex items-center gap-2 sm:gap-3">
-          {liveMode && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <Circle className="w-1.5 h-1.5 fill-accent-success text-accent-success animate-pulse" />
-              <span className="text-text-muted hidden xs:inline">Live</span>
-            </div>
-          )}
-          {/* Mobile filter toggle */}
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={clsx(
-              'sm:hidden px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-              'flex items-center gap-1.5 border',
-              hasActiveFilters
-                ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/30'
-                : 'bg-bg-subtle text-text-muted border-border-subtle'
+    <PageContainer>
+      <PageHeader
+        title="Packet History"
+        icon={<Radio />}
+        controls={
+          <>
+            {liveMode && (
+              <div className="flex items-center gap-1.5 text-xs">
+                <Circle className="w-1.5 h-1.5 fill-accent-success text-accent-success animate-pulse" />
+                <span className="text-text-muted hidden xs:inline">Live</span>
+              </div>
             )}
-          >
-            <Filter className="w-4 h-4" />
-            {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-accent-primary" />}
-          </button>
-          <button
-            onClick={() => setLiveMode(!liveMode)}
-            className={clsx(
-              'px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
-              'flex items-center gap-1.5 border',
-              liveMode
-                ? 'bg-accent-success/20 text-accent-success border-accent-success/30'
-                : 'bg-bg-subtle text-text-muted border-border-subtle hover:bg-bg-elevated'
-            )}
-          >
-            <RefreshCw className={clsx('w-4 h-4', liveMode && 'animate-spin')} />
-            <span className="hidden xs:inline">{liveMode ? 'Live' : 'Paused'}</span>
-          </button>
-        </div>
-      </div>
+            {/* Mobile filter toggle */}
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={clsx(
+                'sm:hidden px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                'flex items-center gap-1.5 border',
+                hasActiveFilters
+                  ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/30'
+                  : 'bg-bg-subtle text-text-muted border-border-subtle'
+              )}
+            >
+              <Filter className="w-4 h-4" />
+              {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-accent-primary" />}
+            </button>
+            <button
+              onClick={() => setLiveMode(!liveMode)}
+              className={clsx(
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
+                'flex items-center gap-1.5 border',
+                liveMode
+                  ? 'bg-accent-success/20 text-accent-success border-accent-success/30'
+                  : 'bg-bg-subtle text-text-muted border-border-subtle hover:bg-bg-elevated'
+              )}
+            >
+              <RefreshCw className={clsx('w-4 h-4', liveMode && 'animate-spin')} />
+              <span className="hidden xs:inline">{liveMode ? 'Live' : 'Paused'}</span>
+            </button>
+          </>
+        }
+      />
 
       {/* Filters - Always visible on desktop, collapsible on mobile */}
-      <div className={clsx(
-        'glass-card overflow-hidden transition-all duration-200',
-        showFilters ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0 sm:max-h-96 sm:opacity-100'
-      )}>
+      <Card
+        noPadding
+        className={clsx(
+          'overflow-hidden transition-all duration-200',
+          showFilters ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0 sm:max-h-96 sm:opacity-100'
+        )}
+      >
         <div className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-2">
@@ -295,13 +298,13 @@ export default function Packets() {
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Stats Summary */}
       <PacketStats packets={filteredPackets} />
 
       {/* Packet List - Single glass-card with responsive layout */}
-      <div className="glass-card overflow-hidden">
+      <Card noPadding>
         {/* Mobile header */}
         <div className="sm:hidden flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle bg-bg-elevated/30">
           <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider w-14 flex-shrink-0">Dir</span>
@@ -386,7 +389,7 @@ export default function Packets() {
         <div className="px-3 py-2 border-t border-border-subtle text-xs text-text-muted bg-bg-elevated/20 sm:text-left text-center">
           Showing {filteredPackets.length} of {packets.length} packets
         </div>
-      </div>
+      </Card>
 
       {/* Packet Detail Modal */}
       {selectedPacket && (
@@ -395,6 +398,6 @@ export default function Packets() {
           onClose={() => setSelectedPacket(null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

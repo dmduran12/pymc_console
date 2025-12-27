@@ -136,7 +136,7 @@ src/
 ├── components/
 │   ├── charts/            # AirtimeGauge, PacketTypesChart, NeighborPolarChart, NetworkCompositionChart, NoiseFloorHeatmap, AirtimeSpectrumChart
 │   ├── controls/          # ControlPanel (mode/duty cycle)
-│   ├── layout/            # Sidebar, Header, BackgroundProvider, PageSkeleton
+│   ├── layout/            # Sidebar, Header, BackgroundProvider, PageSkeleton, PageLayout
 │   ├── contacts/          # ContactsMap, ContactsMapMapLibre, PathHealthPanel, NodeSparkline
 │   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization, RecentPackets, SignalIndicator
 │   ├── shared/            # TimeRangeSelector, BackgroundSelector, Skeleton
@@ -189,6 +189,55 @@ const { stats } = useStore();       // Avoid
 ```
 
 **Polling**: Use `usePolling` hook from `src/lib/hooks/` for live data updates.
+
+### Page Layout System (`components/layout/PageLayout.tsx`) (v0.6.56+)
+
+Centralized layout components for consistent page structure. **All pages should use these components instead of raw CSS classes.**
+
+**Core Components:**
+```typescript
+import { PageContainer, PageHeader, Grid12, GridCell, Card } from '@/components/layout/PageLayout';
+
+// PageContainer - Outer wrapper with vertical spacing
+<PageContainer>
+  {/* Page content */}
+</PageContainer>
+
+// PageHeader - Title, icon, and controls
+<PageHeader
+  title="Page Title"
+  icon={<SomeIcon />}
+  controls={<TimeRangeSelector />}
+/>
+
+// Grid12 - 12-column responsive grid
+<Grid12>
+  <GridCell span={6} md={3} lg={4}>...</GridCell>
+</Grid12>
+
+// Card - Glass card with responsive padding
+<Card>...</Card>
+<Card compact>...</Card>        // Smaller padding
+<Card noPadding>...</Card>      // No padding
+```
+
+**GridCell Breakpoints:**
+- `span` - Base (mobile) column count
+- `sm` - 640px+ breakpoint
+- `md` - 768px+ breakpoint  
+- `lg` - 1024px+ breakpoint
+- `xl` - 1280px+ breakpoint
+
+**Convenience Components:**
+- `StatsRow` - 2-col mobile, 3/4-col desktop for stats cards
+- `TwoColumnLayout` - 8/4 split for main+sidebar
+- `ThreeColumnLayout` - Equal thirds on desktop
+
+**CSS Foundation** (in `index.css`):
+- `.section-gap` - Vertical spacing (1rem mobile → 2rem desktop)
+- `.grid-12` - 12-column grid with responsive gaps
+- `.card-padding` - Responsive padding (1rem → 1.5rem)
+- `.col-span-*` and breakpoint variants (`sm:`, `md:`, `lg:`, `xl:`)
 
 ### Mesh Health Widget Suite (`components/widgets/`) (v0.6.43+)
 
