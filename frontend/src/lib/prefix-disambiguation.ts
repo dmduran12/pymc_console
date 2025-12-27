@@ -39,6 +39,60 @@ import { parsePacketPath, getHashPrefix as getPrefix, getPositionFromIndex } fro
 import { calculateDistance, PROXIMITY_BANDS } from '@/lib/geo-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Repeater Filtering
+// ═══════════════════════════════════════════════════════════════════════════════
+// Prefix disambiguation is ONLY relevant for repeaters. Companion devices
+// (mobile clients) don't participate in mesh routing and their inclusion
+// would skew collision rates and confidence metrics.
+
+/**
+ * Determine if a neighbor is a repeater (participates in mesh routing).
+ * 
+ * Only repeaters should be included in prefix disambiguation because:
+ * - Companions don't forward packets, so their prefixes never appear in paths
+ * - Including companions inflates collision counts artificially
+ * - Disambiguation is specifically for resolving forwarding node ambiguity
+ * 
+ * @param neighbor - NeighborInfo from stats.neighbors
+ * @returns true if this is a repeater, false if companion/room_server/unknown
+ */
+export function isRepeater(neighbor: NeighborInfo): boolean {
+  // Check explicit contact_type first (most reliable)
+  if (neighbor.contact_type) {
+    const ct = neighbor.contact_type.toLowerCase();
+    // Only 'repeater' and 'rep' are considered repeaters
+    if (ct === 'repeater' || ct === 'rep') return true;
+    // Explicitly not repeaters: companions, room servers, etc.
+    if (ct === 'companion' || ct === 'client' || ct === 'cli') return false;
+    if (ct === 'room server' || ct === 'room_server' || ct === 'room' || ct === 'server') return false;
+  }
+  
+  // Fallback to is_repeater flag if no contact_type
+  if (neighbor.is_repeater === true) return true;
+  if (neighbor.is_repeater === false) return false;
+  
+  // Unknown type - be conservative and exclude
+  // Most unknown contacts are companions that haven't sent typed ADVERTs
+  return false;
+}
+
+/**
+ * Filter neighbors to only include repeaters.
+ * Used by prefix disambiguation to exclude companions from collision analysis.
+ */
+export function filterRepeatersOnly(
+  neighbors: Record<string, NeighborInfo>
+): Record<string, NeighborInfo> {
+  const result: Record<string, NeighborInfo> = {};
+  for (const [hash, neighbor] of Object.entries(neighbors)) {
+    if (isRepeater(neighbor)) {
+      result[hash] = neighbor;
+    }
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -231,8 +285,13 @@ function isCandidateTooOld(lastSeenTimestamp: number): boolean {
  * Build a prefix lookup table from packets and neighbors.
  * This is the main entry point for disambiguation.
  * 
+ * IMPORTANT: Only REPEATERS are included in the prefix lookup!
+ * Companion devices don't participate in mesh routing, so their prefixes
+ * never appear in packet paths. Including them would artificially inflate
+ * collision rates and skew confidence metrics.
+ * 
  * @param packets - All packets to analyze
- * @param neighbors - Known neighbors with location data
+ * @param neighbors - Known neighbors with location data (will be filtered to repeaters only)
  * @param localHash - Local node's hash (e.g., "0x19")
  * @param localLat - Local node latitude
  * @param localLon - Local node longitude
@@ -247,12 +306,17 @@ export function buildPrefixLookup(
 ): PrefixLookup {
   const lookup: PrefixLookup = new Map();
   
+  // ─── Step 0: Filter to repeaters only ────────────────────────────────────────
+  // Companions don't forward packets, so they shouldn't be in disambiguation.
+  // This prevents artificial collision inflation from companion prefixes.
+  const repeatersOnly = filterRepeatersOnly(neighbors);
+  
   // ─── Step 1: Build prefix -> candidates mapping ──────────────────────────────
   const prefixToCandidates = new Map<string, DisambiguationCandidate[]>();
   const hasLocalCoords = localLat !== undefined && localLon !== undefined &&
     (localLat !== 0 || localLon !== 0);
   
-  // Add local node if hash provided
+  // Add local node if hash provided (local is always a repeater)
   if (localHash) {
     const localPrefix = getPrefix(localHash);
     const candidate: DisambiguationCandidate = {
@@ -279,8 +343,9 @@ export function buildPrefixLookup(
     prefixToCandidates.set(localPrefix, [candidate]);
   }
   
-  // Add all neighbors (with age filtering)
-  for (const [hash, neighbor] of Object.entries(neighbors)) {
+  // Add all repeater neighbors (with age filtering)
+  // NOTE: We use repeatersOnly, not the original neighbors, to exclude companions
+  for (const [hash, neighbor] of Object.entries(repeatersOnly)) {
     const prefix = getPrefix(hash);
     const lastSeenTimestamp = neighbor.last_seen ?? 0;
     
