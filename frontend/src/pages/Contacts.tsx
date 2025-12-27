@@ -399,18 +399,32 @@ export default function Contacts() {
                           const ct = contact.contact_type?.toLowerCase();
                           const isRoomServer = ct === 'room server' || ct === 'room_server' || ct === 'room' || ct === 'server';
                           const isCompanion = ct === 'companion' || ct === 'client' || ct === 'cli';
+                          const isRepeater = contact.is_repeater || ct === 'repeater' || ct === 'rep';
                           
-                          if (isRoomServer) {
-                            // Room server (regardless of repeater status)
-                            return <MessagesSquare className="w-5 h-5 text-indigo-400" />;
+                          // Color constants from map design system (constants.ts)
+                          const INDIGO = '#4338CA';      // Deep royal blue-purple for standard nodes
+                          const AMBER = '#F59E0B';       // Amber-500 for room servers
+                          
+                          if (isRoomServer && isRepeater) {
+                            // Room server + repeater hybrid: custom dual-color icon
+                            // MessagesSquare in amber with Share2 overlay in indigo
+                            return (
+                              <div className="relative w-5 h-5">
+                                <MessagesSquare className="w-5 h-5 absolute inset-0" style={{ color: AMBER }} />
+                                <Share2 className="w-2.5 h-2.5 absolute -bottom-0.5 -right-0.5" style={{ color: INDIGO }} />
+                              </div>
+                            );
+                          } else if (isRoomServer) {
+                            // Room server (non-repeater) - amber
+                            return <MessagesSquare className="w-5 h-5" style={{ color: AMBER }} />;
                           } else if (isCompanion) {
-                            // Companion/client device
+                            // Companion/client device - muted gray
                             return <MonitorSmartphone className="w-5 h-5 text-text-muted" />;
-                          } else if (contact.is_repeater || ct === 'repeater' || ct === 'rep') {
+                          } else if (isRepeater) {
                             // Repeater - different icon based on neighbor status
                             return isNeighbor 
                               ? <ArrowLeftRight className="w-5 h-5 text-accent-success" />
-                              : <Share2 className="w-5 h-5 text-accent-primary" />;
+                              : <Share2 className="w-5 h-5" style={{ color: INDIGO }} />;
                           } else {
                             // Unknown type - default to companion icon
                             return <MonitorSmartphone className="w-5 h-5 text-text-muted" />;
