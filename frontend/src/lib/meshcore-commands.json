@@ -1,0 +1,2340 @@
+{
+  "version": "2025-12-27",
+  "source_url": "https://raw.githubusercontent.com/meshcore-dev/MeshCore/main/src/helpers/CommonCLI.cpp",
+  "generated_by": "parse_meshcore_cli.py",
+  "total_commands": 88,
+  "categories": [
+    "get",
+    "gps",
+    "logging",
+    "neighbor",
+    "other",
+    "radio",
+    "sensor",
+    "set",
+    "stats",
+    "system"
+  ],
+  "commands": [
+    {
+      "name": "get adc.multiplier",
+      "category": "get",
+      "params": [],
+      "response_format": "Error: unsupported by this board",
+      "description": "Get ADC multiplier for battery",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get advert.interval",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get local advert interval (minutes)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get af",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get airtime factor",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get agc.reset.interval",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get AGC reset interval (seconds)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get allow.read.only",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get read-only access setting",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.baud",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get bridge baud rate",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.channel",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get bridge channel (ESP-NOW)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.delay",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get bridge delay (ms)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.enabled",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get bridge enabled status",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.secret",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get bridge encryption secret",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.source",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get bridge packet source",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get bridge.type",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get bridge type (rs232/espnow/none)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get direct.txdelay",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get direct TX delay factor",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get flood.advert.interval",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get flood advert interval (hours)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get flood.max",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get max flood hops",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get freq",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get frequency (MHz)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get guest.password",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get guest password",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get int.thresh",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get interference threshold",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get lat",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get latitude",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get lon",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get longitude",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get multi.acks",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get multi-ack setting",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get name",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get node name",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get prv.key",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get private key (serial only)",
+      "serial_only": true,
+      "has_param": false
+    },
+    {
+      "name": "get public.key",
+      "category": "get",
+      "params": [],
+      "response_format": "> ",
+      "description": "Get public key (hex)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get radio",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str},{str},{int},{int}",
+      "description": "Get radio params (freq,bw,sf,cr)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get repeat",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get repeat/forward status (on/off)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get role",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get device role",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get rxdelay",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get RX delay base",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get tx",
+      "category": "get",
+      "params": [],
+      "response_format": "> {int}",
+      "description": "Get TX power (dBm)",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get txdelay",
+      "category": "get",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get TX delay factor",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "gps",
+      "category": "gps",
+      "params": [],
+      "response_format": "on, {str}, {str}, {int} sats",
+      "description": "Show GPS status",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "gps advert",
+      "category": "gps",
+      "params": [],
+      "response_format": "> none",
+      "description": "Get/set GPS advert location policy",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "gps off",
+      "category": "gps",
+      "params": [],
+      "response_format": "ok",
+      "description": "Disable GPS",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "gps on",
+      "category": "gps",
+      "params": [],
+      "response_format": "ok",
+      "description": "Enable GPS",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "gps setloc",
+      "category": "gps",
+      "params": [],
+      "response_format": "ok",
+      "description": "Set node location from GPS",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "gps sync",
+      "category": "gps",
+      "params": [],
+      "response_format": "ok",
+      "description": "Sync time from GPS",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "log",
+      "category": "logging",
+      "params": [],
+      "response_format": "   EOF",
+      "description": "Dump log file (serial only)",
+      "serial_only": true,
+      "has_param": false
+    },
+    {
+      "name": "log erase",
+      "category": "logging",
+      "params": [],
+      "response_format": "   log erased",
+      "description": "Erase log file",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "log start",
+      "category": "logging",
+      "params": [],
+      "response_format": "   logging on",
+      "description": "Start packet logging",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "log stop",
+      "category": "logging",
+      "params": [],
+      "response_format": "   logging off",
+      "description": "Stop packet logging",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "neighbor.remove",
+      "category": "neighbor",
+      "params": [],
+      "response_format": "OK",
+      "description": "Remove neighbor by pubkey",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "neighbors",
+      "category": "neighbor",
+      "params": [],
+      "response_format": "OK",
+      "description": "List neighbors",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "get",
+      "category": "other",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Execute get command",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set",
+      "category": "other",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Execute set command",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "tempradio",
+      "category": "radio",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK - temp params for {int} mins",
+      "description": "Apply temporary radio params (freq bw sf cr timeout_mins)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "sensor get",
+      "category": "sensor",
+      "params": [],
+      "response_format": "> {str}",
+      "description": "Get sensor/custom variable value",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "sensor list",
+      "category": "sensor",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "no custom var",
+      "description": "List all sensor/custom variables",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "sensor set",
+      "category": "sensor",
+      "params": [],
+      "response_format": "ok",
+      "description": "Set sensor/custom variable value",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set adc.multiplier",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK - using default board multiplier",
+      "description": "Set ADC multiplier",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set advert.interval",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "response_format": "Error: interval range is {int}-240 minutes",
+      "description": "Set local advert interval (60-240 min, 0=off)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set af",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set airtime factor (0-9)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set agc.reset.interval",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK - interval rounded to {int}",
+      "description": "Set AGC reset interval (seconds, rounded to 4)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set allow.read.only",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set read-only access (on/off)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set bridge.baud",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set bridge baud (9600-115200)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set bridge.channel",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set bridge channel (1-14)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set bridge.delay",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set bridge delay (0-10000 ms)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set bridge.enabled",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Enable/disable bridge",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set bridge.secret",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set bridge encryption secret",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set bridge.source",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set bridge source (rx/tx)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set direct.txdelay",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set direct TX delay factor",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set flood.advert.interval",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "Error: interval range is 3-48 hours",
+      "description": "Set flood advert interval (3-48 hours, 0=off)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set flood.max",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set max flood hops (0-64)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set freq",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK - reboot to apply",
+      "description": "Set frequency MHz (serial only, reboot required)",
+      "serial_only": true,
+      "has_param": true
+    },
+    {
+      "name": "set guest.password",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set guest password",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set int.thresh",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set interference threshold",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set lat",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set latitude",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set lon",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set longitude",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set multi.acks",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set multi-ack (0/1)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set name",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set node name",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set prv.key",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set private key (serial only)",
+      "serial_only": true,
+      "has_param": true
+    },
+    {
+      "name": "set radio",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK - reboot to apply",
+      "description": "Set radio params (freq bw sf cr)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set repeat",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": null,
+      "description": "Set repeat/forward (on/off)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set rxdelay",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set RX delay base",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set tx",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "float"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set TX power (dBm)",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "set txdelay",
+      "category": "set",
+      "params": [
+        {
+          "name": "value",
+          "type": "float"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK",
+      "description": "Set TX delay factor",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "stats-core",
+      "category": "stats",
+      "params": [],
+      "response_format": "Unknown command",
+      "description": "Show core statistics (serial only)",
+      "serial_only": true,
+      "has_param": false
+    },
+    {
+      "name": "stats-packets",
+      "category": "stats",
+      "params": [],
+      "response_format": "Unknown command",
+      "description": "Show packet statistics (serial only)",
+      "serial_only": true,
+      "has_param": false
+    },
+    {
+      "name": "stats-radio",
+      "category": "stats",
+      "params": [],
+      "response_format": "Unknown command",
+      "description": "Show radio statistics (serial only)",
+      "serial_only": true,
+      "has_param": false
+    },
+    {
+      "name": "advert",
+      "category": "system",
+      "params": [],
+      "response_format": "OK - Advert sent",
+      "description": "Send self advertisement",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "board",
+      "category": "system",
+      "params": [],
+      "response_format": "{str}",
+      "description": "Show board/manufacturer name",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "clear stats",
+      "category": "system",
+      "params": [],
+      "response_format": "(OK - stats reset)",
+      "description": "Reset statistics counters",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "clock",
+      "category": "system",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "{int}:{int} - {int}/{int}/{int} UTC",
+      "description": "Display current time",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "clock sync",
+      "category": "system",
+      "params": [],
+      "response_format": "OK - clock set: {int}:{int} - {int}/{int}/{int} UTC",
+      "description": "Sync clock from sender timestamp",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "password",
+      "category": "system",
+      "params": [
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "response_format": "password now: {str}",
+      "description": "Change admin password",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "reboot",
+      "category": "system",
+      "params": [],
+      "response_format": "OK - Advert sent",
+      "description": "Reboot the device",
+      "serial_only": false,
+      "has_param": false
+    },
+    {
+      "name": "start ota",
+      "category": "system",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "Error",
+      "description": "Start OTA firmware update",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "time",
+      "category": "system",
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "response_format": "OK - clock set: {int}:{int} - {int}/{int}/{int} UTC",
+      "description": "Set time to epoch seconds",
+      "serial_only": false,
+      "has_param": true
+    },
+    {
+      "name": "ver",
+      "category": "system",
+      "params": [],
+      "response_format": "{str} (Build: {str})",
+      "description": "Show firmware version and build date",
+      "serial_only": false,
+      "has_param": false
+    }
+  ],
+  "commands_by_category": {
+    "get": [
+      {
+        "name": "get adc.multiplier",
+        "category": "get",
+        "params": [],
+        "response_format": "Error: unsupported by this board",
+        "description": "Get ADC multiplier for battery",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get advert.interval",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get local advert interval (minutes)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get af",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get airtime factor",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get agc.reset.interval",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get AGC reset interval (seconds)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get allow.read.only",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get read-only access setting",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.baud",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get bridge baud rate",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.channel",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get bridge channel (ESP-NOW)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.delay",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get bridge delay (ms)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.enabled",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get bridge enabled status",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.secret",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get bridge encryption secret",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.source",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get bridge packet source",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get bridge.type",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get bridge type (rs232/espnow/none)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get direct.txdelay",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get direct TX delay factor",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get flood.advert.interval",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get flood advert interval (hours)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get flood.max",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get max flood hops",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get freq",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get frequency (MHz)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get guest.password",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get guest password",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get int.thresh",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get interference threshold",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get lat",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get latitude",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get lon",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get longitude",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get multi.acks",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get multi-ack setting",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get name",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get node name",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get prv.key",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get private key (serial only)",
+        "serial_only": true,
+        "has_param": false
+      },
+      {
+        "name": "get public.key",
+        "category": "get",
+        "params": [],
+        "response_format": "> ",
+        "description": "Get public key (hex)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get radio",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str},{str},{int},{int}",
+        "description": "Get radio params (freq,bw,sf,cr)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get repeat",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get repeat/forward status (on/off)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get role",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get device role",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get rxdelay",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get RX delay base",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get tx",
+        "category": "get",
+        "params": [],
+        "response_format": "> {int}",
+        "description": "Get TX power (dBm)",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "get txdelay",
+        "category": "get",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get TX delay factor",
+        "serial_only": false,
+        "has_param": false
+      }
+    ],
+    "gps": [
+      {
+        "name": "gps",
+        "category": "gps",
+        "params": [],
+        "response_format": "on, {str}, {str}, {int} sats",
+        "description": "Show GPS status",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "gps advert",
+        "category": "gps",
+        "params": [],
+        "response_format": "> none",
+        "description": "Get/set GPS advert location policy",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "gps off",
+        "category": "gps",
+        "params": [],
+        "response_format": "ok",
+        "description": "Disable GPS",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "gps on",
+        "category": "gps",
+        "params": [],
+        "response_format": "ok",
+        "description": "Enable GPS",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "gps setloc",
+        "category": "gps",
+        "params": [],
+        "response_format": "ok",
+        "description": "Set node location from GPS",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "gps sync",
+        "category": "gps",
+        "params": [],
+        "response_format": "ok",
+        "description": "Sync time from GPS",
+        "serial_only": false,
+        "has_param": true
+      }
+    ],
+    "logging": [
+      {
+        "name": "log",
+        "category": "logging",
+        "params": [],
+        "response_format": "   EOF",
+        "description": "Dump log file (serial only)",
+        "serial_only": true,
+        "has_param": false
+      },
+      {
+        "name": "log erase",
+        "category": "logging",
+        "params": [],
+        "response_format": "   log erased",
+        "description": "Erase log file",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "log start",
+        "category": "logging",
+        "params": [],
+        "response_format": "   logging on",
+        "description": "Start packet logging",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "log stop",
+        "category": "logging",
+        "params": [],
+        "response_format": "   logging off",
+        "description": "Stop packet logging",
+        "serial_only": false,
+        "has_param": true
+      }
+    ],
+    "neighbor": [
+      {
+        "name": "neighbor.remove",
+        "category": "neighbor",
+        "params": [],
+        "response_format": "OK",
+        "description": "Remove neighbor by pubkey",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "neighbors",
+        "category": "neighbor",
+        "params": [],
+        "response_format": "OK",
+        "description": "List neighbors",
+        "serial_only": false,
+        "has_param": false
+      }
+    ],
+    "other": [
+      {
+        "name": "get",
+        "category": "other",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Execute get command",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set",
+        "category": "other",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Execute set command",
+        "serial_only": false,
+        "has_param": true
+      }
+    ],
+    "radio": [
+      {
+        "name": "tempradio",
+        "category": "radio",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK - temp params for {int} mins",
+        "description": "Apply temporary radio params (freq bw sf cr timeout_mins)",
+        "serial_only": false,
+        "has_param": true
+      }
+    ],
+    "sensor": [
+      {
+        "name": "sensor get",
+        "category": "sensor",
+        "params": [],
+        "response_format": "> {str}",
+        "description": "Get sensor/custom variable value",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "sensor list",
+        "category": "sensor",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "no custom var",
+        "description": "List all sensor/custom variables",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "sensor set",
+        "category": "sensor",
+        "params": [],
+        "response_format": "ok",
+        "description": "Set sensor/custom variable value",
+        "serial_only": false,
+        "has_param": true
+      }
+    ],
+    "set": [
+      {
+        "name": "set adc.multiplier",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK - using default board multiplier",
+        "description": "Set ADC multiplier",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set advert.interval",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "response_format": "Error: interval range is {int}-240 minutes",
+        "description": "Set local advert interval (60-240 min, 0=off)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set af",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set airtime factor (0-9)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set agc.reset.interval",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK - interval rounded to {int}",
+        "description": "Set AGC reset interval (seconds, rounded to 4)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set allow.read.only",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set read-only access (on/off)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set bridge.baud",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set bridge baud (9600-115200)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set bridge.channel",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set bridge channel (1-14)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set bridge.delay",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set bridge delay (0-10000 ms)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set bridge.enabled",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Enable/disable bridge",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set bridge.secret",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set bridge encryption secret",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set bridge.source",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set bridge source (rx/tx)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set direct.txdelay",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set direct TX delay factor",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set flood.advert.interval",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "Error: interval range is 3-48 hours",
+        "description": "Set flood advert interval (3-48 hours, 0=off)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set flood.max",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set max flood hops (0-64)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set freq",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK - reboot to apply",
+        "description": "Set frequency MHz (serial only, reboot required)",
+        "serial_only": true,
+        "has_param": true
+      },
+      {
+        "name": "set guest.password",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set guest password",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set int.thresh",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set interference threshold",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set lat",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set latitude",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set lon",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set longitude",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set multi.acks",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set multi-ack (0/1)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set name",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set node name",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set prv.key",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set private key (serial only)",
+        "serial_only": true,
+        "has_param": true
+      },
+      {
+        "name": "set radio",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK - reboot to apply",
+        "description": "Set radio params (freq bw sf cr)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set repeat",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": null,
+        "description": "Set repeat/forward (on/off)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set rxdelay",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set RX delay base",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set tx",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          },
+          {
+            "name": "value",
+            "type": "float"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set TX power (dBm)",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "set txdelay",
+        "category": "set",
+        "params": [
+          {
+            "name": "value",
+            "type": "float"
+          },
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK",
+        "description": "Set TX delay factor",
+        "serial_only": false,
+        "has_param": true
+      }
+    ],
+    "stats": [
+      {
+        "name": "stats-core",
+        "category": "stats",
+        "params": [],
+        "response_format": "Unknown command",
+        "description": "Show core statistics (serial only)",
+        "serial_only": true,
+        "has_param": false
+      },
+      {
+        "name": "stats-packets",
+        "category": "stats",
+        "params": [],
+        "response_format": "Unknown command",
+        "description": "Show packet statistics (serial only)",
+        "serial_only": true,
+        "has_param": false
+      },
+      {
+        "name": "stats-radio",
+        "category": "stats",
+        "params": [],
+        "response_format": "Unknown command",
+        "description": "Show radio statistics (serial only)",
+        "serial_only": true,
+        "has_param": false
+      }
+    ],
+    "system": [
+      {
+        "name": "advert",
+        "category": "system",
+        "params": [],
+        "response_format": "OK - Advert sent",
+        "description": "Send self advertisement",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "board",
+        "category": "system",
+        "params": [],
+        "response_format": "{str}",
+        "description": "Show board/manufacturer name",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "clear stats",
+        "category": "system",
+        "params": [],
+        "response_format": "(OK - stats reset)",
+        "description": "Reset statistics counters",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "clock",
+        "category": "system",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "{int}:{int} - {int}/{int}/{int} UTC",
+        "description": "Display current time",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "clock sync",
+        "category": "system",
+        "params": [],
+        "response_format": "OK - clock set: {int}:{int} - {int}/{int}/{int} UTC",
+        "description": "Sync clock from sender timestamp",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "password",
+        "category": "system",
+        "params": [
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "response_format": "password now: {str}",
+        "description": "Change admin password",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "reboot",
+        "category": "system",
+        "params": [],
+        "response_format": "OK - Advert sent",
+        "description": "Reboot the device",
+        "serial_only": false,
+        "has_param": false
+      },
+      {
+        "name": "start ota",
+        "category": "system",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "Error",
+        "description": "Start OTA firmware update",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "time",
+        "category": "system",
+        "params": [
+          {
+            "name": "value",
+            "type": "int"
+          }
+        ],
+        "response_format": "OK - clock set: {int}:{int} - {int}/{int}/{int} UTC",
+        "description": "Set time to epoch seconds",
+        "serial_only": false,
+        "has_param": true
+      },
+      {
+        "name": "ver",
+        "category": "system",
+        "params": [],
+        "response_format": "{str} (Build: {str})",
+        "description": "Show firmware version and build date",
+        "serial_only": false,
+        "has_param": false
+      }
+    ]
+  },
+  "node_prefs": {
+    "airtime_factor": {
+      "type": "float",
+      "array_size": null
+    },
+    "node_name": {
+      "type": "char",
+      "array_size": 32
+    },
+    "node_lat": {
+      "type": "double",
+      "array_size": null
+    },
+    "password": {
+      "type": "char",
+      "array_size": 16
+    },
+    "freq": {
+      "type": "float",
+      "array_size": null
+    },
+    "tx_power_dbm": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "disable_fwd": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "advert_interval": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "flood_advert_interval": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "rx_delay_base": {
+      "type": "float",
+      "array_size": null
+    },
+    "tx_delay_factor": {
+      "type": "float",
+      "array_size": null
+    },
+    "guest_password": {
+      "type": "char",
+      "array_size": 16
+    },
+    "direct_tx_delay_factor": {
+      "type": "float",
+      "array_size": null
+    },
+    "guard": {
+      "type": "uint32_t",
+      "array_size": null
+    },
+    "sf": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "cr": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "allow_read_only": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "multi_acks": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "bw": {
+      "type": "float",
+      "array_size": null
+    },
+    "flood_max": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "interference_threshold": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "agc_reset_interval": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "bridge_enabled": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "bridge_delay": {
+      "type": "uint16_t",
+      "array_size": null
+    },
+    "bridge_pkt_src": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "bridge_baud": {
+      "type": "uint32_t",
+      "array_size": null
+    },
+    "bridge_channel": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "bridge_secret": {
+      "type": "char",
+      "array_size": 16
+    },
+    "gps_enabled": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "gps_interval": {
+      "type": "uint32_t",
+      "array_size": null
+    },
+    "advert_loc_policy": {
+      "type": "uint8_t",
+      "array_size": null
+    },
+    "discovery_mod_timestamp": {
+      "type": "uint32_t",
+      "array_size": null
+    },
+    "adc_multiplier": {
+      "type": "float",
+      "array_size": null
+    }
+  }
+}

@@ -16,6 +16,55 @@
 # - Stay compatible with upstream updates
 # - Allow users to switch between console and vanilla pyMC_Repeater
 
+# ============================================================================
+# Bootstrap Self-Healing (runs BEFORE anything else)
+# ============================================================================
+# Fixes chicken-and-egg: if git history diverged (e.g., after force-push),
+# the old manage.sh can't pull the new manage.sh. This check runs early
+# and resyncs if needed, then re-execs to run the updated script.
+
+_bootstrap_self_heal() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Only heal if we're in a git repo and running as root (upgrade/install context)
+    [ ! -d "$script_dir/.git" ] && return 0
+    [ "$EUID" -ne 0 ] && return 0
+    
+    # Skip if BOOTSTRAP_DONE is set (prevents infinite loop)
+    [ -n "$BOOTSTRAP_DONE" ] && return 0
+    
+    cd "$script_dir" || return 0
+    git config --global --add safe.directory "$script_dir" 2>/dev/null || true
+    git fetch origin 2>/dev/null || return 0
+    
+    local local_hash=$(git rev-parse HEAD 2>/dev/null)
+    local remote_hash=$(git rev-parse origin/main 2>/dev/null || git rev-parse origin/master 2>/dev/null)
+    
+    # If already up-to-date, nothing to do
+    [ -z "$remote_hash" ] && return 0
+    [ "$local_hash" = "$remote_hash" ] && return 0
+    
+    # Check if fast-forward is possible
+    if git merge-base --is-ancestor HEAD "$remote_hash" 2>/dev/null; then
+        # Fast-forward works, let normal upgrade flow handle it
+        return 0
+    fi
+    
+    # History diverged! Fix it now.
+    echo -e "\033[1;33m⚠ Detected diverged git history - auto-healing...\033[0m"
+    if git reset --hard "origin/main" 2>/dev/null || git reset --hard "origin/master" 2>/dev/null; then
+        echo -e "\033[0;32m✓ Repository synced - restarting with updated script...\033[0m"
+        echo ""
+        export BOOTSTRAP_DONE=1
+        exec "$script_dir/manage.sh" "$@"
+    else
+        echo -e "\033[0;31m✗ Auto-heal failed. Manual fix: cd $script_dir && git fetch && git reset --hard origin/main\033[0m"
+    fi
+}
+
+# Run bootstrap check, passing through all args for re-exec
+_bootstrap_self_heal "$@"
+
 set -e
 
 # ============================================================================
@@ -854,8 +903,9 @@ do_install() {
     # Apply patches to /opt/pymc_repeater (the installed location, not the clone)
     print_info "Patching installed files..."
     patch_api_endpoints "$INSTALL_DIR"           # PATCH 1: Radio config API endpoint
-    patch_logging_section "$INSTALL_DIR"         # PATCH 3: Ensure logging section exists
-    patch_log_level_api "$INSTALL_DIR"           # PATCH 4: Log level toggle API
+    patch_logging_section "$INSTALL_DIR"         # PATCH 2: Ensure logging section exists
+    patch_log_level_api "$INSTALL_DIR"           # PATCH 3: Log level toggle API
+    patch_mesh_cli "$INSTALL_DIR"                # PATCH 4: MeshCore CLI parity
     
     # =========================================================================
     # Step 5: Install dashboard and console extras
@@ -1227,6 +1277,7 @@ Continue?"; then
     patch_api_endpoints "$INSTALL_DIR"           # PATCH 1: Radio config API endpoint
     patch_logging_section "$INSTALL_DIR"         # PATCH 2: Ensure logging section exists
     patch_log_level_api "$INSTALL_DIR"           # PATCH 3: Log level toggle API
+    patch_mesh_cli "$INSTALL_DIR"                # PATCH 4: MeshCore CLI parity
     
     # Ensure --log-level DEBUG is in service file (RX timing fix)
     if [ -f /etc/systemd/system/pymc-repeater.service ]; then
@@ -2241,6 +2292,12 @@ run_upstream_installer() {
 #    - Allows web UI to toggle log level (INFO/DEBUG) and restart service
 #    - PR Status: Pending
 #
+# 4. patch_mesh_cli (mesh_cli.py)
+#    - Enhances mesh CLI with MeshCore CommonCLI.cpp parity
+#    - tempradio with auto-revert timer, reboot, stats-*, board, neighbor.remove
+#    - Implemented via external Python patch script (patches/mesh_cli_enhancements.py)
+#    - PR Status: Pending
+#
 # NOTE: patch_static_file_serving was removed in v0.4.0 (SPA migration).
 # Upstream's default() method already returns index.html for all unknown routes,
 # which is exactly what a true SPA needs. React Router handles client-side routing.
@@ -2600,6 +2657,52 @@ PATCHEOF
         fi
     else
         print_info "No log_level handling found - may be older version"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# PATCH 4: MeshCore CLI Parity (mesh_cli.py)
+# ------------------------------------------------------------------------------
+# File: repeater/handler_helpers/mesh_cli.py
+# Purpose: Enhance mesh CLI with MeshCore CommonCLI.cpp parity
+# Changes:
+#   - tempradio with auto-revert timer (saves config, reverts after timeout)
+#   - reboot via systemctl restart
+#   - neighbor.remove implementation
+#   - clear stats implementation
+#   - stats-packets, stats-radio, stats-core commands
+#   - board command for platform info
+# PR Status: Pending upstream submission
+# ------------------------------------------------------------------------------
+patch_mesh_cli() {
+    local target_dir="${1:-$CLONE_DIR}"
+    local mesh_cli_file="$target_dir/repeater/handler_helpers/mesh_cli.py"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local patch_script="$script_dir/patches/mesh_cli_enhancements.py"
+    
+    if [ ! -f "$mesh_cli_file" ]; then
+        print_warning "mesh_cli.py not found, skipping MeshCore CLI patch"
+        return 0
+    fi
+    
+    # Check if already patched (look for our marker comment)
+    if grep -q 'pymc_console: tempradio' "$mesh_cli_file" 2>/dev/null; then
+        print_info "MeshCore CLI patch already applied"
+        return 0
+    fi
+    
+    # Check if patch script exists
+    if [ ! -f "$patch_script" ]; then
+        print_warning "Patch script not found: $patch_script"
+        print_info "Skipping MeshCore CLI enhancements"
+        return 0
+    fi
+    
+    # Run the Python patch script
+    if python3 "$patch_script" "$mesh_cli_file" 2>/dev/null; then
+        print_success "Applied MeshCore CLI parity patch"
+    else
+        print_warning "MeshCore CLI patch may not have applied correctly"
     fi
 }
 

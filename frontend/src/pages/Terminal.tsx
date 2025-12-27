@@ -1,19 +1,33 @@
 /**
  * Terminal - Interactive command-line interface to the repeater
  * 
+ * This is a CLIENT-SIDE command interpreter that maps terminal commands
+ * to existing pyMC_Repeater API endpoints. No backend terminal endpoint required.
+ * 
  * Features:
  * - ASCII art header (PYMC_TERMINAL)
  * - Faux loading sequence with real connection check
  * - Command input with blinking cursor
  * - Command history with output display
- * - Autocomplete for commands (future)
+ * - Autocomplete for commands
+ * - Maps commands to existing REST endpoints
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import clsx from 'clsx';
 import { useStats } from '@/lib/stores/useStore';
-import { sendTerminalCommand } from '@/lib/api';
+import {
+  sendAdvert,
+  setMode,
+  setDutyCycle,
+  updateRadioConfig,
+  setLogLevel,
+  getStats,
+  getPacketStats,
+} from '@/lib/api';
+import type { LogLevel } from '@/lib/api';
+import { MESHCORE_COMMANDS, type MeshCoreCommand } from '@/lib/meshcore-commands';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants
@@ -43,47 +57,66 @@ interface CommandDef {
   required?: boolean;
 }
 
+// Build available commands from MeshCore registry + local additions
+// Filter out serial-only commands and add local commands
 const AVAILABLE_COMMANDS: CommandDef[] = [
+  // Local commands (not in MeshCore)
   { cmd: 'help', desc: 'Show available commands' },
-  { cmd: 'status', desc: 'Get repeater status' },
-  { cmd: 'advert', desc: 'Send an advertisement packet' },
-  { cmd: 'reboot', desc: 'Reboot the device (may timeout, normal)' },
-  { cmd: 'clock', desc: 'Display device clock time' },
-  { cmd: 'ver', desc: 'Show firmware version and build date' },
-  { cmd: 'neighbors', desc: 'Show nearby repeater nodes' },
   { cmd: 'clear', desc: 'Clear terminal screen' },
-  { cmd: 'password', desc: 'Set new admin password', params: '{new-password}', required: true },
-  { cmd: 'set af', desc: 'Set air-time factor', params: '{value}', required: true },
-  { cmd: 'set tx', desc: 'Set LoRa TX power (reboot to apply)', params: '{power-dbm}', required: true },
-  { cmd: 'set repeat', desc: 'Enable/disable repeater role', params: '{on|off}', required: true },
-  { cmd: 'set allow.read.only', desc: 'Set read-only login access', params: '{on|off}', required: true },
-  { cmd: 'set flood.max', desc: 'Set max hops for flood packets', params: '{max-hops}', required: true },
-  { cmd: 'set int.thresh', desc: 'Set interference threshold', params: '{db-value}', required: true },
-  { cmd: 'set agc.reset.interval', desc: 'Set AGC reset interval (0=disable)', params: '{seconds}', required: true },
-  { cmd: 'set multi.acks', desc: 'Enable/disable double ACKs', params: '{0|1}', required: true },
-  { cmd: 'set advert.interval', desc: 'Set local advert interval (0=disable)', params: '{minutes}', required: true },
-  { cmd: 'set flood.advert.interval', desc: 'Set flood advert interval (0=disable)', params: '{hours}', required: true },
-  { cmd: 'set guest.password', desc: 'Set guest password', params: '{password}', required: true },
-  { cmd: 'set name', desc: 'Set advertisement name', params: '{name}', required: true },
-  { cmd: 'set lat', desc: 'Set map latitude', params: '{decimal-degrees}', required: true },
-  { cmd: 'set lon', desc: 'Set map longitude', params: '{decimal-degrees}', required: true },
-  { cmd: 'set radio', desc: 'Set radio params (reboot required)', params: '{freq,bw,sf,cr}', required: true },
-  { cmd: 'log start', desc: 'Start packet logging' },
-  { cmd: 'log stop', desc: 'Stop packet logging' },
-  { cmd: 'log erase', desc: 'Erase packet logs' },
+  { cmd: 'status', desc: 'Get repeater status summary' },
+  { cmd: 'uptime', desc: 'Show system uptime' },
+  { cmd: 'packets', desc: 'Show packet statistics' },
+  { cmd: 'board', desc: 'Show board/platform info' },
+  
+  // Import MeshCore commands (excluding serial-only and unsupported)
+  ...MESHCORE_COMMANDS
+    .filter((c: MeshCoreCommand) => !c.serialOnly)  // Exclude serial-only
+    .filter((c: MeshCoreCommand) => !c.name.startsWith('gps'))  // No GPS on Pi
+    .filter((c: MeshCoreCommand) => !c.name.startsWith('bridge'))  // No bridge support
+    .filter((c: MeshCoreCommand) => !c.name.startsWith('sensor'))  // No sensors
+    .filter((c: MeshCoreCommand) => c.name !== 'start ota')  // No OTA via HTTP
+    .filter((c: MeshCoreCommand) => c.name !== 'erase')  // Too dangerous
+    .filter((c: MeshCoreCommand) => c.name !== 'reboot')  // Use systemctl
+    .map((c: MeshCoreCommand) => ({
+      cmd: c.name,
+      desc: c.description,
+      params: c.hasParam ? '{value}' : undefined,
+      required: c.hasParam,
+    })),
 ];
 
-// Parameter suggestions for autocomplete
+// Parameter suggestions for autocomplete (MeshCore-compatible values)
 const PARAM_SUGGESTIONS: Record<string, string[]> = {
+  // Mode/toggle commands
+  'set mode': ['forward', 'monitor'],
+  'set duty': ['on', 'off'],
   'set repeat': ['on', 'off'],
   'set allow.read.only': ['on', 'off'],
   'set multi.acks': ['0', '1'],
-  'set af': ['0.1', '0.5', '1.0', '2.0'],
-  'set tx': ['10', '14', '20', '27'],
+  
+  // Radio parameters
+  'set tx': ['10', '14', '17', '20', '22'],
+  'set sf': ['7', '8', '9', '10', '11', '12'],
+  'set bw': ['125', '250', '500'],
+  'set freq': ['906.875', '915.0', '920.0'],
+  'set radio': ['906.875 250 10 5', '915.0 125 7 5'],
+  'tempradio': ['906.875 250 10 5', '915.0 125 7 5', '920.0 500 12 8'],
+  
+  // Timing parameters
+  'set af': ['0.5', '1.0', '1.5', '2.0'],
+  'set txdelay': ['0.5', '0.7', '1.0', '1.5'],
+  'set direct.txdelay': ['0.3', '0.5', '0.7'],
+  'set rxdelay': ['0', '0.5', '1.0'],
+  
+  // Intervals
+  'set advert.interval': ['0', '60', '120', '180'],
+  'set flood.advert.interval': ['0', '6', '12', '24'],
+  'set flood.max': ['0', '3', '5', '10'],
+  'set agc.reset.interval': ['0', '60', '300'],
   'set int.thresh': ['10', '14', '18', '22'],
-  'set agc.reset.interval': ['0', '30', '60', '300'],
-  'set advert.interval': ['0', '5', '15', '30'],
-  'set flood.advert.interval': ['0', '1', '6', '24'],
+  
+  // Log level
+  'set log': ['debug', 'info', 'warning'],
 };
 
 // Status response parsing
@@ -417,28 +450,29 @@ export default function Terminal() {
   }, [autocompleteOptions, updateAutocomplete]);
   
   // ─────────────────────────────────────────────────────────────────────────────
-  // Command execution
+  // Command execution - maps commands to existing API endpoints
   // ─────────────────────────────────────────────────────────────────────────────
   
   const executeCommand = useCallback(async (cmd: string) => {
     const trimmedCmd = cmd.trim();
     if (!trimmedCmd) return;
+    const lowerCmd = trimmedCmd.toLowerCase();
     
     // Handle client-side commands
-    if (trimmedCmd.toLowerCase() === 'clear') {
+    if (lowerCmd === 'clear') {
       setCommandHistory([]);
       return;
     }
     
-    if (trimmedCmd.toLowerCase() === 'help') {
+    if (lowerCmd === 'help') {
       const helpText = AVAILABLE_COMMANDS
-        .map(c => `  ${c.cmd.padEnd(22)} ${c.desc}`)
+        .map(c => `  ${c.cmd.padEnd(18)} ${c.desc}`)
         .join('\n');
       
       const entry: CommandEntry = {
         id: crypto.randomUUID(),
         cmd: trimmedCmd,
-        result: `Available commands:\n\n${helpText}`,
+        result: `Available commands:\n\n${helpText}\n\nNote: Commands use existing API endpoints. Some MeshCore CLI\ncommands are not available via HTTP.`,
         isProcessing: false,
         timestamp: Date.now(),
       };
@@ -457,24 +491,399 @@ export default function Terminal() {
     };
     setCommandHistory(prev => [...prev, entry]);
     
+    // Helper to update result
+    const setResult = (result: string) => {
+      setCommandHistory(prev => 
+        prev.map(e => e.id === entryId ? { ...e, isProcessing: false, result } : e)
+      );
+    };
+    
     try {
-      const response = await sendTerminalCommand(trimmedCmd);
+      // Refresh stats for read commands
+      const freshStats = await getStats();
       
-      setCommandHistory(prev => 
-        prev.map(e => 
-          e.id === entryId 
-            ? { ...e, isProcessing: false, result: response.response || response.result || 'Command executed' }
-            : e
-        )
-      );
+      // Helper to format uptime from seconds
+      const formatUptime = (seconds: number): string => {
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        if (days > 0) return `${days}d ${hours}h ${mins}m`;
+        if (hours > 0) return `${hours}h ${mins}m`;
+        return `${mins}m`;
+      };
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // READ COMMANDS - Use /api/stats data
+      // ═══════════════════════════════════════════════════════════════════════
+      
+      if (lowerCmd === 'status') {
+        const mode = freshStats.config?.repeater?.mode || 'unknown';
+        const dutyCycle = freshStats.config?.duty_cycle?.enforcement_enabled ? 'enabled' : 'disabled';
+        const neighbors = Object.keys(freshStats.neighbors || {}).length;
+        const uptime = formatUptime(freshStats.uptime_seconds || 0);
+        setResult(
+          `Mode: ${mode} | Duty Cycle: ${dutyCycle}\n` +
+          `Neighbors: ${neighbors} | Uptime: ${uptime}`
+        );
+        return;
+      }
+      
+      if (lowerCmd === 'ver' || lowerCmd === 'version') {
+        const ver = freshStats.version || 'unknown';
+        const coreVer = freshStats.core_version || 'unknown';
+        setResult(`pyMC Repeater v${ver}\npyMC Core v${coreVer}`);
+        return;
+      }
+      
+      if (lowerCmd === 'clock') {
+        const now = new Date();
+        setResult(now.toLocaleString());
+        return;
+      }
+      
+      if (lowerCmd === 'uptime') {
+        setResult(formatUptime(freshStats.uptime_seconds || 0));
+        return;
+      }
+      
+      if (lowerCmd === 'neighbors') {
+        const neighbors = freshStats.neighbors || {};
+        const entries = Object.entries(neighbors);
+        if (entries.length === 0) {
+          setResult('No neighbors discovered yet.');
+        } else {
+          const lines = entries.map(([hash, info]) => {
+            const name = info.name || info.node_name || 'Unknown';
+            const rssi = info.rssi != null ? `${info.rssi}dBm` : '?';
+            const snr = info.snr != null ? `${info.snr}dB` : '?';
+            return `  ${hash.slice(0, 8)}  ${name.padEnd(16)} RSSI:${rssi.padStart(6)} SNR:${snr.padStart(5)}`;
+          });
+          setResult(`Neighbors (${entries.length}):\n${lines.join('\n')}`);
+        }
+        return;
+      }
+      
+      if (lowerCmd === 'packets') {
+        setResult(
+          `Packets RX: ${freshStats.rx_count ?? '?'} | TX: ${freshStats.tx_count ?? '?'}\n` +
+          `Forwarded: ${freshStats.forwarded_count ?? '?'} | Dropped: ${freshStats.dropped_count ?? '?'}`
+        );
+        return;
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // ALL GET COMMANDS - MeshCore parity (from CommonCLI.cpp)
+      // ═══════════════════════════════════════════════════════════════════════
+      
+      if (lowerCmd.startsWith('get ')) {
+        const param = lowerCmd.slice(4).trim();
+        const radio = freshStats.config?.radio;
+        const repeater = freshStats.config?.repeater;
+        const delays = freshStats.config?.delays;
+        
+        switch (param) {
+          // Identity
+          case 'name':
+            setResult(`> ${freshStats.node_name || 'Unknown'}`);
+            return;
+          case 'public.key':
+            setResult(`> ${freshStats.public_key || 'Not available'}`);
+            return;
+          case 'role':
+            setResult(`> repeater`);
+            return;
+            
+          // Radio params (MeshCore format: freq,bw,sf,cr)
+          case 'radio': {
+            if (!radio) { setResult('> Radio config not available'); return; }
+            const freq = radio.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?';
+            const bw = radio.bandwidth ? (radio.bandwidth / 1000) : '?';
+            setResult(`> ${freq},${bw},${radio.spreading_factor || '?'},${radio.coding_rate || '?'}`);
+            return;
+          }
+          case 'freq':
+            setResult(`> ${radio?.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?'}`);
+            return;
+          case 'tx':
+            setResult(`> ${radio?.tx_power ?? '?'}`);
+            return;
+            
+          // Timing
+          case 'af':
+            setResult(`> ${repeater?.use_score_for_tx ? '1.0' : '0'}`);
+            return;
+          case 'rxdelay':
+            setResult(`> ${delays?.tx_delay_factor ?? '0'}`);
+            return;
+          case 'txdelay':
+            setResult(`> ${delays?.tx_delay_factor ?? '1.0'}`);
+            return;
+          case 'direct.txdelay':
+            setResult(`> ${delays?.direct_tx_delay_factor ?? '0.5'}`);
+            return;
+            
+          // Repeater settings
+          case 'repeat':
+            setResult(`> ${repeater?.mode === 'forward' ? 'on' : 'off'}`);
+            return;
+          case 'lat':
+            setResult(`> ${repeater?.latitude ?? '0'}`);
+            return;
+          case 'lon':
+            setResult(`> ${repeater?.longitude ?? '0'}`);
+            return;
+            
+          // Intervals
+          case 'advert.interval':
+            setResult(`> ${(repeater?.send_advert_interval_hours ?? 2) * 60}`);
+            return;
+          case 'flood.advert.interval':
+            setResult(`> ${repeater?.send_advert_interval_hours ?? 24}`);
+            return;
+          case 'flood.max':
+            setResult(`> 3`);  // Default, not exposed in config
+            return;
+          case 'agc.reset.interval':
+            setResult(`> 0`);  // Not implemented in pyMC
+            return;
+            
+          // Security
+          case 'allow.read.only':
+            setResult(`> off`);  // Not exposed
+            return;
+          case 'guest.password':
+            setResult(`> (not exposed via HTTP)`);
+            return;
+          case 'multi.acks':
+            setResult(`> 0`);
+            return;
+          case 'int.thresh':
+            setResult(`> 0`);
+            return;
+            
+          // Mode (custom for pyMC)
+          case 'mode':
+            setResult(`> ${repeater?.mode || 'forward'}`);
+            return;
+            
+          default:
+            setResult(`??: ${param}`);
+            return;
+        }
+      }
+      
+      // board command (MeshCore parity)
+      if (lowerCmd === 'board') {
+        setResult('pyMC_Repeater (Linux/Raspberry Pi)');
+        return;
+      }
+      
+      // stats-packets (MeshCore format)
+      if (lowerCmd === 'stats-packets') {
+        try {
+          const pktStats = await getPacketStats(24);
+          if (pktStats.success && pktStats.data) {
+            setResult(
+              `rx: ${freshStats.rx_count ?? 0}\n` +
+              `tx: ${freshStats.tx_count ?? 0}\n` +
+              `fwd: ${freshStats.forwarded_count ?? 0}\n` +
+              `drop: ${freshStats.dropped_count ?? 0}`
+            );
+          } else {
+            setResult(`rx: ${freshStats.rx_count ?? 0}, tx: ${freshStats.tx_count ?? 0}`);
+          }
+        } catch {
+          setResult(`rx: ${freshStats.rx_count ?? 0}, tx: ${freshStats.tx_count ?? 0}`);
+        }
+        return;
+      }
+      
+      // stats-radio
+      if (lowerCmd === 'stats-radio') {
+        const radio = freshStats.config?.radio;
+        setResult(
+          `freq: ${radio?.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?'} MHz\n` +
+          `bw: ${radio?.bandwidth ? radio.bandwidth / 1000 : '?'} kHz\n` +
+          `sf: ${radio?.spreading_factor ?? '?'}\n` +
+          `cr: ${radio?.coding_rate ?? '?'}\n` +
+          `tx_pwr: ${radio?.tx_power ?? '?'} dBm\n` +
+          `noise: ${freshStats.noise_floor_dbm ?? '?'} dBm`
+        );
+        return;
+      }
+      
+      // stats-core
+      if (lowerCmd === 'stats-core') {
+        setResult(
+          `uptime: ${formatUptime(freshStats.uptime_seconds || 0)}\n` +
+          `rx/hr: ${freshStats.rx_per_hour?.toFixed(1) ?? '?'}\n` +
+          `fwd/hr: ${freshStats.forwarded_per_hour?.toFixed(1) ?? '?'}\n` +
+          `neighbors: ${Object.keys(freshStats.neighbors || {}).length}\n` +
+          `airtime: ${freshStats.utilization_percent?.toFixed(1) ?? '?'}%`
+        );
+        return;
+      }
+      
+      // clear stats
+      if (lowerCmd === 'clear stats') {
+        setResult('Error: Not implemented in pyMC_Repeater');
+        return;
+      }
+      
+      // tempradio <freq> <bw> <sf> <cr> - MeshCore format
+      // Note: On pyMC_Repeater this persists to config.yaml (restart service to revert)
+      if (lowerCmd.startsWith('tempradio ')) {
+        const parts = lowerCmd.split(/\s+/);
+        if (parts.length < 5) {
+          setResult('Usage: tempradio <freq_mhz> <bw_khz> <sf> <cr>\nExample: tempradio 906.875 250 10 5');
+          return;
+        }
+        const freq = parseFloat(parts[1]);
+        const bw = parseInt(parts[2]);
+        const sf = parseInt(parts[3]);
+        const cr = parseInt(parts[4]);
+        
+        if (isNaN(freq) || freq < 100 || freq > 1000) {
+          setResult('Error: Frequency must be in MHz (e.g., 906.875)');
+          return;
+        }
+        if (![125, 250, 500].includes(bw)) {
+          setResult('Error: Bandwidth must be 125, 250, or 500 kHz');
+          return;
+        }
+        if (isNaN(sf) || sf < 5 || sf > 12) {
+          setResult('Error: Spreading factor must be 5-12');
+          return;
+        }
+        if (isNaN(cr) || cr < 5 || cr > 8) {
+          setResult('Error: Coding rate must be 5-8');
+          return;
+        }
+        
+        const response = await updateRadioConfig({
+          frequency_mhz: freq,
+          bandwidth_khz: bw,
+          spreading_factor: sf,
+          coding_rate: cr,
+        });
+        if (response.success) {
+          setResult(`OK - Radio: ${freq}MHz, ${bw}kHz, SF${sf}, CR4/${cr}\nNote: Changes persist. Restart service to revert.`);
+        } else {
+          setResult(`Error: ${response.error || 'Failed to update radio config'}`);
+        }
+        return;
+      }
+      
+      // neighbor.remove
+      if (lowerCmd.startsWith('neighbor.remove ')) {
+        setResult('Error: neighbor.remove not implemented via HTTP');
+        return;
+      }
+      
+      // password
+      if (lowerCmd.startsWith('password ')) {
+        setResult('Error: Use config.yaml to change password');
+        return;
+      }
+      
+      // log commands
+      if (lowerCmd === 'log start' || lowerCmd === 'log stop' || lowerCmd === 'log erase') {
+        setResult('Error: Log commands not implemented via HTTP');
+        return;
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // ACTION COMMANDS - Use existing POST endpoints
+      // ═══════════════════════════════════════════════════════════════════════
+      
+      if (lowerCmd === 'advert') {
+        const response = await sendAdvert();
+        setResult(response.success ? 'OK - Advert sent' : `Error: ${response.error || 'Failed'}`);
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set mode ')) {
+        const mode = lowerCmd.split(' ')[2];
+        if (mode !== 'forward' && mode !== 'monitor') {
+          setResult('Error: Mode must be "forward" or "monitor"');
+          return;
+        }
+        const response = await setMode(mode as 'forward' | 'monitor');
+        setResult(response.success ? `OK - Mode set to ${mode}` : 'Error: Failed to set mode');
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set duty ')) {
+        const val = lowerCmd.split(' ')[2];
+        const enabled = val === 'on' || val === '1' || val === 'true';
+        const response = await setDutyCycle(enabled);
+        setResult(response.success ? `OK - Duty cycle ${enabled ? 'enabled' : 'disabled'}` : 'Error: Failed to set duty cycle');
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set log ')) {
+        const level = lowerCmd.split(' ')[2]?.toUpperCase();
+        if (!['DEBUG', 'INFO', 'WARNING', 'ERROR'].includes(level)) {
+          setResult('Error: Level must be debug, info, warning, or error');
+          return;
+        }
+        const response = await setLogLevel(level as LogLevel);
+        setResult(response.success ? `OK - Log level set to ${level}. Service restarting...` : `Error: ${response.error || 'Failed'}`);
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set tx ')) {
+        const power = parseInt(lowerCmd.split(' ')[2]);
+        if (isNaN(power) || power < 2 || power > 22) {
+          setResult('Error: TX power must be 2-22 dBm');
+          return;
+        }
+        const response = await updateRadioConfig({ tx_power: power });
+        setResult(response.success ? `OK - TX power set to ${power}dBm. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set freq ')) {
+        const freq = parseFloat(lowerCmd.split(' ')[2]);
+        if (isNaN(freq) || freq < 100 || freq > 1000) {
+          setResult('Error: Frequency must be in MHz (e.g., 906.875)');
+          return;
+        }
+        const response = await updateRadioConfig({ frequency_mhz: freq });
+        setResult(response.success ? `OK - Frequency set to ${freq}MHz. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set sf ')) {
+        const sf = parseInt(lowerCmd.split(' ')[2]);
+        if (isNaN(sf) || sf < 5 || sf > 12) {
+          setResult('Error: Spreading factor must be 5-12');
+          return;
+        }
+        const response = await updateRadioConfig({ spreading_factor: sf });
+        setResult(response.success ? `OK - SF set to ${sf}. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        return;
+      }
+      
+      if (lowerCmd.startsWith('set bw ')) {
+        const bw = parseInt(lowerCmd.split(' ')[2]);
+        if (![125, 250, 500].includes(bw)) {
+          setResult('Error: Bandwidth must be 125, 250, or 500 kHz');
+          return;
+        }
+        const response = await updateRadioConfig({ bandwidth_khz: bw });
+        setResult(response.success ? `OK - Bandwidth set to ${bw}kHz. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        return;
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // UNKNOWN COMMAND
+      // ═══════════════════════════════════════════════════════════════════════
+      
+      setResult(`Unknown command: ${trimmedCmd}\nType 'help' for available commands.`);
+      
     } catch (error) {
-      setCommandHistory(prev => 
-        prev.map(e => 
-          e.id === entryId 
-            ? { ...e, isProcessing: false, result: `Error: ${error instanceof Error ? error.message : 'Command failed'}` }
-            : e
-        )
-      );
+      setResult(`Error: ${error instanceof Error ? error.message : 'Command failed'}`);
     }
   }, []);
   
@@ -483,7 +892,7 @@ export default function Terminal() {
   // ─────────────────────────────────────────────────────────────────────────────
   
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Autocomplete navigation
+    // Autocomplete navigation (arrows, tab, escape)
     if (showAutocomplete && autocompleteOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -501,11 +910,9 @@ export default function Terminal() {
         e.preventDefault();
         setShowAutocomplete(false);
         return;
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        selectAutocompleteOption(selectedOptionIndex);
-        return;
       }
+      // NOTE: Enter executes the command as typed (like a real terminal)
+      // Use Tab to accept autocomplete suggestion
     }
     
     if (e.key === 'Enter') {
