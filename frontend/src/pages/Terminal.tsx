@@ -283,35 +283,34 @@ export default function Terminal() {
   const cursorIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // ─────────────────────────────────────────────────────────────────────────────
-  // Loading sequence
+  // Loading sequence (runs once on mount)
   // ─────────────────────────────────────────────────────────────────────────────
   
+  const hasRunLoadingSequence = useRef(false);
+  
   useEffect(() => {
+    // Only run once
+    if (hasRunLoadingSequence.current) return;
+    hasRunLoadingSequence.current = true;
+    
     const runLoadingSequence = async () => {
       // Step 1: Initializing
       setLoadingStep(1);
       await new Promise(r => setTimeout(r, 600));
       
-      // Step 2: Checking connection (real check - stats already loaded by app)
+      // Step 2: Checking connection
       setConnectionState('checking');
       setLoadingStep(2);
       await new Promise(r => setTimeout(r, 800));
       
-      // Step 3: Connected
-      if (stats) {
-        setLoadingStep(3);
-        await new Promise(r => setTimeout(r, 400));
-        setConnectionState('connected');
-      } else {
-        // Still wait for stats
-        await new Promise(r => setTimeout(r, 1000));
-        setConnectionState(stats ? 'connected' : 'error');
-        setLoadingStep(3);
-      }
+      // Step 3: Connected (stats should already be loaded by app)
+      setLoadingStep(3);
+      await new Promise(r => setTimeout(r, 400));
+      setConnectionState('connected');
     };
     
     runLoadingSequence();
-  }, [stats]);
+  }, []);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Cursor blinking
