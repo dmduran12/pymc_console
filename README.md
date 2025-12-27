@@ -11,7 +11,8 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 
 ### Dashboard
 - **Live packet metrics** — Received, forwarded, dropped packets with sparkline charts
-- **TX Delay Calculator** — Recommends optimal delay settings based on duplicate rate
+- **TX Delay Recommendations** — Slot-based delay optimization with network role classification (edge/relay/hub/backbone)
+- **LBT Insights widgets** — Channel health, collision risk, noise floor, link quality at a glance
 - **Time range selector** — View stats from 20 minutes to 7 days
 - **Recent packets** — Live feed of incoming traffic
 
@@ -25,7 +26,7 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 
 ![Statistics](docs/images/statistics.png)
 
-### Neighbors & Topology
+### Contacts & Topology
 - **Interactive map** — OpenStreetMap with dark theme and neighbor positions
 - **Mesh topology graph** — Network connections inferred from packet paths
 - **Deep Analysis** — One-click full topology rebuild from 20K+ packets
@@ -35,8 +36,10 @@ Built on [pyMC_Repeater](https://github.com/rightup/pyMC_Repeater) by [RightUp](
 - **Filter toggles** — Solo view for hub nodes or direct neighbors only
 - **Loop detection** — Identifies redundant paths (double-line rendering)
 - **Visual identity** — Yellow house icon for local node, indigo rings for neighbors
+- **Path health panel** — Health scores, weakest links, and latency estimates for observed routes
+- **Mobile node detection** — Identifies volatile nodes that appear/disappear frequently
 
-![Neighbors](docs/images/neighbors.png)
+![Contacts](docs/images/neighbors.png)
 
 ### Packets
 - **Searchable history** — Filter by type, route, time range
@@ -223,8 +226,8 @@ Packet path: ["FA", "79", "24", "19"]
 
 1. **Position (15%)** — Where in paths does this prefix typically appear?
 2. **Co-occurrence (15%)** — Which prefixes appear adjacent to this one?
-3. **Geographic (40%)** — How close is the candidate to anchor points?
-4. **Recency (30%)** — How recently was this node seen?
+3. **Geographic (35%)** — How close is the candidate to anchor points?
+4. **Recency (35%)** — How recently was this node seen?
 
 **Key techniques:**
 
@@ -243,9 +246,10 @@ Topology edges are rendered with visual cues indicating confidence:
 - **Line thickness** — Scales from 1.5px (5 validations) to 10px (100+ validations)
 - **Validation threshold** — Edges require 5+ certain observations to render
 - **Certainty conditions** — An edge is "certain" when:
-  - Both endpoints have ≥60% confidence, OR
-  - The destination has ≥90% confidence, OR
+  - Both endpoints have ≥0.6 confidence (HIGH threshold), OR
+  - The destination has ≥0.9 confidence (VERY_HIGH threshold), OR
   - It's the last hop to local node
+- **Inclusion threshold** — Edges require ≥0.4 confidence (MEDIUM threshold) for topology
 - **Trace animation** — Edges "draw" from point A to B when topology is enabled
 - **Fade animation** — Edges smoothly fade out when topology is disabled
 - **Loop edges** — Redundant paths rendered as parallel double-lines in accent color
