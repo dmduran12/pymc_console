@@ -4,13 +4,24 @@ venv/
 __pycache__/
 *.pyc
 
-# Build outputs
+# Build outputs (out/ is temp, dist/ is committed for releases)
 frontend/out/
-frontend/dist/
 frontend/tsconfig.tsbuildinfo
 *.egg-info/
-dist/
 build/
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROPRIETARY SOURCE FILES - Do not commit to public repo
+# These algorithms are closed-source. Only the minified build is distributed.
+# ═══════════════════════════════════════════════════════════════════════════════
+frontend/src/lib/prefix-disambiguation.ts
+frontend/src/lib/mesh-topology.ts
+frontend/src/lib/topology-service.ts
+frontend/src/lib/path-registry.ts
+frontend/src/lib/geo-utils.ts
+frontend/src/lib/edge-styling.ts
+frontend/src/lib/workers/topology.worker.ts
+frontend/src/lib/workers/sparkline.worker.ts
 
 # Environment files
 .env
