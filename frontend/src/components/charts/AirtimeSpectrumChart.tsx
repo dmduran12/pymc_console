@@ -131,7 +131,14 @@ function AirtimeSpectrumChartComponent({
     
     for (let i = 0; i < samples.length; i += step) {
       const s = samples[i];
-      out.push({ timestamp: s.timestamp, rx: s.rxUtilW, tx: s.txUtilW });
+      // Defensive: ensure all values are valid numbers to prevent Recharts errors
+      if (s && typeof s.timestamp === 'number' && !isNaN(s.timestamp)) {
+        out.push({ 
+          timestamp: s.timestamp, 
+          rx: typeof s.rxUtilW === 'number' && !isNaN(s.rxUtilW) ? s.rxUtilW : 0, 
+          tx: typeof s.txUtilW === 'number' && !isNaN(s.txUtilW) ? s.txUtilW : 0,
+        });
+      }
     }
     
     return out;

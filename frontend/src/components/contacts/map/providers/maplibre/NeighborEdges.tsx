@@ -226,9 +226,13 @@ export function NeighborEdges({
     if (!map || !hasData) return;
     
     const mapInstance = map.getMap();
-    if (!mapInstance) return;
+    if (!mapInstance || !mapInstance.isStyleLoaded()) return;
     
     try {
+      // Check if layer exists before attempting to modify
+      const layer = mapInstance.getLayer('neighbor-edges');
+      if (!layer) return;
+      
       // MapLibre uses line-dasharray with offset via dash pattern manipulation
       // We shift the pattern by adjusting the first dash length
       // This creates the scrolling effect
@@ -255,11 +259,9 @@ export function NeighborEdges({
         dashArray = [firstDash, gapLength, extraGap, gapLength];
       }
       
-      if (mapInstance.getLayer('neighbor-edges')) {
-        mapInstance.setPaintProperty('neighbor-edges', 'line-dasharray', dashArray);
-      }
+      mapInstance.setPaintProperty('neighbor-edges', 'line-dasharray', dashArray);
     } catch {
-      // Layer might not exist yet, ignore
+      // Layer might not exist yet or style not loaded, ignore
     }
   }, [map, dashOffset, hasData]);
   
