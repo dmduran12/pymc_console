@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { getLogLevelColor, POLLING_INTERVALS } from '@/lib/constants';
 import { setLogLevel, type LogLevel } from '@/lib/api';
 import { LogsSkeleton } from '@/components/shared/Skeleton';
+import { PageContainer, PageHeader, Card } from '@/components/layout/PageLayout';
 import type { LogEntry } from '@/types/api';
 
 /** Memoized log row to prevent re-renders when other logs update */
@@ -123,39 +124,37 @@ export default function Logs() {
   usePolling(fetchLogs, POLLING_INTERVALS.logs, liveMode);
 
   return (
-    <div className="section-gap">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <FileText className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          System Logs
-        </h1>
-        <div className="flex items-center gap-3 sm:gap-4">
-          <LogLevelToggle />
-          {liveMode && (
-            <div className="flex items-center gap-2 text-sm">
-              <Circle className="w-2 h-2 fill-accent-success text-accent-success animate-pulse" />
-              <span className="text-text-muted">Live</span>
-            </div>
-          )}
-          <button
-            onClick={() => setLiveMode(!liveMode)}
-            className={clsx(
-              'px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors',
-              'flex items-center gap-2 border',
-              liveMode
-                ? 'bg-accent-success/20 text-accent-success border-accent-success/30'
-                : 'bg-bg-subtle text-text-muted border-border-subtle hover:bg-bg-elevated'
+    <PageContainer>
+      <PageHeader
+        title="System Logs"
+        icon={<FileText />}
+        controls={
+          <>
+            <LogLevelToggle />
+            {liveMode && (
+              <div className="flex items-center gap-2 text-sm">
+                <Circle className="w-2 h-2 fill-accent-success text-accent-success animate-pulse" />
+                <span className="text-text-muted">Live</span>
+              </div>
             )}
-          >
-            <RefreshCw className={clsx('w-4 h-4', liveMode && 'animate-spin')} />
-            <span className="hidden xs:inline">{liveMode ? 'Live' : 'Paused'}</span>
-          </button>
-        </div>
-      </div>
+            <button
+              onClick={() => setLiveMode(!liveMode)}
+              className={clsx(
+                'px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-2 border',
+                liveMode
+                  ? 'bg-accent-success/20 text-accent-success border-accent-success/30'
+                  : 'bg-bg-subtle text-text-muted border-border-subtle hover:bg-bg-elevated'
+              )}
+            >
+              <RefreshCw className={clsx('w-4 h-4', liveMode && 'animate-spin')} />
+              <span className="hidden xs:inline">{liveMode ? 'Live' : 'Paused'}</span>
+            </button>
+          </>
+        }
+      />
 
-      {/* Logs */}
-      <div className="glass-card card-padding">
+      <Card>
         <div className="space-y-2 max-h-[calc(100vh-300px)] sm:max-h-[calc(100vh-250px)] overflow-y-auto font-mono text-sm">
           {logsLoading && logs.length === 0 ? (
             <LogsSkeleton count={10} />
@@ -169,7 +168,7 @@ export default function Logs() {
             ))
           )}
         </div>
-      </div>
-    </div>
+      </Card>
+    </PageContainer>
   );
 }

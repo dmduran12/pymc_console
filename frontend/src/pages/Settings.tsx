@@ -5,6 +5,7 @@ import { formatFrequency, formatBandwidth } from '@/lib/format';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { updateRadioConfig } from '@/lib/api';
 import { BackgroundSelector } from '@/components/shared/BackgroundSelector';
+import { PageContainer, PageHeader, Grid12, GridCell, Card } from '@/components/layout/PageLayout';
 import clsx from 'clsx';
 
 // LoRa radio parameter options
@@ -177,19 +178,17 @@ export default function Settings() {
   };
 
   return (
-    <div className="section-gap">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <SettingsIcon className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          Settings
-        </h1>
-        <BackgroundSelector />
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Settings"
+        icon={<SettingsIcon />}
+        controls={<BackgroundSelector />}
+      />
 
-      <div className="grid-12">
+      <Grid12>
         {/* Operating Mode */}
-        <div className="col-span-full md:col-span-6 glass-card card-padding">
+        <GridCell md={6}>
+          <Card>
           <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
             <Radio className="w-5 h-5 text-accent-primary" />
             Operating Mode
@@ -227,10 +226,12 @@ export default function Settings() {
               </div>
             </button>
           </div>
-        </div>
+          </Card>
+        </GridCell>
 
         {/* Duty Cycle */}
-        <div className="col-span-full md:col-span-6 glass-card card-padding">
+        <GridCell md={6}>
+          <Card>
           <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
             <Gauge className="w-5 h-5 text-accent-primary" />
             Duty Cycle Enforcement
@@ -268,10 +269,13 @@ export default function Settings() {
               </div>
             </button>
           </div>
-        </div>
+          </Card>
+        </GridCell>
 
         {/* Radio Configuration */}
-        <div ref={radioCardRef} className="col-span-full md:col-span-6 glass-card card-padding">
+        <GridCell md={6}>
+          <Card>
+            <div ref={radioCardRef}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-text-primary flex items-center gap-2">
               <Antenna className="w-5 h-5 text-accent-primary" />
@@ -470,10 +474,13 @@ export default function Settings() {
           ) : (
             <p className="text-text-muted">Loading radio configuration...</p>
           )}
-        </div>
+            </div>
+          </Card>
+        </GridCell>
 
         {/* Location */}
-        <div className="col-span-full md:col-span-6 glass-card card-padding">
+        <GridCell md={6}>
+          <Card>
           <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
             <MapPin className="w-5 h-5 text-accent-primary" />
             Location
@@ -510,10 +517,12 @@ export default function Settings() {
           ) : (
             <p className="text-text-muted">Loading location settings...</p>
           )}
-        </div>
+          </Card>
+        </GridCell>
 
         {/* Node Information */}
-        <div className="col-span-full glass-card card-padding">
+        <GridCell>
+          <Card>
           <h2 className="type-subheading text-text-primary mb-4 flex items-center gap-2">
             <Radio className="w-5 h-5 text-accent-primary" />
             Node Information
@@ -556,8 +565,9 @@ export default function Settings() {
           ) : (
             <p className="text-text-muted">Loading node information...</p>
           )}
-        </div>
-      </div>
-    </div>
+          </Card>
+        </GridCell>
+      </Grid12>
+    </PageContainer>
   );
 }

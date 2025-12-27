@@ -9,6 +9,7 @@ import { PathHealthPanel } from '@/components/contacts/PathHealthPanel';
 import { HashBadge } from '@/components/ui/HashBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { NodeSparkline } from '@/components/contacts/NodeSparkline';
+import { PageContainer, PageHeader } from '@/components/layout/PageLayout';
 
 // Get signal color for card badges based on SNR
 function getSignalColor(snr?: number): string {
@@ -225,23 +226,22 @@ export default function Contacts() {
   }, []);
 
   return (
-    <div className="section-gap">
-      {/* Header */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
-        <h1 className="type-title text-text-primary flex items-center gap-3">
-          <Users className="w-6 h-6 text-accent-primary flex-shrink-0" />
-          Contacts
-        </h1>
-        <div className="flex items-baseline gap-3 sm:gap-4">
-          <span className="roster-title tabular-nums">{sortedContacts.length} node{sortedContacts.length !== 1 ? 's' : ''}</span>
-          {contactsWithLocation > 0 && (
-            <span className="roster-title flex items-baseline gap-1.5 tabular-nums">
-              <MapPin className="w-3.5 h-3.5 relative top-[2px]" />
-              {contactsWithLocation} with location
-            </span>
-          )}
-        </div>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Contacts"
+        icon={<Users />}
+        controls={
+          <div className="flex items-baseline gap-3 sm:gap-4">
+            <span className="roster-title tabular-nums">{sortedContacts.length} node{sortedContacts.length !== 1 ? 's' : ''}</span>
+            {contactsWithLocation > 0 && (
+              <span className="roster-title flex items-baseline gap-1.5 tabular-nums">
+                <MapPin className="w-3.5 h-3.5 relative top-[2px]" />
+                {contactsWithLocation} with location
+              </span>
+            )}
+          </div>
+        }
+      />
       
       {/* Map */}
       <div className="relative">
@@ -556,6 +556,6 @@ export default function Contacts() {
         }}
         onCancel={() => setPendingRemove(null)}
       />
-    </div>
+    </PageContainer>
   );
 }
