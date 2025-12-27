@@ -236,30 +236,31 @@ const CommandRow = memo(function CommandRow({ entry, nodeName }: { entry: Comman
     : null;
   
   return (
-    <div className="mb-3">
-      {/* Command line */}
+    <div className="mb-4">
+      {/* Command line - macOS Tahoe style: bold prompt */}
       <div className="flex items-center gap-2">
-        <span className="text-accent-primary font-semibold">
+        <span className="text-accent-primary font-bold">
           {nodeName}@repeater:~$
         </span>
-        <span className="text-text-primary">{entry.cmd}</span>
+        <span className="text-text-primary font-medium">{entry.cmd}</span>
       </div>
       
-      {/* Output */}
+      {/* Output - indented with pipe character like real shell */}
       {entry.isProcessing ? (
-        <div className="ml-0 mt-1 text-accent-secondary flex items-center gap-1">
-          <span>Processing</span>
-          <span className="inline-flex gap-0.5">
-            <span className="animate-pulse" style={{ animationDelay: '0ms' }}>.</span>
-            <span className="animate-pulse" style={{ animationDelay: '200ms' }}>.</span>
-            <span className="animate-pulse" style={{ animationDelay: '400ms' }}>.</span>
-          </span>
+        <div className="mt-0.5 text-text-muted flex items-center gap-1 pl-4">
+          <span className="text-text-muted">│</span>
+          <span>processing...</span>
         </div>
       ) : statusItems ? (
         <StatusTable items={statusItems} nodeName={nodeName} />
       ) : entry.result ? (
-        <div className="ml-0 mt-1 text-text-secondary whitespace-pre-wrap border-l-2 border-border-subtle pl-3">
-          {entry.result}
+        <div className="mt-0.5 text-text-secondary whitespace-pre-wrap pl-4">
+          {entry.result.split('\n').map((line, i) => (
+            <div key={i} className="flex">
+              <span className="text-text-muted mr-2 select-none">│</span>
+              <span className="font-medium">{line}</span>
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
@@ -306,7 +307,7 @@ const LoadingLine = memo(function LoadingLine({
 
 export default function Terminal() {
   const stats = useStats();
-  const nodeName = stats?.node_name || 'pymc';
+  const nodeName = stats?.config?.node_name || stats?.node_name || 'pymc';
   
   // Connection state
   const [connectionState, setConnectionState] = useState<ConnectionState>('initializing');
@@ -597,97 +598,97 @@ export default function Terminal() {
         switch (param) {
           // Identity
           case 'name':
-            setResult(`> ${freshStats.node_name || 'Unknown'}`);
+            setResult(freshStats.config?.node_name || 'Unknown');
             return;
           case 'public.key':
-            setResult(`> ${freshStats.public_key || 'Not available'}`);
+            setResult(freshStats.public_key || 'Not available');
             return;
           case 'role':
-            setResult(`> repeater`);
+            setResult('repeater');
             return;
             
           // Radio params (MeshCore format: freq,bw,sf,cr)
           case 'radio': {
-            if (!radio) { setResult('> Radio config not available'); return; }
+            if (!radio) { setResult('Radio config not available'); return; }
             const freq = radio.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?';
             const bw = radio.bandwidth ? (radio.bandwidth / 1000) : '?';
-            setResult(`> ${freq},${bw},${radio.spreading_factor || '?'},${radio.coding_rate || '?'}`);
+            setResult(`${freq},${bw},${radio.spreading_factor || '?'},${radio.coding_rate || '?'}`);
             return;
           }
           case 'freq':
-            setResult(`> ${radio?.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?'}`);
+            setResult(radio?.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?');
             return;
           case 'tx':
-            setResult(`> ${radio?.tx_power ?? '?'}`);
+            setResult(String(radio?.tx_power ?? '?'));
             return;
             
           // Timing
           case 'af':
-            setResult(`> ${repeater?.use_score_for_tx ? '1.0' : '0'}`);
+            setResult(String(delays?.tx_delay_factor ?? '1.0'));
             return;
           case 'rxdelay':
-            setResult(`> ${delays?.tx_delay_factor ?? '0'}`);
+            setResult('0');  // Not exposed in pyMC config
             return;
           case 'txdelay':
-            setResult(`> ${delays?.tx_delay_factor ?? '1.0'}`);
+            setResult(String(delays?.tx_delay_factor ?? '1.0'));
             return;
           case 'direct.txdelay':
-            setResult(`> ${delays?.direct_tx_delay_factor ?? '0.5'}`);
+            setResult(String(delays?.direct_tx_delay_factor ?? '0.5'));
             return;
             
           // Repeater settings
           case 'repeat':
-            setResult(`> ${repeater?.mode === 'forward' ? 'on' : 'off'}`);
+            setResult(repeater?.mode === 'forward' ? 'on' : 'off');
             return;
           case 'lat':
-            setResult(`> ${repeater?.latitude ?? '0'}`);
+            setResult(String(repeater?.latitude ?? '0'));
             return;
           case 'lon':
-            setResult(`> ${repeater?.longitude ?? '0'}`);
+            setResult(String(repeater?.longitude ?? '0'));
             return;
             
           // Intervals
           case 'advert.interval':
-            setResult(`> ${(repeater?.send_advert_interval_hours ?? 2) * 60}`);
+            setResult(String((repeater?.send_advert_interval_hours ?? 2) * 60));
             return;
           case 'flood.advert.interval':
-            setResult(`> ${repeater?.send_advert_interval_hours ?? 24}`);
+            setResult(String(repeater?.send_advert_interval_hours ?? 24));
             return;
           case 'flood.max':
-            setResult(`> 3`);  // Default, not exposed in config
+            setResult('3');  // Default, not exposed in config
             return;
           case 'agc.reset.interval':
-            setResult(`> 0`);  // Not implemented in pyMC
+            setResult('0');  // Not implemented in pyMC
             return;
             
           // Security
           case 'allow.read.only':
-            setResult(`> off`);  // Not exposed
+            setResult('off');  // Not exposed
             return;
           case 'guest.password':
-            setResult(`> (not exposed via HTTP)`);
+            setResult('(not exposed via HTTP)');
             return;
           case 'multi.acks':
-            setResult(`> 0`);
+            setResult('0');
             return;
           case 'int.thresh':
-            setResult(`> 0`);
+            setResult('0');
             return;
             
           // Mode (custom for pyMC)
           case 'mode':
-            setResult(`> ${repeater?.mode || 'forward'}`);
+            setResult(repeater?.mode || 'forward');
             return;
             
           default:
-            setResult(`??: ${param}`);
+            setResult(`Unknown parameter: ${param}`);
             return;
         }
       }
       
       // board command (MeshCore parity)
       if (lowerCmd === 'board') {
-        setResult('pyMC_Repeater (Linux/Raspberry Pi)');
+        setResult('pyMC_Repeater (Linux/RPi)');
         return;
       }
       
@@ -982,10 +983,10 @@ export default function Terminal() {
         style={{ height: 'calc(100vh - 180px)', minHeight: '400px' }}
         onClick={focusInput}
       >
-        {/* Terminal Body */}
+        {/* Terminal Body - macOS Tahoe style */}
         <div 
           ref={logRef}
-          className="flex-1 p-4 sm:p-6 overflow-y-auto font-mono text-sm leading-relaxed bg-black/30"
+          className="flex-1 p-4 sm:p-6 overflow-y-auto font-mono text-sm leading-tight bg-black/40"
         >
           {/* ASCII Header */}
           <pre className="text-accent-primary text-[0.5rem] sm:text-[0.6rem] lg:text-xs leading-none mb-6 overflow-x-auto">
@@ -1027,14 +1028,14 @@ export default function Terminal() {
             <CommandRow key={entry.id} entry={entry} nodeName={nodeName} />
           ))}
           
-          {/* Current Input Line */}
+          {/* Current Input Line - macOS Tahoe style */}
           {connectionState === 'connected' && (
             <div className="relative">
               <div className="flex items-center gap-2">
-                <span className="text-accent-primary font-semibold">
+                <span className="text-accent-primary font-bold">
                   {nodeName}@repeater:~$
                 </span>
-                <span className="text-text-primary">{currentInput}</span>
+                <span className="text-text-primary font-medium">{currentInput}</span>
                 <Cursor visible={cursorVisible} />
               </div>
               
