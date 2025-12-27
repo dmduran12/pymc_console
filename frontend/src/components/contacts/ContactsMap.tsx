@@ -861,18 +861,22 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
   // Get quick neighbors from main store (runs on every poll, persisted)
   const quickNeighbors = useQuickNeighbors();
   
-  // Get zero-hop neighbors - use quickNeighbors as primary source (always available),
-  // fall back to topology's lastHopNeighbors (only after deep analysis), then inference
+  // Get zero-hop neighbors from quickNeighbors ONLY (true MeshCore zero-hop algorithm)
   // Build both a Set (for .has() checks) and a Map (for looking up RSSI/SNR data)
   //
-  // Standard neighbor detection (letsme.sh / meshcoretomqtt style):
-  // A node is a "neighbor" when we've received zero-hop ADVERTs from them,
-  // meaning they were the LAST HOP in the packet path (direct RF contact).
+  // MeshCore-aligned neighbor detection:
+  // A node is a "neighbor" when we receive ADVERT packets with path_len == 0,
+  // meaning they transmitted directly to us without any forwarders.
+  //
+  // NOTE: We intentionally do NOT merge meshTopology.lastHopNeighbors because:
+  //   - quickNeighbors = true zero-hop (ADVERTs with path_len == 0, MeshCore algorithm)
+  //   - lastHopNeighbors = last forwarder in ANY ADVERT path (may be multi-hop)
+  // Merging them caused edges to be drawn to every forwarding node, not just neighbors.
   const { zeroHopNeighbors, lastHopNeighborMap } = useMemo(() => {
     const neighborSet = new Set<string>();
     const neighborMap = new Map<string, LastHopNeighbor>();
     
-    // Primary source: quickNeighbors from main store (runs on every poll, persisted)
+    // Source: quickNeighbors from main store (true zero-hop neighbors)
     // These are available immediately without deep analysis
     if (quickNeighbors.length > 0) {
       for (const qn of quickNeighbors) {
@@ -883,7 +887,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
           hash: qn.hash,
           prefix: qn.prefix,
           count: qn.count,
-          confidence: 1.0, // Direct RF contact
+          confidence: 1.0, // Direct RF contact (zero-hop)
           avgRssi: qn.avgRssi,
           avgSnr: qn.avgSnr,
           lastSeen: qn.lastSeen,
@@ -891,17 +895,8 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       }
     }
     
-    // Enhancement: merge in topology's lastHopNeighbors (may have more neighbors after deep analysis)
-    // These may include neighbors that quickNeighbors missed due to prefix collisions
-    for (const lastHop of meshTopology.lastHopNeighbors) {
-      if (!neighborSet.has(lastHop.hash)) {
-        neighborSet.add(lastHop.hash);
-        neighborMap.set(lastHop.hash, lastHop);
-      }
-    }
-    
-    // Fallback: if still no neighbors, use the old inference method
-    // This handles edge cases where both quickNeighbors and topology are empty
+    // Fallback: if no quickNeighbors, use the old inference method
+    // This handles edge cases where polling hasn't run yet or no zero-hop ADVERTs exist
     if (neighborSet.size === 0) {
       const inferred = inferZeroHopNeighbors(
         packets, 
@@ -918,7 +913,7 @@ export default function ContactsMap({ neighbors, localNode, localHash, onRemoveN
       zeroHopNeighbors: neighborSet, 
       lastHopNeighborMap: neighborMap,
     };
-  }, [quickNeighbors, meshTopology.lastHopNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
+  }, [quickNeighbors, packets, neighbors, meshTopology.validatedEdges, localHash]);
   
   // Filter neighbors with valid coordinates
   const neighborsWithLocation = useMemo(() => {
