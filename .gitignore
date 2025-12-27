@@ -23,6 +23,9 @@ frontend/src/lib/edge-styling.ts
 frontend/src/lib/workers/topology.worker.ts
 frontend/src/lib/workers/sparkline.worker.ts
 
+# Developer documentation (contains proprietary algorithm details)
+WARP.md
+
 # Environment files
 .env
 .env.local
