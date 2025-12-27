@@ -1,8 +1,8 @@
 /**
- * ChannelHealthWidget - Displays composite channel health score
+ * ChannelHealthWidget - Displays composite channel health score with trend
  *
  * Combines LBT, noise floor, and link quality into a single health score
- * with color-coded status and progress bar visualization.
+ * with color-coded status, progress bar visualization, and trend indicator.
  */
 
 import { Cross } from 'lucide-react';
@@ -28,10 +28,11 @@ function getStatusLabel(status: ComputedChannelHealth['status']): string {
 }
 
 export function ChannelHealthWidget() {
-  const { channelHealth, isLoading, error } = useLBTData();
+  const { channelHealth, trends, isLoading, error } = useLBTData();
 
   const healthScore = channelHealth?.score ?? 0;
   const status = channelHealth?.status ?? 'excellent';
+  const trend = trends?.channelHealth.trend;
 
   // Progress bar showing health score
   const progressBar = channelHealth ? (
@@ -50,6 +51,7 @@ export function ChannelHealthWidget() {
       value={Math.round(healthScore)}
       unit="/100"
       status={status}
+      trend={trend}
       subtitle={channelHealth ? getStatusLabel(status) : undefined}
       isLoading={isLoading}
       error={error}

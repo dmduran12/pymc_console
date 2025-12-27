@@ -3,9 +3,11 @@
  *
  * Shows the percentage of transmissions that required CAD backoff retries,
  * with average backoff time in the subtitle and a 24h sparkline.
+ * Click navigates to Packets page filtered to transmitted packets.
  */
 
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RefreshCwOff } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line } from 'recharts';
 import { MiniWidget } from './MiniWidget';
@@ -32,6 +34,7 @@ function getRetryStatus(rate: number): ComputedChannelHealth['status'] {
 
 export function LBTRetryWidget() {
   const { lbtStats, isLoading, error } = useLBTData();
+  const navigate = useNavigate();
 
   const retryRate = lbtStats?.retryRate ?? 0;
   const avgBackoff = lbtStats?.avgBackoffMs ?? 0;
@@ -56,6 +59,7 @@ export function LBTRetryWidget() {
       subtitle={lbtStats ? `Avg ${Math.round(avgBackoff)}ms backoff` : undefined}
       isLoading={isLoading}
       error={error}
+      onClick={() => navigate('/packets')}
     >
       <div className="mini-widget-sparkline">
         {chartData.length > 0 ? (

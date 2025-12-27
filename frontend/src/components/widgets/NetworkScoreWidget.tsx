@@ -1,10 +1,11 @@
 /**
  * NetworkScoreWidget - Displays average network link quality score
  *
- * Shows the mean quality score across all neighbors, with neighbor count
- * in the subtitle.
+ * Shows the mean quality score across TRUE zero-hop neighbors (QuickNeighbors).
+ * These are nodes where we received ADVERTs with them as the last hop.
  */
 
+import { useNavigate } from 'react-router-dom';
 import { Network } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
@@ -19,11 +20,14 @@ function getScoreStatus(score: number): ComputedChannelHealth['status'] {
 }
 
 export function NetworkScoreWidget() {
-  const { linkQuality, isLoading, error } = useLBTData();
+  const { linkQuality, trends, isLoading, error } = useLBTData();
+  const navigate = useNavigate();
 
   const avgScore = linkQuality?.networkScore ?? 0;
-  const neighborCount = linkQuality?.neighbors?.length ?? 0;
+  // Use neighborCount from linkQuality - this is TRUE zero-hop count
+  const neighborCount = linkQuality?.neighborCount ?? 0;
   const status = linkQuality ? getScoreStatus(avgScore) : 'unknown';
+  const trend = trends?.networkScore.trend;
 
   return (
     <MiniWidget
@@ -32,9 +36,11 @@ export function NetworkScoreWidget() {
       value={Math.round(avgScore)}
       unit="/100"
       status={status}
-      subtitle={linkQuality ? `${neighborCount} neighbor${neighborCount !== 1 ? 's' : ''} scored` : undefined}
+      trend={trend}
+      subtitle={linkQuality ? `${neighborCount} direct neighbor${neighborCount !== 1 ? 's' : ''}` : undefined}
       isLoading={isLoading}
       error={error}
+      onClick={() => navigate('/contacts')}
     />
   );
 }

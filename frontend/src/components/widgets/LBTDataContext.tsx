@@ -11,17 +11,23 @@
  * COMPUTED STATISTICS:
  * - lbtStats: retry rate, busy events, backoff times from packet LBT fields
  * - noiseFloor: current noise floor from stats
- * - linkQuality: computed from neighbor SNR/RSSI
+ * - linkQuality: computed from TRUE zero-hop neighbors (QuickNeighbors)
  * - channelHealth: composite score combining all above
+ * - trends: historical comparison for trend indicators
  *
  * LBT fields in packet records:
  * - lbt_attempts: number of CAD checks before TX (1 = clean channel)
  * - lbt_backoff_delays_ms: JSON array of backoff delays "[192.0, 314.0]"
  * - lbt_channel_busy: boolean (true if TX failed due to channel busy)
+ * 
+ * NEIGHBOR DETECTION:
+ * Uses QuickNeighbors from the centralized store - these are TRUE zero-hop
+ * neighbors detected by receiving ADVERTs where they were the last hop.
+ * This is the standard letsme.sh / meshcoretomqtt approach.
  */
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { useStats, usePackets } from '@/lib/stores/useStore';
+import { createContext, useContext, useMemo, useState, useEffect, useRef, type ReactNode } from 'react';
+import { useStats, usePackets, useQuickNeighbors, type QuickNeighbor } from '@/lib/stores/useStore';
 import type { Packet, Stats, NeighborInfo } from '@/types/api';
 
 /** LBT Statistics computed from packets */
@@ -49,7 +55,7 @@ export interface ComputedLBTStats {
   packetCount: number;
 }
 
-/** Link quality computed from neighbors */
+/** Link quality computed from TRUE zero-hop neighbors (QuickNeighbors) */
 export interface ComputedLinkQuality {
   neighbors: Array<{
     name: string;
@@ -57,8 +63,10 @@ export interface ComputedLinkQuality {
     rssi: number;
     snr: number;
     score: number; // 0-100 composite quality
+    advertCount: number; // Number of ADVERTs received from this neighbor
   }>;
   networkScore: number; // average of all neighbor scores
+  neighborCount: number; // TRUE zero-hop neighbor count
   bestLink: { name: string; score: number } | null;
   worstLink: { name: string; score: number } | null;
 }
@@ -74,6 +82,16 @@ export interface ComputedChannelHealth {
   };
 }
 
+/** Trend direction for widgets */
+export type TrendDirection = 'up' | 'down' | 'stable';
+
+/** Historical values for trend computation */
+export interface TrendData {
+  noiseFloor: { current: number | null; previous: number | null; trend: TrendDirection };
+  networkScore: { current: number; previous: number | null; trend: TrendDirection };
+  channelHealth: { current: number; previous: number | null; trend: TrendDirection };
+}
+
 /** Context data shape */
 export interface LBTData {
   // Computed stats
@@ -82,9 +100,13 @@ export interface LBTData {
   linkQuality: ComputedLinkQuality | null;
   channelHealth: ComputedChannelHealth | null;
 
+  // Trend data for widgets
+  trends: TrendData | null;
+
   // Raw data references
   stats: Stats | null;
   recentPackets: Packet[];
+  quickNeighbors: QuickNeighbor[]; // TRUE zero-hop neighbors
 
   // Loading states
   isLoading: boolean;
@@ -101,8 +123,10 @@ const defaultData: LBTData = {
   noiseFloor: null,
   linkQuality: null,
   channelHealth: null,
+  trends: null,
   stats: null,
   recentPackets: [],
+  quickNeighbors: [],
   isLoading: true,
   error: null,
   refresh: async () => {},
@@ -225,17 +249,41 @@ function computeLBTStats(packets: Packet[], windowHours: number): ComputedLBTSta
 }
 
 /**
- * Compute link quality from neighbors
+ * Compute link quality from TRUE zero-hop neighbors (QuickNeighbors)
+ * 
+ * This uses the standard letsme.sh / meshcoretomqtt approach:
+ * A neighbor is a node where we received ADVERTs with them as the LAST HOP.
+ * 
+ * @param quickNeighbors - True zero-hop neighbors from store
+ * @param allContacts - All contacts for name resolution
  */
-function computeLinkQuality(neighbors: Record<string, NeighborInfo>): ComputedLinkQuality {
-  const neighborList = Object.entries(neighbors).map(([hash, info]) => {
-    const score = computeLinkScore(info.snr, info.rssi);
+function computeLinkQuality(
+  quickNeighbors: QuickNeighbor[],
+  allContacts: Record<string, NeighborInfo>
+): ComputedLinkQuality {
+  if (quickNeighbors.length === 0) {
     return {
-      name: info.name || info.node_name || hash.slice(0, 8),
-      hash,
-      rssi: info.rssi ?? -100,
-      snr: info.snr ?? -10,
+      neighbors: [],
+      networkScore: 0,
+      neighborCount: 0,
+      bestLink: null,
+      worstLink: null,
+    };
+  }
+
+  const neighborList = quickNeighbors.map((qn) => {
+    // Use QuickNeighbor's direct RSSI/SNR measurements (from ADVERTs)
+    const score = computeLinkScore(qn.avgSnr ?? undefined, qn.avgRssi ?? undefined);
+    // Get name from all contacts
+    const contact = allContacts[qn.hash];
+    const name = contact?.name || contact?.node_name || qn.prefix;
+    return {
+      name,
+      hash: qn.hash,
+      rssi: qn.avgRssi ?? -100,
+      snr: qn.avgSnr ?? -10,
       score,
+      advertCount: qn.count,
     };
   });
 
@@ -249,6 +297,7 @@ function computeLinkQuality(neighbors: Record<string, NeighborInfo>): ComputedLi
   return {
     neighbors: neighborList,
     networkScore: Math.round(networkScore),
+    neighborCount: neighborList.length,
     bestLink: neighborList.length > 0 ? { name: neighborList[0].name, score: neighborList[0].score } : null,
     worstLink: neighborList.length > 0 ? { name: neighborList[neighborList.length - 1].name, score: neighborList[neighborList.length - 1].score } : null,
   };
@@ -299,6 +348,36 @@ function computeChannelHealth(
   };
 }
 
+/**
+ * Compute trend direction from current and previous values
+ * @param current - Current value
+ * @param previous - Previous value (null if no history)
+ * @param threshold - Minimum change to register as up/down (default 2%)
+ * @param invertDirection - If true, higher values mean "down" trend (e.g., noise floor)
+ */
+function computeTrend(
+  current: number,
+  previous: number | null,
+  threshold: number = 2,
+  invertDirection: boolean = false
+): TrendDirection {
+  if (previous === null) return 'stable';
+  
+  const delta = current - previous;
+  const percentChange = previous !== 0 ? Math.abs(delta / previous) * 100 : Math.abs(delta);
+  
+  if (percentChange < threshold) return 'stable';
+  
+  // For inverted metrics (like noise floor), higher = worse = "up" trend
+  if (invertDirection) {
+    return delta > 0 ? 'up' : 'down';
+  }
+  
+  // For normal metrics (like health score), higher = better = "down" trend (improving)
+  // Note: In our trend display, "up" means worse, "down" means better
+  return delta > 0 ? 'down' : 'up';
+}
+
 export interface LBTDataProviderProps {
   children: ReactNode;
 }
@@ -309,11 +388,16 @@ export interface LBTDataProviderProps {
  * NOTE: This provider does NOT poll for data. It consumes stats and packets
  * from the centralized Zustand store, which handles all polling.
  * Only derived computations are performed here.
+ * 
+ * NEIGHBOR DATA:
+ * Uses QuickNeighbors for link quality - these are TRUE zero-hop neighbors
+ * detected by receiving ADVERTs where they were the last hop.
  */
 export function LBTDataProvider({ children }: LBTDataProviderProps) {
   // Consume data from centralized store (polling handled at App level)
   const stats = useStats();
   const packets = usePackets();
+  const quickNeighbors = useQuickNeighbors();
   
   // Derived loading state - we're "loading" if store hasn't populated data yet
   const isLoading = stats === null;
@@ -321,16 +405,80 @@ export function LBTDataProvider({ children }: LBTDataProviderProps) {
   // Compute derived LBT statistics from store data
   const lbtStats = useMemo(() => computeLBTStats(packets, 24), [packets]);
   const noiseFloor = stats?.noise_floor_dbm ?? null;
-  // Extract neighbors to satisfy React compiler's dependency inference
+  
+  // Memoize allContacts to prevent useMemo dependency churn
   const neighbors = stats?.neighbors;
+  const allContacts = useMemo(() => neighbors ?? {}, [neighbors]);
+  
+  // Use QuickNeighbors for TRUE zero-hop neighbor link quality
   const linkQuality = useMemo(
-    () => neighbors ? computeLinkQuality(neighbors) : null,
-    [neighbors]
+    () => computeLinkQuality(quickNeighbors, allContacts),
+    [quickNeighbors, allContacts]
   );
+  
   const channelHealth = useMemo(
     () => computeChannelHealth(lbtStats, noiseFloor, linkQuality),
     [lbtStats, noiseFloor, linkQuality]
   );
+  
+  // Track previous values for trend computation
+  // Use state for values (triggers re-render when trends should update)
+  // Use ref for timing (no cascading render issues)
+  const [prevValues, setPrevValues] = useState<{
+    noiseFloor: number | null;
+    networkScore: number | null;
+    channelHealth: number | null;
+  }>({ noiseFloor: null, networkScore: null, channelHealth: null });
+  const lastUpdateRef = useRef<number>(0);
+  
+  // Update previous values every 30 seconds using an interval
+  // This avoids the cascading render issue from calling setState in useEffect
+  useEffect(() => {
+    const checkAndUpdate = () => {
+      const now = Date.now();
+      if (now - lastUpdateRef.current > 30000) {
+        lastUpdateRef.current = now;
+        setPrevValues({
+          noiseFloor: noiseFloor,
+          networkScore: linkQuality?.networkScore ?? null,
+          channelHealth: channelHealth?.score ?? null,
+        });
+      }
+    };
+    
+    // Check immediately on mount
+    checkAndUpdate();
+    
+    // Set up interval to check periodically
+    const interval = setInterval(checkAndUpdate, 5000);
+    return () => clearInterval(interval);
+  }, [noiseFloor, linkQuality?.networkScore, channelHealth?.score]);
+  
+  // Compute trends by comparing current to previous values
+  const trends = useMemo((): TrendData => {
+    return {
+      noiseFloor: {
+        current: noiseFloor,
+        previous: prevValues.noiseFloor,
+        // Noise floor: lower is better, so increasing = worse = "up"
+        trend: noiseFloor !== null 
+          ? computeTrend(noiseFloor, prevValues.noiseFloor, 2, true) 
+          : 'stable',
+      },
+      networkScore: {
+        current: linkQuality?.networkScore ?? 0,
+        previous: prevValues.networkScore,
+        // Network score: higher is better, so increasing = better = "down"
+        trend: computeTrend(linkQuality?.networkScore ?? 0, prevValues.networkScore, 3, false),
+      },
+      channelHealth: {
+        current: channelHealth?.score ?? 0,
+        previous: prevValues.channelHealth,
+        // Channel health: higher is better, so increasing = better = "down"
+        trend: computeTrend(channelHealth?.score ?? 0, prevValues.channelHealth, 3, false),
+      },
+    };
+  }, [noiseFloor, linkQuality?.networkScore, channelHealth?.score, prevValues]);
 
   // Refresh is now a no-op since polling is centralized
   // Kept for API compatibility
@@ -341,8 +489,10 @@ export function LBTDataProvider({ children }: LBTDataProviderProps) {
     noiseFloor,
     linkQuality,
     channelHealth,
+    trends,
     stats,
     recentPackets: packets,
+    quickNeighbors,
     isLoading,
     error: null, // Errors handled at store level
     refresh,

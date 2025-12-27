@@ -1,10 +1,11 @@
 /**
  * BestWorstLinkWidget - Displays best and worst neighbor links
  *
- * Shows the highest and lowest quality links with their scores,
+ * Shows the highest and lowest quality links among TRUE zero-hop neighbors,
  * useful for identifying network weak points.
  */
 
+import { useNavigate } from 'react-router-dom';
 import { Route } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
@@ -26,6 +27,7 @@ function truncateName(name: string, maxLen: number = 8): string {
 
 export function BestWorstLinkWidget() {
   const { linkQuality, isLoading, error } = useLBTData();
+  const navigate = useNavigate();
 
   const best = linkQuality?.bestLink;
   const worst = linkQuality?.worstLink;
@@ -47,6 +49,10 @@ export function BestWorstLinkWidget() {
         </span>
       </div>
     </div>
+  ) : linkQuality && linkQuality.neighborCount === 0 ? (
+    <div className="flex items-center justify-center text-xs text-text-muted mt-auto">
+      No direct neighbors
+    </div>
   ) : null;
 
   return (
@@ -56,6 +62,7 @@ export function BestWorstLinkWidget() {
       status={status}
       isLoading={isLoading}
       error={error}
+      onClick={() => navigate('/contacts')}
     >
       {linkDisplay}
     </MiniWidget>

@@ -2,9 +2,10 @@
  * ChannelBusyWidget - Displays channel busy event count
  *
  * Shows the number of times the channel remained busy after max CAD attempts,
- * indicating serious congestion issues.
+ * indicating serious congestion issues. Click navigates to Packets page.
  */
 
+import { useNavigate } from 'react-router-dom';
 import { EarOff } from 'lucide-react';
 import { MiniWidget } from './MiniWidget';
 import { useLBTData, type ComputedChannelHealth } from './LBTDataContext';
@@ -20,6 +21,7 @@ function getBusyStatus(rate: number): ComputedChannelHealth['status'] {
 
 export function ChannelBusyWidget() {
   const { lbtStats, isLoading, error } = useLBTData();
+  const navigate = useNavigate();
 
   const busyEvents = lbtStats?.channelBusyCount ?? 0;
   const totalTx = lbtStats?.totalPacketsWithLBT ?? 0;
@@ -35,6 +37,7 @@ export function ChannelBusyWidget() {
       subtitle={lbtStats ? `${busyRate.toFixed(2)}% of ${totalTx} TX` : undefined}
       isLoading={isLoading}
       error={error}
+      onClick={() => navigate('/packets')}
     />
   );
 }
