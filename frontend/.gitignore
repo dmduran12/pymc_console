@@ -3,7 +3,7 @@ node_modules
 
 # Build outputs
 out/
-dist/
+# dist/ is committed for releases (contains minified build)
 *.tar.gz
 *.zip
 

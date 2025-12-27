@@ -1,0 +1,16 @@
+import{c as d,j as s}from"./index-Bjb7-Yzm.js";import{b as r,c as n}from"./recharts-CHDYrIv-.js";/**
+ * @license lucide-react v0.559.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const C=[["path",{d:"M20 6 9 17l-5-5",key:"1gmf2c"}]],g=d("check",C);/**
+ * @license lucide-react v0.559.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const v=[["rect",{width:"14",height:"14",x:"8",y:"8",rx:"2",ry:"2",key:"17jyea"}],["path",{d:"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2",key:"zix9uf"}]],k=d("copy",v);/**
+ * @license lucide-react v0.559.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const j=[["path",{d:"M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0",key:"1r0f0z"}],["circle",{cx:"12",cy:"10",r:"3",key:"ilqhr7"}]],T=d("map-pin",j);function N(t){if(typeof window<"u"&&(window.isSecureContext||window.location.protocol==="https:"||window.location.hostname==="localhost")&&navigator.clipboard&&typeof navigator.clipboard.writeText=="function")return navigator.clipboard.writeText(t).catch(()=>{}),!0;try{const c=window.scrollX,l=window.scrollY,e=document.createElement("textarea");e.value=t,e.style.position="fixed",e.style.left="-9999px",e.style.top="-9999px",e.style.opacity="0",e.style.pointerEvents="none",e.setAttribute("readonly",""),document.body.appendChild(e),e.focus({preventScroll:!0}),e.select(),e.setSelectionRange(0,t.length);const o=document.execCommand("copy");return document.body.removeChild(e),window.scrollTo(c,l),o}catch(c){return console.error("Copy failed:",c),!1}}function _({hash:t,prefixLength:a=8,suffixLength:c=6,full:l=!1,className:e,size:o="md"}){const[p,u]=r.useState(!1),[m,y]=r.useState(!1),i=r.useRef(null),f=r.useCallback(x=>{x.preventDefault(),x.stopPropagation(),i.current&&clearTimeout(i.current);const h=N(t);u(!0),i.current=setTimeout(()=>u(!1),2e3),h||console.warn("Copy may have failed for:",t.slice(0,16)+"...")},[t]),w=l||t.length<=a+c+3?t:`${t.slice(0,a)}…${t.slice(-c)}`,b={xs:"text-[9px] px-1 py-0.5 gap-0.5",sm:"text-[10px] px-1.5 py-0.5 gap-1",md:"text-xs px-2 py-1 gap-1.5"}[o];return s.jsxs("button",{type:"button",onClick:f,onMouseEnter:()=>y(!0),onMouseLeave:()=>y(!1),className:n("inline-flex items-center font-mono rounded-md transition-all duration-200","bg-bg-subtle/80 hover:bg-bg-elevated border border-border-subtle hover:border-border-strong","cursor-pointer select-none",b,e),title:`Click to copy: ${t}`,"aria-label":`Copy hash ${t}`,children:[s.jsx("span",{className:n("transition-colors duration-200",p?"text-accent-success":"text-text-secondary"),children:w}),s.jsx("span",{className:n("flex items-center justify-center transition-all duration-200",o==="xs"?"w-2.5 h-2.5":o==="sm"?"w-3 h-3":"w-3.5 h-3.5"),children:p?s.jsx(g,{className:n("text-accent-success",o==="xs"?"w-2 h-2":o==="sm"?"w-2.5 h-2.5":"w-3 h-3")}):s.jsx(k,{className:n("transition-opacity duration-200",m?"opacity-70":"opacity-40",o==="xs"?"w-2 h-2":o==="sm"?"w-2.5 h-2.5":"w-3 h-3")})})]})}export{k as C,_ as H,T as M,g as a};

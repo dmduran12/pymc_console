@@ -1,0 +1,1 @@
+import{b as r}from"./recharts-CHDYrIv-.js";function i(t,u,s=!0,c=!1){const e=r.useRef(t);r.useEffect(()=>{e.current=t},[t]),r.useEffect(()=>{if(!s)return;c||e.current();const f=setInterval(()=>{e.current()},u);return()=>clearInterval(f)},[u,s,c])}export{i as u};
