@@ -13,8 +13,8 @@
  * @module providers/maplibre/NeighborEdges
  */
 
-import { useMemo } from 'react';
-import { Source, Layer } from 'react-map-gl/maplibre';
+import { useMemo, useEffect, useRef, useState } from 'react';
+import { Source, Layer, useMap } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import type { NeighborInfo } from '@/types/api';
 import type { LastHopNeighbor } from '@/lib/mesh-topology';
@@ -122,7 +122,16 @@ function buildNeighborEdgesGeoJSON(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Layer Style
+// Animation Constants
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Total dash pattern length (dash + gap) - must match for seamless loop */
+const DASH_PATTERN_LENGTH = 8; // 4px dash + 4px gap
+/** Animation duration for one complete cycle (ms) */
+const ANIMATION_DURATION = 1500;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Layer Style (base - dashOffset animated via hook)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const neighborEdgesLayerStyle: LayerProps = {
@@ -162,12 +171,21 @@ const neighborEdgesHitAreaStyle: LayerProps = {
 /**
  * Renders neighbor edges as dashed lines from local to zero-hop neighbors.
  * Always visible regardless of topology toggle state.
+ * 
+ * Features a seamless infinite scrolling dash animation for visual appeal.
  */
 export function NeighborEdges({
   neighborPolylines,
   hoveredEdgeKey,
   onEdgeHover: _onEdgeHover, // Hover handled at map level now
 }: NeighborEdgesProps) {
+  const { current: map } = useMap();
+  const animationRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number>(0);
+  
+  // Track current dash offset for animation
+  const [dashOffset, setDashOffset] = useState(0);
+  
   // Whether we have data to render
   const hasData = neighborPolylines.length > 0;
   
@@ -176,6 +194,74 @@ export function NeighborEdges({
     () => hasData ? buildNeighborEdgesGeoJSON(neighborPolylines, hoveredEdgeKey) : { type: 'FeatureCollection' as const, features: [] },
     [neighborPolylines, hoveredEdgeKey, hasData]
   );
+  
+  // Animate dash offset for scrolling effect
+  // Uses requestAnimationFrame for smooth, seamless looping
+  useEffect(() => {
+    if (!hasData) return;
+    
+    startTimeRef.current = performance.now();
+    
+    const animate = () => {
+      const elapsed = performance.now() - startTimeRef.current;
+      // Calculate offset: loops seamlessly when it reaches DASH_PATTERN_LENGTH
+      const progress = (elapsed % ANIMATION_DURATION) / ANIMATION_DURATION;
+      const offset = progress * DASH_PATTERN_LENGTH;
+      setDashOffset(offset);
+      
+      animationRef.current = requestAnimationFrame(animate);
+    };
+    
+    animationRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationRef.current !== null) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [hasData]);
+  
+  // Apply dash offset to the layer when map and offset change
+  useEffect(() => {
+    if (!map || !hasData) return;
+    
+    const mapInstance = map.getMap();
+    if (!mapInstance) return;
+    
+    try {
+      // MapLibre uses line-dasharray with offset via dash pattern manipulation
+      // We shift the pattern by adjusting the first dash length
+      // This creates the scrolling effect
+      const offsetRatio = dashOffset / DASH_PATTERN_LENGTH;
+      const dashLength = 4;
+      const gapLength = 4;
+      
+      // Create animated dash pattern: shift the pattern based on offset
+      // Pattern cycles through [4,4] -> [3,4,1,4] -> [2,4,2,4] -> [1,4,3,4] -> [0,4,4,4] -> back to [4,4]
+      const firstDash = dashLength * (1 - offsetRatio);
+      const extraGap = dashLength * offsetRatio;
+      
+      // Build the dash array - handle edge cases for seamless looping
+      let dashArray: number[];
+      if (firstDash < 0.1) {
+        // Near the end of cycle, reset to start
+        dashArray = [dashLength, gapLength];
+      } else if (extraGap < 0.1) {
+        // At the start, use normal pattern
+        dashArray = [dashLength, gapLength];
+      } else {
+        // Mid-animation: [firstDash, gap, extraGap (as dash), gap]
+        // This creates the scrolling illusion
+        dashArray = [firstDash, gapLength, extraGap, gapLength];
+      }
+      
+      if (mapInstance.getLayer('neighbor-edges')) {
+        mapInstance.setPaintProperty('neighbor-edges', 'line-dasharray', dashArray);
+      }
+    } catch {
+      // Layer might not exist yet, ignore
+    }
+  }, [map, dashOffset, hasData]);
   
   // Early return after all hooks
   if (!hasData) {
@@ -186,7 +272,7 @@ export function NeighborEdges({
     <Source id="neighbor-edges" type="geojson" data={neighborEdgesData}>
       {/* Hit-area layer (invisible, wider for easy hover detection) - rendered first (below) */}
       <Layer {...neighborEdgesHitAreaStyle} />
-      {/* Visual layer */}
+      {/* Visual layer - dash animation applied via useEffect */}
       <Layer {...neighborEdgesLayerStyle} />
       {/* Note: Tooltips handled at map level for proper interactivity */}
     </Source>
