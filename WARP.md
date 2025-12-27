@@ -134,13 +134,13 @@ src/
 │   ├── Logs.tsx           # /logs - System logs
 │   └── Settings.tsx       # /settings - Radio configuration
 ├── components/
-│   ├── charts/            # AirtimeGauge, PacketTypesChart, TrafficStackedChart, NeighborPolarChart
+│   ├── charts/            # AirtimeGauge, PacketTypesChart, NeighborPolarChart, NetworkCompositionChart, NoiseFloorHeatmap, AirtimeSpectrumChart
 │   ├── controls/          # ControlPanel (mode/duty cycle)
-│   ├── layout/            # Sidebar, Header, BackgroundProvider
-│   ├── contacts/          # ContactsMap, PathHealthPanel (topology visualization)
-│   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization
-│   ├── shared/            # TimeRangeSelector, BackgroundSelector
-│   ├── stats/             # StatsCard
+│   ├── layout/            # Sidebar, Header, BackgroundProvider, PageSkeleton
+│   ├── contacts/          # ContactsMap, ContactsMapMapLibre, PathHealthPanel, NodeSparkline
+│   ├── packets/           # PacketRow, PacketDetailModal, PathMapVisualization, RecentPackets, SignalIndicator
+│   ├── shared/            # TimeRangeSelector, BackgroundSelector, Skeleton
+│   ├── stats/             # StatsCard, DisambiguationCard, TxDelayCard
 │   ├── ui/                # HashBadge, ConfirmModal, DeepAnalysisModal
 │   └── widgets/           # LBT Insights mini-widgets (MiniWidget, WidgetRow)
 ├── lib/
@@ -507,13 +507,52 @@ The frontend connects to pyMC_Repeater's CherryPy API (port 8000):
 - `/api/hardware_stats` - CPU, memory, disk, temperature
 - `/api/packet_type_graph_data?hours=N` - Packet type chart data
 - `/api/metrics_graph_data?hours=N` - Metrics chart data
-- `/api/noise_floor_chart_data?hours=N` - Noise floor history
+- `/api/noise_floor_history?hours=N` - Noise floor history
+- `/api/radio_presets` - Available radio configuration presets
+- `/api/packet_stats?hours=N` - Packet statistics
+- `/api/packet_type_stats?hours=N` - Packet type breakdown
 
 **POST endpoints:**
 - `/api/send_advert` - Trigger advert broadcast
 - `/api/set_mode` - Set forward/monitor mode `{mode: "forward"|"monitor"}`
 - `/api/set_duty_cycle` - Enable/disable duty cycle `{enabled: bool}`
 - `/api/update_radio_config` - Update radio settings (patched by manage.sh)
+- `/api/set_log_level` - Set logging level `{level: "DEBUG"|"INFO"|"WARNING"|"ERROR"}`
+- `/api/global_flood_policy` - Set global flood allow policy
+
+**Identity Management (feat/identity branch):**
+- `GET /api/identities` - List all identities
+- `GET /api/identity?name=X` - Get specific identity
+- `POST /api/create_identity` - Create new identity
+- `PUT /api/update_identity` - Update existing identity
+- `DELETE /api/delete_identity?name=X` - Delete identity
+- `POST /api/send_room_server_advert` - Send advert for room server
+
+**ACL (Access Control List):**
+- `GET /api/acl_info` - ACL config and stats for all identities
+- `GET /api/acl_clients` - List authenticated clients
+- `POST /api/acl_remove_client` - Remove client from ACL
+- `GET /api/acl_stats` - Overall ACL statistics
+
+**Room Server:**
+- `GET /api/room_messages` - Get messages from a room
+- `POST /api/room_post_message` - Post message to a room
+- `GET /api/room_stats` - Room statistics
+- `GET /api/room_clients` - Clients synced to a room
+- `DELETE /api/room_message` - Delete specific message
+- `DELETE /api/room_messages` - Clear all messages in room
+
+**Transport Keys:**
+- `GET /api/transport_keys` - List all transport keys
+- `POST /api/transport_keys` - Create new transport key
+- `GET /api/transport_key/:id` - Get specific transport key
+- `PUT /api/transport_key/:id` - Update transport key
+- `DELETE /api/transport_key/:id` - Delete transport key
+
+**Neighbor/Advert:**
+- `DELETE /api/advert/:id` - Delete a neighbor/advert
+- `POST /api/ping_neighbor` - Ping a neighbor
+- `GET /api/adverts_by_contact_type` - Filter adverts by contact type
 
 ## manage.sh Installer
 

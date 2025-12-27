@@ -1,10 +1,16 @@
 /**
- * TxDelayCard - Local TX delay recommendations using MeshCore slot-based system
+ * TxDelayCard - Local TX delay factor recommendations using MeshCore slot-based system
+ * 
+ * IMPORTANT: These are DELAY FACTORS, not absolute times!
  * 
  * MeshCore Formula: t(txdelay) = trunc(Af * 5 * txdelay)
- * - Af = 1.0 (airtime factor)
- * - Increments <0.2s have NO EFFECT (slot quantization)
- * - All outputs aligned to 0.2s boundaries
+ * - Af = airtime factor (packet-dependent)
+ * - txdelay = the factor we're recommending (e.g., 1.2 = "×1.2")
+ * - Increments <0.2 have NO EFFECT (slot quantization)
+ * - All outputs aligned to 0.2 slot boundaries
+ * 
+ * The actual transmission delay varies based on packet airtime.
+ * A factor of 1.2 with different packets produces different absolute delays.
  */
 
 import { useMemo } from 'react';
@@ -190,7 +196,7 @@ export function TxDelayCard({
       {/* Top section: Icon + Title + Time Range */}
       <div className="flex items-center gap-2 mb-3">
         <Timer className="w-4 h-4 text-[var(--metric-transmitted)]" />
-        <span className="data-card-title">TX DELAY</span>
+        <span className="data-card-title">TX DELAY FACTOR</span>
         {timeRangeLabel && (
           <span className="pill-tag">{timeRangeLabel}</span>
         )}
@@ -211,15 +217,15 @@ export function TxDelayCard({
       <div className="flex items-baseline gap-4">
         <div>
           <div className="type-data-lg tabular-nums text-[var(--metric-transmitted)]">
-            {calc.floodDelaySec.toFixed(1)}s
+            ×{calc.floodDelaySec.toFixed(1)}
           </div>
           <div className="type-data-xs text-text-muted">
-            tx_delay <span className="text-accent-secondary font-semibold">({calc.floodSlots} slots)</span>
+            flood <span className="text-accent-secondary font-semibold">({calc.floodSlots} slots)</span>
           </div>
         </div>
         <div>
           <div className="type-data-lg tabular-nums text-[var(--metric-forwarded)]">
-            {calc.directDelaySec.toFixed(1)}s
+            ×{calc.directDelaySec.toFixed(1)}
           </div>
           <div className="type-data-xs text-text-muted">
             direct <span className="text-accent-secondary font-semibold">({calc.directSlots} slots)</span>
@@ -253,10 +259,10 @@ export function TxDelayCard({
       <div className="data-card-secondary border-t border-border-subtle pt-3 mt-2">
         {currentTxDelay !== null ? (
           <span>
-            Current: {currentTxDelay.toFixed(1)}s ({currentFloodSlots} slots) / {currentDirectDelay?.toFixed(1) ?? '—'}s
+            Current: ×{currentTxDelay.toFixed(1)} ({currentFloodSlots} slots) / ×{currentDirectDelay?.toFixed(1) ?? '—'}
           </span>
         ) : (
-          <span>Recommended delays (MeshCore slot-aligned)</span>
+          <span>Recommended factors (MeshCore slot-aligned)</span>
         )}
       </div>
     </div>
