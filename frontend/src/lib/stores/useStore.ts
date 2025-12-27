@@ -18,7 +18,7 @@ import * as api from '@/lib/api';
 import { packetCache, type PacketCacheState } from '@/lib/packet-cache';
 import { topologyService } from '@/lib/topology-service';
 import { sparklineService } from '@/lib/sparkline-service';
-import { parsePacketPath, getHashPrefix } from '@/lib/path-utils';
+import { getHashPrefix } from '@/lib/path-utils';
 import { POLLING_INTERVALS } from '@/lib/constants';
 
 /** Data point for system resource history */
@@ -36,183 +36,348 @@ const HIDDEN_CONTACTS_KEY = 'pymc-hidden-contacts';
 const QUICK_NEIGHBORS_KEY = 'pymc-quick-neighbors';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Quick Neighbor Types (lightweight detection without deep analysis)
+// NEIGHBOR DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// This module implements MeshCore-compatible zero-hop neighbor detection.
+//
+// BACKGROUND:
+// A "neighbor" in MeshCore terminology is a node we can reach via direct RF
+// contact (zero-hop). This is determined by receiving ADVERT packets with
+// path_len == 0, meaning no intermediate nodes forwarded the packet.
+//
+// ALGORITHM SOURCE:
+// MeshCore's MyMesh.cpp onAdvertRecv():
+//   if (packet->path_len == 0 && !isShare(packet)) {
+//     putNeighbour(id, timestamp, packet->getSNR());
+//   }
+//
+// NOTE: This differs from pyMC_Repeater's backend which uses route_type==2
+// (DIRECT) to set zero_hop. Our frontend uses the MeshCore algorithm for
+// consistency with user expectations from the MeshCore mental model.
+//
+// FRESHNESS:
+// Neighbors are tracked with freshness status to identify stale links:
+// - active:  heard within 7 days (shown normally)
+// - stale:   7-14 days ago (shown with "Idle MM/DD" indicator)
+// - expired: >14 days (excluded from neighbor list entirely)
+//
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/** Neighbor freshness status based on last seen timestamp */
+export type NeighborStatus = 'active' | 'stale' | 'expired';
+
+/** Time thresholds for neighbor freshness classification (milliseconds) */
+const NEIGHBOR_FRESHNESS = {
+  ACTIVE_THRESHOLD_MS: 7 * 24 * 60 * 60 * 1000,   // 7 days
+  STALE_THRESHOLD_MS: 14 * 24 * 60 * 60 * 1000,   // 14 days
+} as const;
+
+/** MeshCore packet type constants */
+const MESHCORE_PACKET_TYPES = {
+  ADVERT: 0x04,  // PAYLOAD_TYPE_ADVERT from MeshCore Packet.h
+} as const;
+
 /**
- * A neighbor detected by receiving ADVERT packets directly from them.
+ * A zero-hop neighbor detected from ADVERT packets with path_len == 0.
  * 
- * Standard neighbor detection (letsme.sh / meshcoretomqtt style):
- * A node is a "neighbor" when we've received zero-hop ADVERTs from them,
- * meaning they were the LAST HOP in the packet path (direct RF contact).
- * 
- * Only ADVERT packets (type=4) are used for neighbor detection because:
- * - ADVERTs are periodic broadcasts representing the purest signal quality indicator
- * - Other packet types may be forwarded with different TX power/conditions
+ * This represents direct RF contact - the node transmitted and we received
+ * without any intermediate forwarders.
  */
 export interface QuickNeighbor {
-  /** Full hash of the neighbor (matched from known contacts) */
+  /** Full node hash (e.g., "61a73fe9731d3e...") */
   hash: string;
-  /** 2-char prefix as seen in packet paths */
+  
+  /** 2-char prefix from hash (e.g., "61") */
   prefix: string;
-  /** Number of ADVERT packets where this node was the last hop (direct RF) */
+  
+  /** Count of zero-hop ADVERT packets received from this neighbor */
   count: number;
-  /** Average RSSI of ADVERT packets received from this neighbor */
+  
+  /** Average RSSI across received ADVERTs (dBm), null if no data */
   avgRssi: number | null;
-  /** Average SNR of ADVERT packets received from this neighbor */
+  
+  /** Average SNR across received ADVERTs (dB), null if no data */
   avgSnr: number | null;
-  /** Most recent ADVERT timestamp from this neighbor */
+  
+  /** Unix timestamp (seconds) of most recent zero-hop ADVERT */
+  lastSeen: number;
+  
+  /** Freshness status: active (<7d), stale (7-14d), or expired (>14d) */
+  status: NeighborStatus;
+}
+
+/** Internal accumulator for neighbor signal statistics */
+interface NeighborStatsAccumulator {
+  hash: string;
+  count: number;
+  rssiSum: number;
+  rssiCount: number;
+  snrSum: number;
+  snrCount: number;
   lastSeen: number;
 }
 
 /**
- * Lightweight neighbor detection from ADVERT packets.
- * Standard approach (letsme.sh / meshcoretomqtt style):
- * A neighbor is a node where we received ADVERTs with them as the LAST HOP.
+ * Determine neighbor freshness status from last seen timestamp.
  * 
- * Only ADVERT packets (type=4) are used because they represent the purest
- * signal quality indicator - periodic broadcasts with consistent TX parameters.
+ * @param lastSeenSec - Unix timestamp in seconds
+ * @param nowMs - Current time in milliseconds
+ * @returns Freshness status
+ */
+function getNeighborStatus(lastSeenSec: number, nowMs: number): NeighborStatus {
+  const ageMs = nowMs - (lastSeenSec * 1000);
+  
+  if (ageMs <= NEIGHBOR_FRESHNESS.ACTIVE_THRESHOLD_MS) return 'active';
+  if (ageMs <= NEIGHBOR_FRESHNESS.STALE_THRESHOLD_MS) return 'stale';
+  return 'expired';
+}
+
+/**
+ * Build a prefix-to-hash lookup map from known neighbors.
  * 
- * @param packets - Packet array (even small poll batches work)
+ * When multiple neighbors share the same 2-char prefix (collision),
+ * prefer the one marked as zero_hop by the backend.
+ * 
+ * @param neighbors - Known contacts from stats.neighbors
+ * @returns Map of 2-char prefix to full hash
+ */
+function buildPrefixLookup(neighbors: Record<string, NeighborInfo>): Map<string, string> {
+  const prefixToHash = new Map<string, string>();
+  
+  for (const hash of Object.keys(neighbors)) {
+    const prefix = getHashPrefix(hash);
+    const existing = prefixToHash.get(prefix);
+    
+    if (!existing) {
+      prefixToHash.set(prefix, hash);
+    } else {
+      // Collision: prefer the one with zero_hop=true from backend
+      const currentIsZeroHop = neighbors[existing]?.zero_hop;
+      const newIsZeroHop = neighbors[hash]?.zero_hop;
+      if (newIsZeroHop && !currentIsZeroHop) {
+        prefixToHash.set(prefix, hash);
+      }
+    }
+  }
+  
+  return prefixToHash;
+}
+
+/**
+ * Check if a packet is a zero-hop ADVERT (MeshCore neighbor criteria).
+ * 
+ * @param packet - Packet to check
+ * @returns true if this is a received ADVERT with path_len == 0
+ */
+function isZeroHopAdvert(packet: Packet): boolean {
+  // Must be an ADVERT packet
+  const payloadType = packet.type ?? packet.payload_type;
+  if (payloadType !== MESHCORE_PACKET_TYPES.ADVERT) return false;
+  
+  // Must be received (not transmitted by us)
+  if (packet.transmitted === true) return false;
+  
+  // Must have path_len == 0 (zero-hop, direct RF contact)
+  const path = packet.original_path;
+  const pathLen = Array.isArray(path) ? path.length : 0;
+  return pathLen === 0;
+}
+
+/**
+ * Resolve a packet's src_hash to a full neighbor hash.
+ * 
+ * API may return src_hash as 2-char prefix ("61") or full hash.
+ * This function normalizes to full hash using the prefix lookup.
+ * 
+ * @param srcHash - Source hash from packet (may be prefix or full)
+ * @param localPrefix - Local node's 2-char prefix (to exclude self)
+ * @param prefixToHash - Prefix lookup map
+ * @param knownHashes - Set of known neighbor hashes
+ * @param localHash - Local node's full hash
+ * @returns Resolved full hash, or null if unresolvable/self/unknown
+ */
+function resolveNeighborHash(
+  srcHash: string | undefined,
+  localPrefix: string,
+  prefixToHash: Map<string, string>,
+  knownHashes: Set<string>,
+  localHash: string
+): string | null {
+  if (!srcHash) return null;
+  
+  let resolvedHash = srcHash;
+  
+  // If short prefix, resolve to full hash
+  if (srcHash.length <= 4) {
+    const prefix = srcHash.replace(/^0x/i, '').toUpperCase();
+    
+    // Skip local node
+    if (prefix === localPrefix) return null;
+    
+    const resolved = prefixToHash.get(prefix);
+    if (!resolved) return null; // Can't resolve to known neighbor
+    
+    resolvedHash = resolved;
+  }
+  
+  // Validate against known neighbors and exclude self
+  if (!knownHashes.has(resolvedHash)) return null;
+  if (resolvedHash === localHash) return null;
+  
+  return resolvedHash;
+}
+
+/**
+ * Accumulate signal stats for a neighbor from a packet.
+ * 
+ * @param stats - Existing stats accumulator (mutated in place)
+ * @param packet - Packet to accumulate from
+ */
+function accumulateNeighborStats(stats: NeighborStatsAccumulator, packet: Packet): void {
+  stats.count++;
+  
+  if (packet.rssi !== undefined && packet.rssi !== null) {
+    stats.rssiSum += packet.rssi;
+    stats.rssiCount++;
+  }
+  
+  if (packet.snr !== undefined && packet.snr !== null) {
+    stats.snrSum += packet.snr;
+    stats.snrCount++;
+  }
+  
+  const timestamp = packet.timestamp ?? 0;
+  if (timestamp > stats.lastSeen) {
+    stats.lastSeen = timestamp;
+  }
+}
+
+/**
+ * Create an empty stats accumulator for a neighbor.
+ */
+function createEmptyStats(hash: string): NeighborStatsAccumulator {
+  return {
+    hash,
+    count: 0,
+    rssiSum: 0,
+    rssiCount: 0,
+    snrSum: 0,
+    snrCount: 0,
+    lastSeen: 0,
+  };
+}
+
+/**
+ * Convert accumulated stats to a QuickNeighbor object.
+ * 
+ * @param stats - Accumulated stats
+ * @param nowMs - Current time for freshness calculation
+ * @returns QuickNeighbor or null if expired
+ */
+function statsToQuickNeighbor(stats: NeighborStatsAccumulator, nowMs: number): QuickNeighbor | null {
+  const status = getNeighborStatus(stats.lastSeen, nowMs);
+  
+  // Exclude expired neighbors
+  if (status === 'expired') return null;
+  
+  return {
+    hash: stats.hash,
+    prefix: getHashPrefix(stats.hash),
+    count: stats.count,
+    avgRssi: stats.rssiCount > 0 ? stats.rssiSum / stats.rssiCount : null,
+    avgSnr: stats.snrCount > 0 ? stats.snrSum / stats.snrCount : null,
+    lastSeen: stats.lastSeen,
+    status,
+  };
+}
+
+/**
+ * Detect zero-hop neighbors using MeshCore's algorithm.
+ * 
+ * Scans packets for ADVERT packets with path_len == 0, indicating direct RF
+ * contact. Also includes backend's zero_hop contacts as fallback for neighbors
+ * whose packets may not be in our local cache.
+ * 
+ * @param packets - Packet array from cache
  * @param neighbors - Known contacts from stats.neighbors
  * @param localHash - Local node's hash (e.g., "0x19")
- * @returns Array of QuickNeighbor sorted by ADVERT count descending
+ * @returns Array of QuickNeighbor sorted by count desc, excluding expired
+ * 
+ * @example
+ * ```ts
+ * const quickNeighbors = detectQuickNeighbors(packets, stats.neighbors, stats.local_hash);
+ * // Returns: [{ hash: "61a73...", prefix: "61", count: 15, avgSnr: -7.0, status: "active" }, ...]
+ * ```
  */
 function detectQuickNeighbors(
   packets: Packet[],
   neighbors: Record<string, NeighborInfo>,
   localHash: string | undefined
 ): QuickNeighbor[] {
+  // Early exit if missing required data
   if (!localHash || packets.length === 0 || Object.keys(neighbors).length === 0) {
     return [];
   }
   
-  // Build prefix → hash lookup from known neighbors
-  // For collisions, prefer the neighbor with valid coordinates (more likely to be real)
-  const prefixToHash = new Map<string, string>();
-  const prefixCollisions = new Map<string, string[]>(); // Track all hashes per prefix
+  const nowMs = Date.now();
+  const localPrefix = getHashPrefix(localHash);
+  const knownHashes = new Set(Object.keys(neighbors));
+  const prefixToHash = buildPrefixLookup(neighbors);
   
-  for (const hash of Object.keys(neighbors)) {
-    const prefix = getHashPrefix(hash);
-    if (!prefixCollisions.has(prefix)) {
-      prefixCollisions.set(prefix, [hash]);
-    } else {
-      prefixCollisions.get(prefix)!.push(hash);
-    }
-  }
-  
-  // For each prefix, pick the best hash (prefer one with coordinates)
-  for (const [prefix, hashes] of prefixCollisions) {
-    if (hashes.length === 1) {
-      // No collision - use directly
-      prefixToHash.set(prefix, hashes[0]);
-    } else {
-      // Collision - try to disambiguate by picking the one with valid coordinates
-      const withCoords = hashes.filter(h => {
-        const n = neighbors[h];
-        return n && n.latitude && n.longitude && n.latitude !== 0 && n.longitude !== 0;
-      });
-      
-      if (withCoords.length === 1) {
-        // Only one has coords - use it
-        prefixToHash.set(prefix, withCoords[0]);
-      } else if (withCoords.length > 1) {
-        // Multiple have coords - pick most recently seen
-        const sorted = withCoords.sort((a, b) => {
-          const lastA = neighbors[a]?.last_seen ?? 0;
-          const lastB = neighbors[b]?.last_seen ?? 0;
-          return lastB - lastA;
-        });
-        prefixToHash.set(prefix, sorted[0]);
-      } else {
-        // None have coords - pick most recently seen
-        const sorted = hashes.sort((a, b) => {
-          const lastA = neighbors[a]?.last_seen ?? 0;
-          const lastB = neighbors[b]?.last_seen ?? 0;
-          return lastB - lastA;
-        });
-        prefixToHash.set(prefix, sorted[0]);
-      }
-    }
-  }
-  
-  // Track last-hop stats (standard neighbor detection)
-  const lastHopStats = new Map<string, {
-    hash: string;
-    count: number;
-    rssiSum: number;
-    rssiCount: number;
-    snrSum: number;
-    snrCount: number;
-    lastSeen: number;
-  }>();
+  // ─── PHASE 1: Scan packets for zero-hop ADVERTs ───────────────────────────
+  const neighborStats = new Map<string, NeighborStatsAccumulator>();
   
   for (const packet of packets) {
-    // Only use ADVERT packets (type=4) for neighbor detection
-    const packetType = packet.type ?? packet.payload_type;
-    if (packetType !== 4) continue;  // Skip non-ADVERT packets
+    if (!isZeroHopAdvert(packet)) continue;
     
-    // Skip transmitted packets - we want received ADVERTs
-    if (packet.transmitted === true) continue;
-    
-    const parsed = parsePacketPath(packet, localHash);
-    if (!parsed || parsed.effectiveLength === 0) continue;
-    
-    // Last element in effective path is the last forwarder (transmitted directly to us)
-    const lastHopPrefix = parsed.effective[parsed.effectiveLength - 1];
-    
-    // Try to resolve to a known hash
-    const resolvedHash = prefixToHash.get(lastHopPrefix);
-    
-    // Skip if prefix not found in our neighbors
+    const resolvedHash = resolveNeighborHash(
+      packet.src_hash,
+      localPrefix,
+      prefixToHash,
+      knownHashes,
+      localHash
+    );
     if (!resolvedHash) continue;
     
-    // Accumulate stats
-    const existing = lastHopStats.get(resolvedHash) || {
-      hash: resolvedHash,
-      count: 0,
-      rssiSum: 0,
-      rssiCount: 0,
-      snrSum: 0,
-      snrCount: 0,
-      lastSeen: 0,
-    };
-    
-    existing.count++;
-    
-    if (packet.rssi !== undefined && packet.rssi !== null) {
-      existing.rssiSum += packet.rssi;
-      existing.rssiCount++;
+    // Get or create accumulator
+    let stats = neighborStats.get(resolvedHash);
+    if (!stats) {
+      stats = createEmptyStats(resolvedHash);
+      neighborStats.set(resolvedHash, stats);
     }
     
-    if (packet.snr !== undefined && packet.snr !== null) {
-      existing.snrSum += packet.snr;
-      existing.snrCount++;
-    }
-    
-    const timestamp = packet.timestamp ?? 0;
-    if (timestamp > existing.lastSeen) {
-      existing.lastSeen = timestamp;
-    }
-    
-    lastHopStats.set(resolvedHash, existing);
+    accumulateNeighborStats(stats, packet);
   }
   
-  // Convert to QuickNeighbor array
+  // ─── PHASE 2: Include backend zero_hop contacts as fallback ──────────────
+  // This catches neighbors whose packets may not be in our local cache
+  for (const [hash, info] of Object.entries(neighbors)) {
+    if (info.zero_hop && !neighborStats.has(hash)) {
+      neighborStats.set(hash, {
+        hash,
+        count: info.advert_count ?? 0,
+        rssiSum: info.rssi ?? 0,
+        rssiCount: info.rssi !== undefined ? 1 : 0,
+        snrSum: info.snr ?? 0,
+        snrCount: info.snr !== undefined ? 1 : 0,
+        lastSeen: info.last_seen ?? 0,
+      });
+    }
+  }
+  
+  // ─── PHASE 3: Convert to QuickNeighbor array, filter expired ─────────────
   const result: QuickNeighbor[] = [];
-  for (const [hash, stats] of lastHopStats) {
-    result.push({
-      hash,
-      prefix: getHashPrefix(hash),
-      count: stats.count,
-      avgRssi: stats.rssiCount > 0 ? stats.rssiSum / stats.rssiCount : null,
-      avgSnr: stats.snrCount > 0 ? stats.snrSum / stats.snrCount : null,
-      lastSeen: stats.lastSeen,
-    });
+  for (const stats of neighborStats.values()) {
+    const neighbor = statsToQuickNeighbor(stats, nowMs);
+    if (neighbor) result.push(neighbor);
   }
   
-  // Sort by count descending
-  result.sort((a, b) => b.count - a.count);
+  // Sort by packet count (descending), then by recency for ties
+  result.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return b.lastSeen - a.lastSeen;
+  });
   
   return result;
 }

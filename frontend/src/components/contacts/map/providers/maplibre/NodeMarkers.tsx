@@ -143,8 +143,14 @@ function NodeMarker({
   const meanSnr = lastHopData?.avgSnr ?? undefined;
   const meanRssi = lastHopData?.avgRssi ?? undefined;
   
+  // Check if neighbor is stale (7-14 days old)
+  const isStale = lastHopData?.status === 'stale';
+  const lastSeenTimestamp = lastHopData?.lastSeen ?? undefined;
+  
   // Quantize opacity for icon caching (20 steps)
-  const quantizedOpacity = Math.round(nodeOpacity * 20) / 20;
+  // Apply additional dimming for stale neighbors
+  const baseOpacity = isStale ? Math.min(nodeOpacity, 0.5) : nodeOpacity;
+  const quantizedOpacity = Math.round(baseOpacity * 20) / 20;
   
   // Select icon HTML based on node type priority: Room Server > Hub > Mobile > Standard
   const iconHtml = useMemo(() => {
@@ -230,6 +236,8 @@ function NodeMarker({
             isZeroHop={isZeroHop}
             isMobile={isMobile}
             isRoomServer={isRoomServer}
+            isStale={isStale}
+            lastSeenTimestamp={lastSeenTimestamp}
             centrality={centrality}
             affinity={affinity}
             meanSnr={meanSnr}

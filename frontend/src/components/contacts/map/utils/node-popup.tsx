@@ -54,6 +54,8 @@ export interface NodePopupContentProps {
   isZeroHop: boolean;
   isMobile: boolean;
   isRoomServer: boolean;
+  isStale: boolean;
+  lastSeenTimestamp?: number;
   centrality: number;
   affinity?: FullAffinity;
   meanSnr?: number;
@@ -107,6 +109,12 @@ export function LegendTooltip({ text }: { text: string }) {
  * Row 5: Metrics grid (6+6 cols = 2 columns)
  * Row 6: Footer - TX recs + Remove (split 8+4)
  */
+/** Format date as MM/DD for stale indicator */
+function formatLastHeardDate(timestamp: number): string {
+  const date = new Date(timestamp * 1000); // Convert from Unix seconds
+  return `${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+}
+
 export function NodePopupContent({
   hash,
   hashPrefix,
@@ -115,6 +123,8 @@ export function NodePopupContent({
   isZeroHop,
   isMobile,
   isRoomServer,
+  isStale,
+  lastSeenTimestamp,
   centrality,
   affinity,
   meanSnr,
@@ -191,6 +201,14 @@ export function NodePopupContent({
         )}
         {isRoomServer && (
           <span className="px-1 py-px text-[8px] font-bold uppercase rounded bg-amber-500/25 text-amber-400">Room</span>
+        )}
+        {isStale && lastSeenTimestamp && (
+          <span 
+            className="px-1 py-px text-[8px] font-medium rounded bg-gray-500/30 text-gray-300"
+            title="Neighbor not heard in 7+ days"
+          >
+            Idle {formatLastHeardDate(lastSeenTimestamp)}
+          </span>
         )}
       </div>
       

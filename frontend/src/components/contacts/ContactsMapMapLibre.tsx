@@ -241,7 +241,11 @@ export default function ContactsMapMapLibre({
     const map = new Map<string, LastHopNeighbor>();
     
     // Primary source: quickNeighbors (from polling)
+    // Only include active/stale neighbors (exclude expired)
     for (const qn of quickNeighbors) {
+      // Skip expired neighbors (>14 days without hearing)
+      if (qn.status === 'expired') continue;
+      
       map.set(qn.hash, {
         hash: qn.hash,
         prefix: qn.prefix,
@@ -250,6 +254,7 @@ export default function ContactsMapMapLibre({
         avgSnr: qn.avgSnr,
         lastSeen: qn.lastSeen,
         confidence: 1.0,
+        status: qn.status,
       });
     }
     
