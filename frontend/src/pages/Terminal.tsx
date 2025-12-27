@@ -29,6 +29,19 @@ import {
 import type { LogLevel } from '@/lib/api';
 import { MESHCORE_COMMANDS, type MeshCoreCommand } from '@/lib/meshcore-commands';
 
+// Polyfill for crypto.randomUUID (not available in non-HTTPS contexts)
+const generateId = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for HTTP contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -470,7 +483,7 @@ export default function Terminal() {
         .join('\n');
       
       const entry: CommandEntry = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         cmd: trimmedCmd,
         result: `Available commands:\n\n${helpText}\n\nNote: Commands use existing API endpoints. Some MeshCore CLI\ncommands are not available via HTTP.`,
         isProcessing: false,
@@ -481,7 +494,7 @@ export default function Terminal() {
     }
     
     // Create entry with processing state
-    const entryId = crypto.randomUUID();
+    const entryId = generateId();
     const entry: CommandEntry = {
       id: entryId,
       cmd: trimmedCmd,
