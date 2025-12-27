@@ -441,11 +441,21 @@ export interface MeshTopology {
   /** Health metrics for top observed paths */
   pathHealth: PathHealth[];
   
-  // === LAST-HOP NEIGHBORS (ADVERT packets only) ===
+  // === LAST-HOP FORWARDERS (ADVERT packets only) ===
   /** 
-   * Neighbors identified by forwarding ADVERT packets directly to us.
-   * Only ADVERT packets are used - this ensures SNR/RSSI values reflect
-   * the purest signal quality from periodic broadcasts.
+   * Nodes that forwarded ADVERT packets to us (last hop in multi-hop paths).
+   * 
+   * IMPORTANT: These are NOT zero-hop neighbors! They are nodes that relayed
+   * packets where path_len >= 1. For true zero-hop neighbors (MeshCore algorithm),
+   * use `quickNeighbors` from useStore which detects ADVERTs with path_len == 0.
+   * 
+   * This data is useful for:
+   * - Identifying which relay nodes frequently forward traffic to us
+   * - Signal quality from the final hop (RSSI/SNR)
+   * - Gateway analysis (nodes that bridge us to the wider mesh)
+   * 
+   * Only ADVERT packets are tracked - they're periodic broadcasts that
+   * represent the purest signal quality indicator.
    * Sorted by ADVERT count descending.
    */
   lastHopNeighbors: LastHopNeighbor[];
@@ -2158,10 +2168,13 @@ export function buildMeshTopology(
   
   // === LAST-HOP NEIGHBOR TRACKING ===
   // Track prefixes that appear as last hop in ADVERT packets (type=4) with signal quality data.
-  // We ONLY use ADVERT packets for neighbor detection because:
+  // IMPORTANT: This tracks the LAST FORWARDER in multi-hop paths, NOT zero-hop neighbors!
+  // - path_len >= 1 means packet was relayed; the last hop is the relay node, not the source
+  // - For true zero-hop neighbors (MeshCore algorithm: path_len == 0), see detectQuickNeighbors()
+  // 
+  // We use ADVERT packets because:
   // - ADVERTs are periodic broadcasts that represent the purest signal quality indicator
   // - Other packet types (TXT_MSG, ACK, etc.) may be forwarded with different TX conditions
-  // - The backend uses ADVERTs to determine zero_hop status (consistency)
   interface LastHopPrefixAccumulator {
     prefix: string;
     count: number;       // Count of ADVERT packets where this prefix was last hop

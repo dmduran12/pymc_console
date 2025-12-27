@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact, useQuickNeighbors } from '@/lib/stores/useStore';
-import { useHubNodes, useCentrality, useLastHopNeighbors } from '@/lib/stores/useTopologyStore';
+import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
 import { ChevronsLeftRightEllipsis, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import { SignalIcon } from '@/components/packets/SignalIndicator';
@@ -49,7 +49,6 @@ export default function Contacts() {
   const hideContact = useHideContact();
   const hubNodes = useHubNodes();
   const centrality = useCentrality();
-  const lastHopNeighbors = useLastHopNeighbors();
   const quickNeighbors = useQuickNeighbors();
   
   // Confirmation modal state
@@ -111,31 +110,24 @@ export default function Contacts() {
   }, [visibleContacts, localNode]);
   
   // Build set of neighbor hashes - nodes we've received zero-hop ADVERTs from
-  // (letsme.sh / meshcoretomqtt standard: last hop = neighbor = direct RF contact)
+  // MeshCore definition: path_len == 0 means direct RF contact (no forwarders)
   // Also build a map for signal data lookup
+  //
+  // NOTE: We intentionally do NOT merge lastHopNeighbors here because:
+  //   - quickNeighbors = true zero-hop (ADVERTs with path_len == 0, MeshCore algorithm)
+  //   - lastHopNeighbors = last forwarder for multi-hop ADVERTs (NOT zero-hop)
   const { neighborHashSet, neighborSignalMap } = useMemo(() => {
     const set = new Set<string>();
     const signalMap = new Map<string, { avgRssi: number | null; avgSnr: number | null }>();
     
-    // Primary: quickNeighbors from main store (runs on every poll, persisted)
+    // Source: quickNeighbors from main store (true zero-hop neighbors)
     for (const qn of quickNeighbors) {
       set.add(qn.hash);
       signalMap.set(qn.hash, { avgRssi: qn.avgRssi, avgSnr: qn.avgSnr });
     }
     
-    // Merge: lastHopNeighbors from topology (may have additional neighbors after deep analysis)
-    for (const n of lastHopNeighbors) {
-      if (!set.has(n.hash)) {
-        set.add(n.hash);
-      }
-      // Update signal data if not already present
-      if (!signalMap.has(n.hash)) {
-        signalMap.set(n.hash, { avgRssi: n.avgRssi, avgSnr: n.avgSnr });
-      }
-    }
-    
     return { neighborHashSet: set, neighborSignalMap: signalMap };
-  }, [quickNeighbors, lastHopNeighbors]);
+  }, [quickNeighbors]);
   
   // Filter contacts based on search query and neighbors toggle
   const filteredContacts = useMemo(() => {

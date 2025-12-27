@@ -236,11 +236,15 @@ export default function ContactsMapMapLibre({
     return coords;
   }, [localHash, localNode, neighborsWithLocation]);
   
-  // Build lastHopNeighborMap from quickNeighbors and topology
+  // Build lastHopNeighborMap from quickNeighbors ONLY (true zero-hop neighbors)
+  // NOTE: We intentionally do NOT merge meshTopology.lastHopNeighbors here because:
+  //   - quickNeighbors = true zero-hop (ADVERTs with path_len == 0, MeshCore algorithm)
+  //   - lastHopNeighbors = last forwarder in ANY ADVERT path (may be multi-hop)
+  // Merging them caused edges to be drawn to every forwarding node, not just neighbors.
   const lastHopNeighborMap = useMemo(() => {
     const map = new Map<string, LastHopNeighbor>();
     
-    // Primary source: quickNeighbors (from polling)
+    // Source: quickNeighbors (from polling) - true MeshCore zero-hop neighbors
     // Only include active/stale neighbors (exclude expired)
     for (const qn of quickNeighbors) {
       // Skip expired neighbors (>14 days without hearing)
@@ -258,16 +262,8 @@ export default function ContactsMapMapLibre({
       });
     }
     
-    // Merge: topology lastHopNeighbors (after deep analysis)
-    // Note: lastHopNeighbors is an array, not a Map
-    for (const lastHop of meshTopology.lastHopNeighbors) {
-      if (!map.has(lastHop.hash)) {
-        map.set(lastHop.hash, lastHop);
-      }
-    }
-    
     return map;
-  }, [quickNeighbors, meshTopology.lastHopNeighbors]);
+  }, [quickNeighbors]);
   
   // Zero-hop neighbors (direct RF contacts)
   const zeroHopNeighbors = useMemo(() => {
