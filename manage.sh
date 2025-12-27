@@ -961,14 +961,18 @@ do_upgrade() {
         
         if [ -n "$remote_hash" ] && [ "$local_hash" != "$remote_hash" ]; then
             print_info "Updates available, pulling..."
-            if git pull --ff-only; then
+            # Try fast-forward first, fall back to reset if history diverged (e.g., after force-push)
+            if git pull --ff-only 2>/dev/null; then
                 print_success "pymc_console updated - restarting with new version..."
                 echo ""
-                # Re-exec this script with 'upgrade' so new code runs
+                exec "$script_dir/manage.sh" upgrade
+            elif git reset --hard "origin/main" 2>/dev/null || git reset --hard "origin/master" 2>/dev/null; then
+                print_success "pymc_console synced (history was rewritten) - restarting..."
+                echo ""
                 exec "$script_dir/manage.sh" upgrade
             else
                 print_warning "Could not auto-update pymc_console (continuing with current version)"
-                print_info "You may need to manually run: cd $script_dir && sudo git pull"
+                print_info "You may need to manually run: cd $script_dir && git fetch && git reset --hard origin/main"
             fi
         else
             print_success "pymc_console is up to date"
