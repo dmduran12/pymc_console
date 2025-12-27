@@ -1,7 +1,8 @@
 /**
- * NoiseFloorWidget - Displays current noise floor
+ * NoiseFloorWidget - Displays current noise floor with trend indicator
  *
  * Shows the current noise floor reading in dBm from the /api/stats endpoint.
+ * Trend arrow indicates if noise is increasing (worse) or decreasing (better).
  */
 
 import { AudioWaveform } from 'lucide-react';
@@ -18,10 +19,21 @@ function getNoiseStatus(noise: number | null): ComputedChannelHealth['status'] {
   return 'critical';
 }
 
+/** Get noise level description */
+function getNoiseLabel(noise: number | null): string {
+  if (noise === null) return 'No reading';
+  if (noise < -115) return 'Very quiet';
+  if (noise < -105) return 'Quiet';
+  if (noise < -95) return 'Moderate';
+  if (noise < -85) return 'Elevated';
+  return 'High interference';
+}
+
 export function NoiseFloorWidget() {
-  const { noiseFloor, isLoading, error } = useLBTData();
+  const { noiseFloor, trends, isLoading, error } = useLBTData();
 
   const status = getNoiseStatus(noiseFloor);
+  const trend = trends?.noiseFloor.trend;
 
   return (
     <MiniWidget
@@ -30,7 +42,8 @@ export function NoiseFloorWidget() {
       value={noiseFloor !== null ? Math.round(noiseFloor) : '—'}
       unit={noiseFloor !== null ? 'dBm' : undefined}
       status={status}
-      subtitle="Current reading"
+      trend={trend}
+      subtitle={getNoiseLabel(noiseFloor)}
       isLoading={isLoading}
       error={error}
     />

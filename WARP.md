@@ -128,7 +128,7 @@ src/
 ├── pages/                 # Page components (one per route)
 │   ├── Dashboard.tsx      # / - Home dashboard
 │   ├── Packets.tsx        # /packets - Packet history & filtering
-│   ├── Neighbors.tsx      # /neighbors - Neighbor map & list
+│   ├── Contacts.tsx       # /contacts - Neighbor map & list (renamed from Neighbors.tsx)
 │   ├── Statistics.tsx     # /statistics - Charts & metrics
 │   ├── System.tsx         # /system - Hardware stats
 │   ├── Logs.tsx           # /logs - System logs
@@ -145,20 +145,30 @@ src/
 │   └── widgets/           # LBT Insights mini-widgets (MiniWidget, WidgetRow)
 ├── lib/
 │   ├── api.ts             # All API client functions (typed fetch wrappers)
-│   ├── constants.ts       # App constants
+│   ├── airtime.ts         # LoRa airtime calculation (Semtech formula)
+│   ├── constants.ts       # App constants (time ranges, colors, polling intervals)
+│   ├── edge-styling.ts    # Topology edge color/weight functions
 │   ├── format.ts          # Formatting utilities
-│   ├── packet-utils.ts    # Packet processing helpers
-│   ├── path-utils.ts      # Centralized path parsing and iteration utilities
-│   ├── path-registry.ts   # Path sequence tracking and canonical path detection
-│   ├── packet-cache.ts    # Deep packet loading (20K limit) with caching
+│   ├── geo-utils.ts       # Geographic utilities (Haversine, proximity bands)
 │   ├── mesh-topology.ts   # Mesh network analysis (7-phase topology system)
+│   ├── meshcore-tx-constants.ts # MeshCore TX delay constants
+│   ├── packet-cache.ts    # Deep packet loading (20K limit) with caching
+│   ├── packet-utils.ts    # Packet processing helpers
+│   ├── path-registry.ts   # Path sequence tracking and canonical path detection
+│   ├── path-utils.ts      # Centralized path parsing and iteration utilities
 │   ├── prefix-disambiguation.ts # Multi-factor prefix→node disambiguation system
+│   ├── sparkline-service.ts # Sparkline computation service
+│   ├── spectrum-utils.ts  # Spectrum analysis utilities
 │   ├── topology-service.ts # Web Worker orchestration for topology computation
 │   ├── hooks/             # usePolling, useDebounce, useThemeColors
-│   ├── stores/useStore.ts # Zustand store (stats, packets, logs, UI, topology)
+│   ├── stores/            # Zustand stores
+│   │   ├── useStore.ts    # Main store (stats, packets, logs, UI, topology)
+│   │   ├── useTopologyStore.ts # Topology-specific state
+│   │   └── useSparklineStore.ts # Sparkline data cache
 │   ├── theme/             # Theme system (ThemeContext, config, hooks)
-│   └── workers/           # Web Workers (topology computation off main thread)
-│       └── topology.worker.ts # Topology computation worker
+│   └── workers/           # Web Workers (computation off main thread)
+│       ├── topology.worker.ts   # Topology computation worker
+│       └── sparkline.worker.ts  # Sparkline computation worker
 └── types/api.ts           # TypeScript interfaces for API responses
 ```
 
@@ -246,8 +256,8 @@ Compact dashboard widgets displaying channel health, LBT metrics, and link quali
 **Disambiguation Scoring** (4 factors):
 - **Position (15%)** - How often a candidate appears at each path position
 - **Co-occurrence (15%)** - How often pairs of prefixes appear adjacent in paths
-- **Geographic (40%)** - Distance-based scoring using dual-hop anchoring
-- **Recency (30%)** - Exponential decay scoring based on when node was last seen
+- **Geographic (35%)** - Distance-based scoring using dual-hop anchoring
+- **Recency (35%)** - Exponential decay scoring based on when node was last seen
 
 **Recency Scoring** (inspired by meshcore-bot):
 - Uses exponential decay: `e^(-hours/12)`
@@ -273,10 +283,13 @@ Edges are marked "certain" when:
 **Key Constants:**
 - `DEEP_FETCH_LIMIT = 20000` - Packets loaded for topology analysis (~7 days)
 - `MIN_EDGE_VALIDATIONS = 5` - Minimum observations for edge certainty
-- `CERTAINTY_CONFIDENCE_THRESHOLD = 0.6` - Minimum confidence for certain edges
-- `confidenceThreshold = 0.5` - Minimum confidence for edge inclusion
 - `MAX_CANDIDATE_AGE_HOURS = 336` - Filter out nodes not seen in 14 days
 - `RECENCY_DECAY_HOURS = 12` - Half-life for recency scoring
+
+**Tiered Confidence Thresholds:**
+- `VERY_HIGH_CONFIDENCE_THRESHOLD = 0.9` - Single endpoint certainty is sufficient
+- `HIGH_CONFIDENCE_THRESHOLD = 0.6` - Both endpoints required for "certain" edge
+- `MEDIUM_CONFIDENCE_THRESHOLD = 0.4` - Minimum for edge inclusion in topology
 
 **Geographic Scoring Bands:**
 - VERY_CLOSE (<500m) = 1.0
@@ -348,15 +361,36 @@ Identifies volatile/mobile nodes:
 - `isMobile` - True if volatility > 0.3
 - UI: "Mobile" badge in node popup, orange styling
 
-**Phase 6: Enhanced TX Delay Recommendations**
-MeshCore-aligned transmission timing:
-- `avgPathPosition` - Where node typically appears (1 = first hop)
-- `pathPositionVariance` - Role consistency
-- `floodParticipationRate` - Congestion indicator (0-1)
-- `positionDelayMs` - Position-based delay adjustment
-  - Position 1-1.5: +50ms (first hop, highest collision)
-  - Position 1.5-2.5: +30ms
-  - Position 2.5-3.5: +15ms
+**Phase 6: TX Delay Recommendations (MeshCore Slot-Based System)**
+Mesh-wide optimization using MeshCore's slot-based timing formula:
+`t(txdelay) = trunc(Af × 5 × txdelay)` where increments <0.2s have NO EFFECT.
+
+*Network Role Classification* (observer-independent):
+- **Backbone**: ≥4 neighbors + ≥50% symmetric traffic → 0.6s base delay
+- **Hub**: ≥4 neighbors → 0.8s base delay (reduces collision cascades)
+- **Relay**: ≥30% symmetric + ≥2 neighbors → 0.7s (MeshCore default)
+- **Edge**: Low connectivity/asymmetric → 0.4s (aggressive, lower latency)
+
+*Key Fields:*
+- `floodDelaySec`, `directDelaySec` - Slot-aligned delays (0.2s resolution)
+- `floodSlots`, `directSlots` - Integer slot counts for MeshCore
+- `networkRole` - 'edge' | 'relay' | 'hub' | 'backbone'
+- `collisionRisk` - Combined traffic/neighbor/path centrality (0-1)
+- `observationSymmetry` - Bidirectional traffic indicator (high = less observer bias)
+- `dataConfidence` - 'insufficient' | 'low' | 'medium' | 'high'
+
+*MENTOR-Inspired Utilization Balancing:*
+When mesh-wide utilization variance >5% and slack >30%:
+- High-utilization nodes → +slots (reduce TX rate)
+- Low-utilization nodes → -slots (increase TX opportunities)
+
+*Slot Staggering:*
+Multiple nodes at same slot count are staggered to prevent simultaneous TX:
+- Sort by traffic intensity (highest gets original slot)
+- Every 3rd node gets +0.2s, every 3rd+1 gets +0.4s
+
+**NOTE**: Position-based delays were REMOVED due to observer bias. Path position
+is local-centric ("first hop" from our view differs from other nodes' perspectives).
 
 **Phase 7: Path Health Indicators**
 Health metrics for observed paths:
@@ -382,8 +416,11 @@ interface NodeMobility {
 
 // Phase 6: TxDelayRecommendation
 interface TxDelayRecommendation {
-  avgPathPosition, pathPositionVariance, floodParticipationRate,
-  pathDiversity, positionDelayMs
+  floodDelaySec, directDelaySec,      // Slot-aligned delays (0.2s resolution)
+  floodSlots, directSlots,            // Integer slot counts
+  networkRole,                        // 'edge' | 'relay' | 'hub' | 'backbone'
+  collisionRisk, confidence,          // 0-1 scores
+  observationSymmetry, dataConfidence // Observer bias metrics
 }
 
 // Phase 7: PathHealth
@@ -671,8 +708,8 @@ The disambiguation system uses multi-factor analysis to resolve ambiguous 2-char
 3. **Four-Factor Scoring**:
    - **Position (15%)**: Normalized count at observed position vs total observations
    - **Co-occurrence (15%)**: Adjacent prefix relationships from historical data
-   - **Geographic (40%)**: Distance from anchor points (dual-hop anchoring)
-   - **Recency (30%)**: Exponential decay `e^(-hours/12)` favoring recently-seen nodes
+   - **Geographic (35%)**: Distance from anchor points (dual-hop anchoring)
+   - **Recency (35%)**: Exponential decay `e^(-hours/12)` favoring recently-seen nodes
 
 4. **Dual-Hop Anchor Correlation**:
    A relay node must be within RF range of both adjacent hops. The system uses:
