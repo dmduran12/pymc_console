@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact, useQuickNeighbors } from '@/lib/stores/useStore';
 import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
-import { ChevronsLeftRightEllipsis, MapPin, Repeat, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
+import { Share2, ArrowLeftRight, MonitorSmartphone, MessagesSquare, MapPin, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import { SignalIcon } from '@/components/packets/SignalIndicator';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
@@ -395,11 +395,27 @@ export default function Contacts() {
                     {/* Icon with signal indicator - only show signal dot for neighbors */}
                     <div className="relative flex-shrink-0">
                       <div className="roster-icon">
-                        {contact.is_repeater ? (
-                          <Repeat className="w-5 h-5 text-accent-primary" />
-                        ) : (
-                          <ChevronsLeftRightEllipsis className="w-5 h-5 text-text-muted" />
-                        )}
+                        {(() => {
+                          const ct = contact.contact_type?.toLowerCase();
+                          const isRoomServer = ct === 'room server' || ct === 'room_server' || ct === 'room' || ct === 'server';
+                          const isCompanion = ct === 'companion' || ct === 'client' || ct === 'cli';
+                          
+                          if (isRoomServer) {
+                            // Room server (regardless of repeater status)
+                            return <MessagesSquare className="w-5 h-5 text-indigo-400" />;
+                          } else if (isCompanion) {
+                            // Companion/client device
+                            return <MonitorSmartphone className="w-5 h-5 text-text-muted" />;
+                          } else if (contact.is_repeater || ct === 'repeater' || ct === 'rep') {
+                            // Repeater - different icon based on neighbor status
+                            return isNeighbor 
+                              ? <ArrowLeftRight className="w-5 h-5 text-accent-success" />
+                              : <Share2 className="w-5 h-5 text-accent-primary" />;
+                          } else {
+                            // Unknown type - default to companion icon
+                            return <MonitorSmartphone className="w-5 h-5 text-text-muted" />;
+                          }
+                        })()}
                       </div>
                       {/* Signal indicator dot - ONLY for bidirectional neighbors */}
                       {showSignal && neighborSignal?.avgSnr !== null && (
@@ -422,7 +438,7 @@ export default function Contacts() {
                             HUB
                           </span>
                         )}
-                        {contact.is_repeater && (
+                        {(contact.is_repeater || contact.contact_type?.toLowerCase() === 'repeater' || contact.contact_type?.toLowerCase() === 'rep') && (
                           <span className="pill-tag">RPT</span>
                         )}
                       </div>
