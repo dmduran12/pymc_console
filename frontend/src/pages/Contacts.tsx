@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useStore, useHiddenContacts, useHideContact, useQuickNeighbors } from '@/lib/stores/useStore';
 import { useHubNodes, useCentrality } from '@/lib/stores/useTopologyStore';
-import { Share2, ArrowLeftRight, MonitorSmartphone, MessagesSquare, MapPin, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2 } from 'lucide-react';
+import { Share2, ArrowLeftRight, MonitorSmartphone, MessagesSquare, MapPin, Users, X, Network, ArrowUpDown, Clock, Ruler, Activity, Search, Trash2, Radio } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
 import { SignalIcon } from '@/components/packets/SignalIndicator';
 import ContactsMapWrapper from '@/components/contacts/ContactsMapWrapper';
@@ -284,7 +284,7 @@ export default function Contacts() {
                 }`}
                 title={showNeighborsOnly ? 'Show all contacts' : 'Show only MeshCore neighbors (direct RF contact)'}
               >
-                <ChevronsLeftRightEllipsis className="w-3.5 h-3.5" />
+                <Radio className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Neighbors</span>
                 <span className="sm:hidden">{neighborHashSet.size}</span>
                 {showNeighborsOnly && (
