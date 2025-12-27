@@ -846,3 +846,25 @@ export async function getAdvertsByContactType(params: {
   return fetchApi<ApiResponse<AdvertsByContactTypeResponse>>(`/api/adverts_by_contact_type?${queryParams.toString()}`);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Terminal Command Endpoint
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface TerminalCommandResponse {
+  response?: string;
+  result?: string;
+  success?: boolean;
+  error?: string;
+}
+
+/**
+ * Send a command to the repeater terminal.
+ * Commands are forwarded to the mesh device and responses returned.
+ */
+export async function sendTerminalCommand(command: string): Promise<TerminalCommandResponse> {
+  return fetchApi<TerminalCommandResponse>('/api/terminal_command', {
+    method: 'POST',
+    body: JSON.stringify({ command }),
+  });
+}
+

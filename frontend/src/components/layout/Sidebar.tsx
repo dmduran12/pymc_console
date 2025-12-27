@@ -29,6 +29,7 @@ import {
   Pause,
   ChevronDown,
   Sliders,
+  SquareTerminal,
 } from 'lucide-react';
 import { version } from '../../../package.json';
 import wifiIcon from '@/assets/WCM_Waves.gif';
@@ -45,6 +46,7 @@ const navigation = [
   { name: 'Statistics', to: '/statistics', icon: BarChart3 },
   { name: 'System', to: '/system', icon: Gauge },
   { name: 'Logs', to: '/logs', icon: FileText },
+  { name: 'Terminal', to: '/terminal', icon: SquareTerminal },
   { name: 'Settings', to: '/settings', icon: Settings },
 ];
 

@@ -24,6 +24,7 @@ const Contacts = lazy(() => import('@/pages/Contacts'));
 const Statistics = lazy(() => import('@/pages/Statistics'));
 const System = lazy(() => import('@/pages/System'));
 const Logs = lazy(() => import('@/pages/Logs'));
+const Terminal = lazy(() => import('@/pages/Terminal'));
 const Settings = lazy(() => import('@/pages/Settings'));
 
 // Error boundary to catch page render errors
@@ -112,6 +113,11 @@ export default function App() {
                   <Route path="/logs" element={
                     <Suspense fallback={<ListSkeleton />}>
                       <Logs />
+                    </Suspense>
+                  } />
+                  <Route path="/terminal" element={
+                    <Suspense fallback={<ListSkeleton />}>
+                      <Terminal />
                     </Suspense>
                   } />
                   <Route path="/settings" element={
