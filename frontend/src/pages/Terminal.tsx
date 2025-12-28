@@ -54,10 +54,14 @@ const ASCII_HEADER = `██████  ██    ██ ███    ██�
 
 type ConnectionState = 'initializing' | 'checking' | 'connected' | 'error';
 
+// Output types for semantic coloring
+type OutputType = 'success' | 'error' | 'warning' | 'info' | 'value' | 'default';
+
 interface CommandEntry {
   id: string;
   cmd: string;
   result: string | null;
+  outputType: OutputType;
   isProcessing: boolean;
   timestamp: number;
 }
@@ -191,13 +195,56 @@ const Cursor = memo(function Cursor({ visible }: { visible: boolean }) {
   return (
     <span 
       className={clsx(
-        'inline-block w-2 h-4 bg-accent-primary ml-0.5 align-middle',
-        visible ? 'opacity-100' : 'opacity-20'
+        'inline-block w-2 h-5 bg-accent-primary ml-0.5 align-middle',
+        visible ? 'opacity-100' : 'opacity-0'
       )}
       aria-hidden="true"
     />
   );
 });
+
+/** Get color class for output type */
+function getOutputColor(type: OutputType): string {
+  switch (type) {
+    case 'success': return 'text-accent-success';      // Green
+    case 'error': return 'text-accent-danger';         // Red
+    case 'warning': return 'text-amber-400';           // Amber
+    case 'info': return 'text-accent-tertiary';        // Cyan
+    case 'value': return 'text-accent-primary';        // Purple (values)
+    default: return 'text-text-secondary';             // Default gray
+  }
+}
+
+/** Colorize a line based on content patterns */
+function colorizeLine(line: string, baseType: OutputType): { text: string; color: string }[] {
+  // If it's an error/warning type, color the whole line
+  if (baseType === 'error' || baseType === 'warning') {
+    return [{ text: line, color: getOutputColor(baseType) }];
+  }
+  
+  // For value responses (single values like "TRHS-pi" or "1.2")
+  if (baseType === 'value') {
+    return [{ text: line, color: getOutputColor('value') }];
+  }
+  
+  // Check for key: value patterns
+  const kvMatch = line.match(/^([\w\s.]+):\s*(.+)$/);
+  if (kvMatch) {
+    const [, key, value] = kvMatch;
+    return [
+      { text: `${key}: `, color: 'text-text-muted' },
+      { text: value, color: 'text-accent-primary font-semibold' },
+    ];
+  }
+  
+  // Check for "OK" success indicators
+  if (line.startsWith('OK')) {
+    return [{ text: line, color: getOutputColor('success') }];
+  }
+  
+  // Default
+  return [{ text: line, color: getOutputColor(baseType) }];
+}
 
 /** Status table for parsed status responses */
 const StatusTable = memo(function StatusTable({ items, nodeName }: { items: StatusItem[]; nodeName: string }) {
@@ -236,31 +283,32 @@ const CommandRow = memo(function CommandRow({ entry, nodeName }: { entry: Comman
     : null;
   
   return (
-    <div className="mb-4">
-      {/* Command line - macOS Tahoe style: bold prompt */}
+    <div className="py-2 border-b border-white/5 last:border-b-0">
+      {/* Command line */}
       <div className="flex items-center gap-2">
-        <span className="text-accent-primary font-bold">
-          {nodeName}@repeater:~$
-        </span>
-        <span className="text-text-primary font-medium">{entry.cmd}</span>
+        <span className="text-text-muted font-medium select-none">$</span>
+        <span className="text-text-primary font-semibold">{entry.cmd}</span>
       </div>
       
-      {/* Output - indented with pipe character like real shell */}
+      {/* Output */}
       {entry.isProcessing ? (
-        <div className="mt-0.5 text-text-muted flex items-center gap-1 pl-4">
-          <span className="text-text-muted">│</span>
-          <span>processing...</span>
+        <div className="mt-1 ml-4 text-text-muted italic">
+          processing...
         </div>
       ) : statusItems ? (
         <StatusTable items={statusItems} nodeName={nodeName} />
       ) : entry.result ? (
-        <div className="mt-0.5 text-text-secondary whitespace-pre-wrap pl-4">
-          {entry.result.split('\n').map((line, i) => (
-            <div key={i} className="flex">
-              <span className="text-text-muted mr-2 select-none">│</span>
-              <span className="font-medium">{line}</span>
-            </div>
-          ))}
+        <div className="mt-1 ml-4 font-mono text-[13px]">
+          {entry.result.split('\n').map((line, i) => {
+            const segments = colorizeLine(line, entry.outputType);
+            return (
+              <div key={i} className="leading-relaxed">
+                {segments.map((seg, j) => (
+                  <span key={j} className={seg.color}>{seg.text}</span>
+                ))}
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -487,6 +535,7 @@ export default function Terminal() {
         id: generateId(),
         cmd: trimmedCmd,
         result: `Available commands:\n\n${helpText}\n\nNote: Commands use existing API endpoints. Some MeshCore CLI\ncommands are not available via HTTP.`,
+        outputType: 'info',
         isProcessing: false,
         timestamp: Date.now(),
       };
@@ -496,19 +545,21 @@ export default function Terminal() {
     
     // Create entry with processing state
     const entryId = generateId();
+    let outputType: OutputType = 'default';
     const entry: CommandEntry = {
       id: entryId,
       cmd: trimmedCmd,
       result: null,
+      outputType: 'default',
       isProcessing: true,
       timestamp: Date.now(),
     };
     setCommandHistory(prev => [...prev, entry]);
     
-    // Helper to update result
-    const setResult = (result: string) => {
+    // Helper to update result with type
+    const setResult = (result: string, type: OutputType = outputType) => {
       setCommandHistory(prev => 
-        prev.map(e => e.id === entryId ? { ...e, isProcessing: false, result } : e)
+        prev.map(e => e.id === entryId ? { ...e, isProcessing: false, result, outputType: type } : e)
       );
     };
     
@@ -537,7 +588,8 @@ export default function Terminal() {
         const uptime = formatUptime(freshStats.uptime_seconds || 0);
         setResult(
           `Mode: ${mode} | Duty Cycle: ${dutyCycle}\n` +
-          `Neighbors: ${neighbors} | Uptime: ${uptime}`
+          `Neighbors: ${neighbors} | Uptime: ${uptime}`,
+          'info'
         );
         return;
       }
@@ -545,18 +597,18 @@ export default function Terminal() {
       if (lowerCmd === 'ver' || lowerCmd === 'version') {
         const ver = freshStats.version || 'unknown';
         const coreVer = freshStats.core_version || 'unknown';
-        setResult(`pyMC Repeater v${ver}\npyMC Core v${coreVer}`);
+        setResult(`pyMC Repeater v${ver}\npyMC Core v${coreVer}`, 'info');
         return;
       }
       
       if (lowerCmd === 'clock') {
         const now = new Date();
-        setResult(now.toLocaleString());
+        setResult(now.toLocaleString(), 'value');
         return;
       }
       
       if (lowerCmd === 'uptime') {
-        setResult(formatUptime(freshStats.uptime_seconds || 0));
+        setResult(formatUptime(freshStats.uptime_seconds || 0), 'value');
         return;
       }
       
@@ -564,7 +616,7 @@ export default function Terminal() {
         const neighbors = freshStats.neighbors || {};
         const entries = Object.entries(neighbors);
         if (entries.length === 0) {
-          setResult('No neighbors discovered yet.');
+          setResult('No neighbors discovered yet.', 'warning');
         } else {
           const lines = entries.map(([hash, info]) => {
             const name = info.name || info.node_name || 'Unknown';
@@ -572,15 +624,15 @@ export default function Terminal() {
             const snr = info.snr != null ? `${info.snr}dB` : '?';
             return `  ${hash.slice(0, 8)}  ${name.padEnd(16)} RSSI:${rssi.padStart(6)} SNR:${snr.padStart(5)}`;
           });
-          setResult(`Neighbors (${entries.length}):\n${lines.join('\n')}`);
+          setResult(`Neighbors (${entries.length}):\n${lines.join('\n')}`, 'info');
         }
         return;
       }
       
       if (lowerCmd === 'packets') {
         setResult(
-          `Packets RX: ${freshStats.rx_count ?? '?'} | TX: ${freshStats.tx_count ?? '?'}\n` +
-          `Forwarded: ${freshStats.forwarded_count ?? '?'} | Dropped: ${freshStats.dropped_count ?? '?'}`
+          `rx: ${freshStats.rx_count ?? '?'}\ntx: ${freshStats.tx_count ?? '?'}\nfwd: ${freshStats.forwarded_count ?? '?'}\ndrop: ${freshStats.dropped_count ?? '?'}`,
+          'info'
         );
         return;
       }
@@ -598,97 +650,97 @@ export default function Terminal() {
         switch (param) {
           // Identity
           case 'name':
-            setResult(freshStats.config?.node_name || 'Unknown');
+            setResult(freshStats.config?.node_name || 'Unknown', 'value');
             return;
           case 'public.key':
-            setResult(freshStats.public_key || 'Not available');
+            setResult(freshStats.public_key || 'Not available', 'value');
             return;
           case 'role':
-            setResult('repeater');
+            setResult('repeater', 'value');
             return;
             
           // Radio params (MeshCore format: freq,bw,sf,cr)
           case 'radio': {
-            if (!radio) { setResult('Radio config not available'); return; }
+            if (!radio) { setResult('Radio config not available', 'warning'); return; }
             const freq = radio.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?';
             const bw = radio.bandwidth ? (radio.bandwidth / 1000) : '?';
-            setResult(`${freq},${bw},${radio.spreading_factor || '?'},${radio.coding_rate || '?'}`);
+            setResult(`${freq},${bw},${radio.spreading_factor || '?'},${radio.coding_rate || '?'}`, 'value');
             return;
           }
           case 'freq':
-            setResult(radio?.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?');
+            setResult(radio?.frequency ? (radio.frequency / 1_000_000).toFixed(3) : '?', 'value');
             return;
           case 'tx':
-            setResult(String(radio?.tx_power ?? '?'));
+            setResult(String(radio?.tx_power ?? '?'), 'value');
             return;
             
           // Timing
           case 'af':
-            setResult(String(delays?.tx_delay_factor ?? '1.0'));
+            setResult(String(delays?.tx_delay_factor ?? '1.0'), 'value');
             return;
           case 'rxdelay':
-            setResult('0');  // Not exposed in pyMC config
+            setResult('0', 'value');  // Not exposed in pyMC config
             return;
           case 'txdelay':
-            setResult(String(delays?.tx_delay_factor ?? '1.0'));
+            setResult(String(delays?.tx_delay_factor ?? '1.0'), 'value');
             return;
           case 'direct.txdelay':
-            setResult(String(delays?.direct_tx_delay_factor ?? '0.5'));
+            setResult(String(delays?.direct_tx_delay_factor ?? '0.5'), 'value');
             return;
             
           // Repeater settings
           case 'repeat':
-            setResult(repeater?.mode === 'forward' ? 'on' : 'off');
+            setResult(repeater?.mode === 'forward' ? 'on' : 'off', 'value');
             return;
           case 'lat':
-            setResult(String(repeater?.latitude ?? '0'));
+            setResult(String(repeater?.latitude ?? '0'), 'value');
             return;
           case 'lon':
-            setResult(String(repeater?.longitude ?? '0'));
+            setResult(String(repeater?.longitude ?? '0'), 'value');
             return;
             
           // Intervals
           case 'advert.interval':
-            setResult(String((repeater?.send_advert_interval_hours ?? 2) * 60));
+            setResult(String((repeater?.send_advert_interval_hours ?? 2) * 60), 'value');
             return;
           case 'flood.advert.interval':
-            setResult(String(repeater?.send_advert_interval_hours ?? 24));
+            setResult(String(repeater?.send_advert_interval_hours ?? 24), 'value');
             return;
           case 'flood.max':
-            setResult('3');  // Default, not exposed in config
+            setResult('3', 'value');  // Default, not exposed in config
             return;
           case 'agc.reset.interval':
-            setResult('0');  // Not implemented in pyMC
+            setResult('0', 'value');  // Not implemented in pyMC
             return;
             
           // Security
           case 'allow.read.only':
-            setResult('off');  // Not exposed
+            setResult('off', 'value');  // Not exposed
             return;
           case 'guest.password':
-            setResult('(not exposed via HTTP)');
+            setResult('(not exposed via HTTP)', 'warning');
             return;
           case 'multi.acks':
-            setResult('0');
+            setResult('0', 'value');
             return;
           case 'int.thresh':
-            setResult('0');
+            setResult('0', 'value');
             return;
             
           // Mode (custom for pyMC)
           case 'mode':
-            setResult(repeater?.mode || 'forward');
+            setResult(repeater?.mode || 'forward', 'value');
             return;
             
           default:
-            setResult(`Unknown parameter: ${param}`);
+            setResult(`Unknown parameter: ${param}`, 'error');
             return;
         }
       }
       
       // board command (MeshCore parity)
       if (lowerCmd === 'board') {
-        setResult('pyMC_Repeater (Linux/RPi)');
+        setResult('pyMC_Repeater (Linux/RPi)', 'value');
         return;
       }
       
@@ -701,13 +753,14 @@ export default function Terminal() {
               `rx: ${freshStats.rx_count ?? 0}\n` +
               `tx: ${freshStats.tx_count ?? 0}\n` +
               `fwd: ${freshStats.forwarded_count ?? 0}\n` +
-              `drop: ${freshStats.dropped_count ?? 0}`
+              `drop: ${freshStats.dropped_count ?? 0}`,
+              'info'
             );
           } else {
-            setResult(`rx: ${freshStats.rx_count ?? 0}, tx: ${freshStats.tx_count ?? 0}`);
+            setResult(`rx: ${freshStats.rx_count ?? 0}, tx: ${freshStats.tx_count ?? 0}`, 'info');
           }
         } catch {
-          setResult(`rx: ${freshStats.rx_count ?? 0}, tx: ${freshStats.tx_count ?? 0}`);
+          setResult(`rx: ${freshStats.rx_count ?? 0}, tx: ${freshStats.tx_count ?? 0}`, 'info');
         }
         return;
       }
@@ -721,7 +774,8 @@ export default function Terminal() {
           `sf: ${radio?.spreading_factor ?? '?'}\n` +
           `cr: ${radio?.coding_rate ?? '?'}\n` +
           `tx_pwr: ${radio?.tx_power ?? '?'} dBm\n` +
-          `noise: ${freshStats.noise_floor_dbm ?? '?'} dBm`
+          `noise: ${freshStats.noise_floor_dbm ?? '?'} dBm`,
+          'info'
         );
         return;
       }
@@ -733,14 +787,15 @@ export default function Terminal() {
           `rx/hr: ${freshStats.rx_per_hour?.toFixed(1) ?? '?'}\n` +
           `fwd/hr: ${freshStats.forwarded_per_hour?.toFixed(1) ?? '?'}\n` +
           `neighbors: ${Object.keys(freshStats.neighbors || {}).length}\n` +
-          `airtime: ${freshStats.utilization_percent?.toFixed(1) ?? '?'}%`
+          `airtime: ${freshStats.utilization_percent?.toFixed(1) ?? '?'}%`,
+          'info'
         );
         return;
       }
       
       // clear stats
       if (lowerCmd === 'clear stats') {
-        setResult('Error: Not implemented in pyMC_Repeater');
+        setResult('Error: Not implemented in pyMC_Repeater', 'error');
         return;
       }
       
@@ -749,7 +804,7 @@ export default function Terminal() {
       if (lowerCmd.startsWith('tempradio ')) {
         const parts = lowerCmd.split(/\s+/);
         if (parts.length < 5) {
-          setResult('Usage: tempradio <freq_mhz> <bw_khz> <sf> <cr>\nExample: tempradio 906.875 250 10 5');
+          setResult('Usage: tempradio <freq_mhz> <bw_khz> <sf> <cr>\nExample: tempradio 906.875 250 10 5', 'warning');
           return;
         }
         const freq = parseFloat(parts[1]);
@@ -758,19 +813,19 @@ export default function Terminal() {
         const cr = parseInt(parts[4]);
         
         if (isNaN(freq) || freq < 100 || freq > 1000) {
-          setResult('Error: Frequency must be in MHz (e.g., 906.875)');
+          setResult('Error: Frequency must be in MHz (e.g., 906.875)', 'error');
           return;
         }
         if (![125, 250, 500].includes(bw)) {
-          setResult('Error: Bandwidth must be 125, 250, or 500 kHz');
+          setResult('Error: Bandwidth must be 125, 250, or 500 kHz', 'error');
           return;
         }
         if (isNaN(sf) || sf < 5 || sf > 12) {
-          setResult('Error: Spreading factor must be 5-12');
+          setResult('Error: Spreading factor must be 5-12', 'error');
           return;
         }
         if (isNaN(cr) || cr < 5 || cr > 8) {
-          setResult('Error: Coding rate must be 5-8');
+          setResult('Error: Coding rate must be 5-8', 'error');
           return;
         }
         
@@ -781,28 +836,28 @@ export default function Terminal() {
           coding_rate: cr,
         });
         if (response.success) {
-          setResult(`OK - Radio: ${freq}MHz, ${bw}kHz, SF${sf}, CR4/${cr}\nNote: Changes persist. Restart service to revert.`);
+          setResult(`OK - Radio: ${freq}MHz, ${bw}kHz, SF${sf}, CR4/${cr}\nNote: Changes persist. Restart service to revert.`, 'success');
         } else {
-          setResult(`Error: ${response.error || 'Failed to update radio config'}`);
+          setResult(`Error: ${response.error || 'Failed to update radio config'}`, 'error');
         }
         return;
       }
       
       // neighbor.remove
       if (lowerCmd.startsWith('neighbor.remove ')) {
-        setResult('Error: neighbor.remove not implemented via HTTP');
+        setResult('Error: neighbor.remove not implemented via HTTP', 'error');
         return;
       }
       
       // password
       if (lowerCmd.startsWith('password ')) {
-        setResult('Error: Use config.yaml to change password');
+        setResult('Error: Use config.yaml to change password', 'error');
         return;
       }
       
       // log commands
       if (lowerCmd === 'log start' || lowerCmd === 'log stop' || lowerCmd === 'log erase') {
-        setResult('Error: Log commands not implemented via HTTP');
+        setResult('Error: Log commands not implemented via HTTP', 'error');
         return;
       }
       
@@ -812,18 +867,18 @@ export default function Terminal() {
       
       if (lowerCmd === 'advert') {
         const response = await sendAdvert();
-        setResult(response.success ? 'OK - Advert sent' : `Error: ${response.error || 'Failed'}`);
+        setResult(response.success ? 'OK - Advert sent' : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
         return;
       }
       
       if (lowerCmd.startsWith('set mode ')) {
         const mode = lowerCmd.split(' ')[2];
         if (mode !== 'forward' && mode !== 'monitor') {
-          setResult('Error: Mode must be "forward" or "monitor"');
+          setResult('Error: Mode must be "forward" or "monitor"', 'error');
           return;
         }
         const response = await setMode(mode as 'forward' | 'monitor');
-        setResult(response.success ? `OK - Mode set to ${mode}` : 'Error: Failed to set mode');
+        setResult(response.success ? `OK - Mode set to ${mode}` : 'Error: Failed to set mode', response.success ? 'success' : 'error');
         return;
       }
       
@@ -831,62 +886,62 @@ export default function Terminal() {
         const val = lowerCmd.split(' ')[2];
         const enabled = val === 'on' || val === '1' || val === 'true';
         const response = await setDutyCycle(enabled);
-        setResult(response.success ? `OK - Duty cycle ${enabled ? 'enabled' : 'disabled'}` : 'Error: Failed to set duty cycle');
+        setResult(response.success ? `OK - Duty cycle ${enabled ? 'enabled' : 'disabled'}` : 'Error: Failed to set duty cycle', response.success ? 'success' : 'error');
         return;
       }
       
       if (lowerCmd.startsWith('set log ')) {
         const level = lowerCmd.split(' ')[2]?.toUpperCase();
         if (!['DEBUG', 'INFO', 'WARNING', 'ERROR'].includes(level)) {
-          setResult('Error: Level must be debug, info, warning, or error');
+          setResult('Error: Level must be debug, info, warning, or error', 'error');
           return;
         }
         const response = await setLogLevel(level as LogLevel);
-        setResult(response.success ? `OK - Log level set to ${level}. Service restarting...` : `Error: ${response.error || 'Failed'}`);
+        setResult(response.success ? `OK - Log level set to ${level}. Service restarting...` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
         return;
       }
       
       if (lowerCmd.startsWith('set tx ')) {
         const power = parseInt(lowerCmd.split(' ')[2]);
         if (isNaN(power) || power < 2 || power > 22) {
-          setResult('Error: TX power must be 2-22 dBm');
+          setResult('Error: TX power must be 2-22 dBm', 'error');
           return;
         }
         const response = await updateRadioConfig({ tx_power: power });
-        setResult(response.success ? `OK - TX power set to ${power}dBm. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        setResult(response.success ? `OK - TX power set to ${power}dBm. Restart service to apply.` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
         return;
       }
       
       if (lowerCmd.startsWith('set freq ')) {
         const freq = parseFloat(lowerCmd.split(' ')[2]);
         if (isNaN(freq) || freq < 100 || freq > 1000) {
-          setResult('Error: Frequency must be in MHz (e.g., 906.875)');
+          setResult('Error: Frequency must be in MHz (e.g., 906.875)', 'error');
           return;
         }
         const response = await updateRadioConfig({ frequency_mhz: freq });
-        setResult(response.success ? `OK - Frequency set to ${freq}MHz. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        setResult(response.success ? `OK - Frequency set to ${freq}MHz. Restart service to apply.` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
         return;
       }
       
       if (lowerCmd.startsWith('set sf ')) {
         const sf = parseInt(lowerCmd.split(' ')[2]);
         if (isNaN(sf) || sf < 5 || sf > 12) {
-          setResult('Error: Spreading factor must be 5-12');
+          setResult('Error: Spreading factor must be 5-12', 'error');
           return;
         }
         const response = await updateRadioConfig({ spreading_factor: sf });
-        setResult(response.success ? `OK - SF set to ${sf}. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        setResult(response.success ? `OK - SF set to ${sf}. Restart service to apply.` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
         return;
       }
       
       if (lowerCmd.startsWith('set bw ')) {
         const bw = parseInt(lowerCmd.split(' ')[2]);
         if (![125, 250, 500].includes(bw)) {
-          setResult('Error: Bandwidth must be 125, 250, or 500 kHz');
+          setResult('Error: Bandwidth must be 125, 250, or 500 kHz', 'error');
           return;
         }
         const response = await updateRadioConfig({ bandwidth_khz: bw });
-        setResult(response.success ? `OK - Bandwidth set to ${bw}kHz. Restart service to apply.` : `Error: ${response.error || 'Failed'}`);
+        setResult(response.success ? `OK - Bandwidth set to ${bw}kHz. Restart service to apply.` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
         return;
       }
       
@@ -894,10 +949,10 @@ export default function Terminal() {
       // UNKNOWN COMMAND
       // ═══════════════════════════════════════════════════════════════════════
       
-      setResult(`Unknown command: ${trimmedCmd}\nType 'help' for available commands.`);
+      setResult(`Unknown command: ${trimmedCmd}\nType 'help' for available commands.`, 'error');
       
     } catch (error) {
-      setResult(`Error: ${error instanceof Error ? error.message : 'Command failed'}`);
+      setResult(`Error: ${error instanceof Error ? error.message : 'Command failed'}`, 'error');
     }
   }, []);
   
@@ -977,157 +1032,138 @@ export default function Terminal() {
         <h1 className="text-xl font-semibold text-text-primary">Terminal</h1>
       </div>
       
-      {/* Terminal Card - Full height */}
+      {/* Terminal Card - Full height with bottom input */}
       <div 
         className="glass-card overflow-hidden flex flex-col"
         style={{ height: 'calc(100vh - 180px)', minHeight: '400px' }}
         onClick={focusInput}
       >
-        {/* Terminal Body - macOS Tahoe style */}
+        {/* Terminal History - scrolls up (flex-col-reverse), newest at bottom */}
         <div 
           ref={logRef}
-          className="flex-1 p-4 sm:p-6 overflow-y-auto font-mono text-sm leading-tight bg-black/40"
+          className="flex-1 flex flex-col-reverse overflow-y-auto font-mono text-sm bg-black/40"
         >
-          {/* ASCII Header */}
-          <pre className="text-accent-primary text-[0.5rem] sm:text-[0.6rem] lg:text-xs leading-none mb-6 overflow-x-auto">
-            {ASCII_HEADER}
-          </pre>
-          
-          {/* Loading Sequence */}
-          {connectionState !== 'connected' && (
-            <div className="mb-6">
-              <LoadingLine 
-                text="Initializing terminal..." 
-                status={loadingStep >= 1 ? (loadingStep === 1 ? 'active' : 'done') : 'pending'} 
-              />
-              <LoadingLine 
-                text="Checking repeater connection..." 
-                status={loadingStep >= 2 ? (loadingStep === 2 ? 'active' : 'done') : 'pending'} 
-              />
-              <LoadingLine 
-                text={connectionState === 'error' ? 'Connection failed' : 'Connection established'} 
-                status={loadingStep >= 3 ? (connectionState === 'error' ? 'error' : 'done') : 'pending'} 
-              />
-            </div>
-          )}
-          
-          {/* Welcome message after connected */}
-          {connectionState === 'connected' && commandHistory.length === 0 && (
-            <div className="mb-4">
-              <p className="text-accent-success mb-1">
-                Connected to {nodeName}
-              </p>
-              <p className="text-text-muted">
-                Type 'help' for available commands.
-              </p>
-            </div>
-          )}
-          
-          {/* Command History */}
-          {commandHistory.map(entry => (
-            <CommandRow key={entry.id} entry={entry} nodeName={nodeName} />
-          ))}
-          
-          {/* Current Input Line - macOS Tahoe style */}
-          {connectionState === 'connected' && (
-            <div className="relative">
-              <div className="flex items-center gap-2">
-                <span className="text-accent-primary font-bold">
-                  {nodeName}@repeater:~$
-                </span>
-                <span className="text-text-primary font-medium">{currentInput}</span>
-                <Cursor visible={cursorVisible} />
+          {/* Scrollable content wrapper */}
+          <div className="p-4 sm:p-5">
+            {/* Loading Sequence */}
+            {connectionState !== 'connected' && (
+              <div className="mb-6">
+                <pre className="text-accent-primary text-[0.5rem] sm:text-[0.6rem] lg:text-xs leading-none mb-6 overflow-x-auto">
+                  {ASCII_HEADER}
+                </pre>
+                <LoadingLine 
+                  text="Initializing terminal..." 
+                  status={loadingStep >= 1 ? (loadingStep === 1 ? 'active' : 'done') : 'pending'} 
+                />
+                <LoadingLine 
+                  text="Checking repeater connection..." 
+                  status={loadingStep >= 2 ? (loadingStep === 2 ? 'active' : 'done') : 'pending'} 
+                />
+                <LoadingLine 
+                  text={connectionState === 'error' ? 'Connection failed' : 'Connection established'} 
+                  status={loadingStep >= 3 ? (connectionState === 'error' ? 'error' : 'done') : 'pending'} 
+                />
               </div>
-              
-              {/* Autocomplete Dropdown */}
-              {showAutocomplete && autocompleteOptions.length > 0 && (
-                <div className="absolute left-0 bottom-full mb-2 w-full max-w-lg bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-10">
-                  <div className="px-3 py-2 bg-bg-subtle border-b border-border-subtle flex justify-between items-center">
-                    <span className="text-xs font-semibold text-accent-primary uppercase tracking-wide">Available Commands</span>
-                    <span className="text-xs text-text-muted">↑↓ Navigate • Tab Select • Esc Close</span>
-                  </div>
-                  <div className="max-h-64 overflow-y-auto">
-                    {autocompleteOptions.map((option, index) => (
-                      <div
-                        key={option.cmd}
-                        onClick={() => selectAutocompleteOption(index)}
-                        className={clsx(
-                          'px-3 py-2 cursor-pointer border-b border-border-subtle last:border-b-0 transition-colors',
-                          index === selectedOptionIndex
-                            ? 'bg-accent-primary text-white'
-                            : 'hover:bg-bg-subtle'
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={clsx(
-                            'font-mono text-sm font-semibold',
-                            index === selectedOptionIndex ? 'text-white' : 'text-text-primary'
-                          )}>
-                            {option.cmd}
-                          </span>
-                          {option.params && (
-                            <span className={clsx(
-                              'text-xs px-1.5 py-0.5 rounded border',
-                              index === selectedOptionIndex
-                                ? 'bg-white/20 border-white/30 text-white/90'
-                                : 'bg-accent-primary/10 border-accent-primary/30 text-accent-primary'
-                            )}>
-                              {option.params}
-                            </span>
-                          )}
-                          {option.required && (
-                            <span className={clsx(
-                              'text-[10px] px-1 py-0.5 rounded uppercase font-semibold',
-                              index === selectedOptionIndex
-                                ? 'bg-amber-400/30 text-amber-200'
-                                : 'bg-amber-500/20 text-amber-400'
-                            )}>
-                              Required
-                            </span>
-                          )}
-                        </div>
-                        <p className={clsx(
-                          'text-xs mt-0.5',
-                          index === selectedOptionIndex ? 'text-white/80' : 'text-text-muted'
-                        )}>
-                          {option.desc}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        
-        {/* Hidden input for capturing keystrokes */}
-        {connectionState === 'connected' && (
-          <input
-            ref={inputRef}
-            type="text"
-            value={currentInput}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            className="sr-only"
-            aria-label="Terminal input"
-            autoFocus
-          />
-        )}
-        
-        {/* Bottom bar with hint */}
-        <div className="px-4 py-2 border-t border-white/5 bg-black/20">
-          <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>
-              {connectionState === 'connected' 
-                ? 'Click anywhere to type • ↑↓ for history'
-                : 'Connecting...'}
-            </span>
-            {stats?.version && (
-              <span>pyMC v{stats.version}</span>
             )}
+            
+            {/* Welcome message after connected, only when no history */}
+            {connectionState === 'connected' && commandHistory.length === 0 && (
+              <div className="text-center py-8">
+                <pre className="text-accent-primary/60 text-[0.45rem] sm:text-[0.5rem] lg:text-[0.55rem] leading-none mb-4 overflow-x-auto inline-block">
+                  {ASCII_HEADER}
+                </pre>
+                <p className="text-text-muted text-sm">
+                  Type a command below or 'help' for available commands
+                </p>
+              </div>
+            )}
+            
+            {/* Command History - rendered in normal order, container reverses */}
+            {commandHistory.map(entry => (
+              <CommandRow key={entry.id} entry={entry} nodeName={nodeName} />
+            ))}
           </div>
         </div>
+        
+        {/* Bottom Input Bar */}
+        {connectionState === 'connected' && (
+          <div className="relative border-t border-white/10 bg-black/50">
+            {/* Autocomplete Shelf - pops UP from input */}
+            {showAutocomplete && autocompleteOptions.length > 0 && (
+              <div className="absolute left-0 right-0 bottom-full bg-bg-elevated border-t border-x border-border-subtle rounded-t-lg shadow-2xl overflow-hidden z-10 mx-2 mb-0">
+                <div className="max-h-64 overflow-y-auto">
+                  {autocompleteOptions.map((option, index) => (
+                    <div
+                      key={option.cmd}
+                      onClick={() => selectAutocompleteOption(index)}
+                      className={clsx(
+                        'px-4 py-2.5 cursor-pointer border-b border-border-subtle/50 last:border-b-0 transition-colors',
+                        index === selectedOptionIndex
+                          ? 'bg-accent-primary/20'
+                          : 'hover:bg-white/5'
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={clsx(
+                          'font-mono text-sm font-semibold',
+                          index === selectedOptionIndex ? 'text-accent-primary' : 'text-text-primary'
+                        )}>
+                          {option.cmd}
+                        </span>
+                        {option.params && (
+                          <span className="text-xs text-text-muted font-mono">
+                            {option.params}
+                          </span>
+                        )}
+                        <span className="flex-1" />
+                        <span className="text-xs text-text-muted truncate max-w-[200px]">
+                          {option.desc}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-3 py-1.5 bg-bg-subtle border-t border-border-subtle flex justify-end">
+                  <span className="text-[10px] text-text-muted">↑↓ Navigate • Tab Select • Enter Run</span>
+                </div>
+              </div>
+            )}
+            
+            {/* Input Field */}
+            <div className="flex items-center gap-3 px-4 py-3">
+              <span className="text-text-muted font-mono font-bold select-none">$</span>
+              <input
+                ref={inputRef}
+                type="text"
+                value={currentInput}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Enter command..."
+                className="flex-1 bg-transparent text-text-primary font-mono text-sm outline-none placeholder:text-text-muted/50"
+                aria-label="Terminal input"
+                autoFocus
+              />
+              <Cursor visible={cursorVisible} />
+            </div>
+            
+            {/* Hints bar */}
+            <div className="px-4 py-1.5 border-t border-white/5 bg-black/30">
+              <div className="flex items-center justify-between text-[10px] text-text-muted">
+                <span>↑↓ History</span>
+                {stats?.version && (
+                  <span className="text-text-muted/60">pyMC v{stats.version}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Connecting state bottom bar */}
+        {connectionState !== 'connected' && (
+          <div className="px-4 py-3 border-t border-white/5 bg-black/30">
+            <span className="text-xs text-text-muted">Connecting...</span>
+          </div>
+        )}
       </div>
     </div>
   );
