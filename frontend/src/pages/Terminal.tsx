@@ -412,6 +412,7 @@ export default function Terminal() {
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const autocompleteRef = useRef<HTMLDivElement>(null);
   const cursorIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // ─────────────────────────────────────────────────────────────────────────────
@@ -522,7 +523,7 @@ export default function Terminal() {
     }
     
     if (matches.length > 0) {
-      setAutocompleteOptions(matches.slice(0, 8));
+      setAutocompleteOptions(matches);  // Show all matches - container scrolls
       setSelectedOptionIndex(0);
       setShowAutocomplete(true);
     } else {
@@ -1027,11 +1028,21 @@ export default function Terminal() {
     if (showAutocomplete && autocompleteOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedOptionIndex(i => Math.min(i + 1, autocompleteOptions.length - 1));
+        const newIndex = Math.min(selectedOptionIndex + 1, autocompleteOptions.length - 1);
+        setSelectedOptionIndex(newIndex);
+        // Scroll into view
+        const container = autocompleteRef.current;
+        const item = container?.children[0]?.children[newIndex] as HTMLElement | undefined;
+        item?.scrollIntoView({ block: 'nearest' });
         return;
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedOptionIndex(i => Math.max(i - 1, 0));
+        const newIndex = Math.max(selectedOptionIndex - 1, 0);
+        setSelectedOptionIndex(newIndex);
+        // Scroll into view
+        const container = autocompleteRef.current;
+        const item = container?.children[0]?.children[newIndex] as HTMLElement | undefined;
+        item?.scrollIntoView({ block: 'nearest' });
         return;
       } else if (e.key === 'Tab') {
         e.preventDefault();
@@ -1152,7 +1163,7 @@ export default function Terminal() {
           <div className="relative border-t border-white/10 bg-black/50">
             {/* Autocomplete Shelf - pops UP from input */}
             {showAutocomplete && autocompleteOptions.length > 0 && (
-              <div className="absolute left-0 right-0 bottom-full bg-bg-elevated border-t border-x border-border-subtle rounded-t-lg shadow-2xl overflow-hidden z-10 mx-2 mb-0">
+              <div ref={autocompleteRef} className="absolute left-0 right-0 bottom-full bg-bg-elevated border-t border-x border-border-subtle rounded-t-lg shadow-2xl overflow-hidden z-10 mx-2 mb-0">
                 <div className="max-h-64 overflow-y-auto">
                   {autocompleteOptions.map((option, index) => (
                     <div
