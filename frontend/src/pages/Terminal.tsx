@@ -463,36 +463,45 @@ export default function Terminal() {
       return;
     }
     
-    const hasSpace = trimmed.includes(' ');
     let matches: CommandDef[] = [];
     
-    if (hasSpace) {
-      // Check for parameter suggestions
-      const parts = trimmed.split(' ');
-      const baseCommand = parts.slice(0, -1).join(' ');
-      const paramValue = parts[parts.length - 1];
+    // First, always check for commands that START with the input
+    // This handles multi-word commands like "set bw", "set bridge.channel"
+    const commandMatches = AVAILABLE_COMMANDS.filter(
+      c => c.cmd.toLowerCase().startsWith(trimmed)
+    );
+    
+    // If we have command matches, use those
+    if (commandMatches.length > 0) {
+      matches = commandMatches;
+    } else if (trimmed.includes(' ')) {
+      // No command matches - check for parameter suggestions
+      // Find the longest matching command prefix
+      const words = trimmed.split(' ');
       
-      const commandDef = AVAILABLE_COMMANDS.find(
-        c => c.cmd.toLowerCase() === baseCommand
-      );
-      
-      if (commandDef && PARAM_SUGGESTIONS[commandDef.cmd]) {
-        matches = PARAM_SUGGESTIONS[commandDef.cmd]
-          .filter(p => p.toLowerCase().startsWith(paramValue))
-          .map(p => ({
-            cmd: `${commandDef.cmd} ${p}`,
-            desc: `${commandDef.desc} → ${p}`,
-          }));
+      // Try progressively shorter prefixes to find a command match
+      for (let i = words.length - 1; i >= 1; i--) {
+        const baseCommand = words.slice(0, i).join(' ');
+        const paramValue = words.slice(i).join(' ');
+        
+        const commandDef = AVAILABLE_COMMANDS.find(
+          c => c.cmd.toLowerCase() === baseCommand
+        );
+        
+        if (commandDef && PARAM_SUGGESTIONS[commandDef.cmd]) {
+          matches = PARAM_SUGGESTIONS[commandDef.cmd]
+            .filter(p => p.toLowerCase().startsWith(paramValue))
+            .map(p => ({
+              cmd: `${commandDef.cmd} ${p}`,
+              desc: `${commandDef.desc} → ${p}`,
+            }));
+          break;
+        }
       }
-    } else {
-      // Command matching
-      matches = AVAILABLE_COMMANDS.filter(
-        c => c.cmd.toLowerCase().startsWith(trimmed)
-      );
     }
     
     if (matches.length > 0) {
-      setAutocompleteOptions(matches);  // Show all matches - container scrolls
+      setAutocompleteOptions(matches);
       setSelectedOptionIndex(0);
       setShowAutocomplete(true);
     } else {
@@ -1168,21 +1177,39 @@ export default function Terminal() {
               </div>
             )}
             
-          {/* Input Field */}
+          {/* Input Field - uses overlay technique for block cursor */}
           <div className="flex items-center gap-3 px-4 py-3">
             <span className="text-text-muted font-mono font-bold select-none">$</span>
-            <input
-              ref={inputRef}
-              type="text"
-              value={currentInput}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder={connectionState === 'connected' ? 'Enter command...' : 'Connecting...'}
-              disabled={connectionState !== 'connected'}
-              className="flex-1 bg-transparent text-text-primary font-mono text-sm outline-none placeholder:text-text-muted/50 disabled:opacity-50"
-              aria-label="Terminal input"
-              autoFocus
-            />
+            <div className="flex-1 relative">
+              {/* Hidden input for actual typing */}
+              <input
+                ref={inputRef}
+                type="text"
+                value={currentInput}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder={connectionState === 'connected' ? 'Enter command...' : 'Connecting...'}
+                disabled={connectionState !== 'connected'}
+                className="w-full bg-transparent text-transparent font-mono text-sm outline-none disabled:opacity-50 absolute inset-0"
+                style={{ caretColor: 'transparent' }}
+                aria-label="Terminal input"
+                autoFocus
+              />
+              {/* Visible text + block cursor */}
+              <div className="font-mono text-sm pointer-events-none flex items-center">
+                {currentInput ? (
+                  <span className="text-text-primary">{currentInput}</span>
+                ) : (
+                  <span className="text-text-muted/50">
+                    {connectionState === 'connected' ? 'Enter command...' : 'Connecting...'}
+                  </span>
+                )}
+                <span 
+                  className="inline-block w-2 h-[1.1em] bg-accent-primary/90 ml-px"
+                  aria-hidden="true"
+                />
+              </div>
+            </div>
           </div>
           
           {/* Hints bar */}
