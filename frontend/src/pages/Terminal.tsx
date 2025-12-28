@@ -217,6 +217,43 @@ function getOutputColor(type: OutputType): string {
 
 /** Colorize a line based on content patterns */
 function colorizeLine(line: string, baseType: OutputType): { text: string; color: string }[] {
+  // Help header
+  if (line.startsWith('HELP_HEADER:::')) {
+    return [{ text: line.slice(14), color: 'text-text-primary font-bold' }];
+  }
+  
+  // Help note (footer)
+  if (line.startsWith('HELP_NOTE:::')) {
+    return [{ text: line.slice(12), color: 'text-text-muted italic' }];
+  }
+  
+  // Help command line: cmd:::description
+  const helpMatch = line.match(/^([a-z][a-z0-9.]*(?:\s+[a-z][a-z0-9.]*)?):::(.+)$/);
+  if (helpMatch) {
+    const [, cmd, desc] = helpMatch;
+    const parts = cmd.split(' ');
+    const segments: { text: string; color: string }[] = [];
+    
+    // First word (get/set/command) - green for get, amber for set, cyan for others
+    const firstWord = parts[0];
+    let cmdColor = 'text-accent-tertiary';  // cyan default
+    if (firstWord === 'get') cmdColor = 'text-accent-success';  // green
+    else if (firstWord === 'set') cmdColor = 'text-amber-400';  // amber
+    
+    segments.push({ text: `  ${firstWord}`, color: `${cmdColor} font-semibold` });
+    
+    // Remaining parts (qualifiers like txdelay, name, etc) - purple
+    if (parts.length > 1) {
+      segments.push({ text: ` ${parts.slice(1).join(' ')}`, color: 'text-accent-primary' });
+    }
+    
+    // Pad and add description - muted
+    const padding = ' '.repeat(Math.max(1, 20 - cmd.length));
+    segments.push({ text: `${padding}${desc}`, color: 'text-text-muted' });
+    
+    return segments;
+  }
+  
   // If it's an error/warning type, color the whole line
   if (baseType === 'error' || baseType === 'warning') {
     return [{ text: line, color: getOutputColor(baseType) }];
@@ -527,15 +564,16 @@ export default function Terminal() {
     }
     
     if (lowerCmd === 'help') {
+      // Format help with markers for coloring: CMD:::description
       const helpText = AVAILABLE_COMMANDS
-        .map(c => `  ${c.cmd.padEnd(18)} ${c.desc}`)
+        .map(c => `${c.cmd}:::${c.desc}`)
         .join('\n');
       
       const entry: CommandEntry = {
         id: generateId(),
         cmd: trimmedCmd,
-        result: `Available commands:\n\n${helpText}\n\nNote: Commands use existing API endpoints. Some MeshCore CLI\ncommands are not available via HTTP.`,
-        outputType: 'info',
+        result: `HELP_HEADER:::Available commands\n${helpText}\nHELP_NOTE:::Commands use existing API endpoints. Some MeshCore CLI commands are not available via HTTP.`,
+        outputType: 'default',  // Use default so colorizeLine handles it
         isProcessing: false,
         timestamp: Date.now(),
       };
