@@ -2334,26 +2334,32 @@ patch_api_endpoints() {
         return 0
     fi
     
-    # Check if already patched with CURRENT version (includes delay settings)
-    if grep -q 'tx_delay_factor' "$api_file" 2>/dev/null; then
-        print_info "API endpoints already patched (current version)"
+    # Patch version - increment when patch content changes
+    local PATCH_VERSION="2"  # v1: radio only, v2: +delay settings
+    
+    # Check if current version is already applied
+    if grep -q "PYMC_CONSOLE_PATCH_V${PATCH_VERSION}" "$api_file" 2>/dev/null; then
+        print_info "API endpoints patch v${PATCH_VERSION} already applied"
         return 0
     fi
     
-    # If old patch exists (without delay settings), remove it first
+    # Remove any existing patch (versioned or legacy) before applying new one
     if grep -q 'def update_radio_config' "$api_file" 2>/dev/null; then
-        print_info "Upgrading API patch to include delay settings..."
-        # Remove old update_radio_config method so we can re-add the new one
+        local old_ver="legacy"
+        if grep -q 'PYMC_CONSOLE_PATCH_V' "$api_file" 2>/dev/null; then
+            old_ver=$(grep -o 'PYMC_CONSOLE_PATCH_V[0-9]*' "$api_file" | head -1 | sed 's/PYMC_CONSOLE_PATCH_V//')
+        fi
+        print_info "Upgrading API patch v${old_ver} → v${PATCH_VERSION}..."
         python3 << REMOVEPATCH
 import re
 with open("$api_file", 'r') as f:
     content = f.read()
-# Remove old update_radio_config method (from @cherrypy.expose to the next @cherrypy.expose or end of class)
-pattern = r'\n    @cherrypy\.expose\n    @cherrypy\.tools\.json_out\(\)\n    @cherrypy\.tools\.json_in\(\)\n    def update_radio_config\(self\):.*?(?=\n    @cherrypy\.expose|\nclass |\Z)'
+# Remove update_radio_config method entirely (handles both versioned and legacy)
+pattern = r'\n(    # PYMC_CONSOLE_PATCH[^\n]*\n)?    @cherrypy\.expose\n    @cherrypy\.tools\.json_out\(\)\n    @cherrypy\.tools\.json_in\(\)\n    def update_radio_config\(self\):.*?return self\._error\(str\(e\)\)'
 content = re.sub(pattern, '', content, flags=re.DOTALL)
 with open("$api_file", 'w') as f:
     f.write(content)
-print("Removed old update_radio_config patch")
+print("Removed old patch")
 REMOVEPATCH
     fi
     
@@ -2369,6 +2375,7 @@ with open(api_file, 'r') as f:
 # Add update_radio_config endpoint after save_cad_settings
 update_radio_config_code = '''
 
+    # PYMC_CONSOLE_PATCH_V2 - Radio and delay configuration API
     @cherrypy.expose
     @cherrypy.tools.json_out()
     @cherrypy.tools.json_in()
