@@ -190,19 +190,6 @@ function parseStatusResponse(result: string): StatusItem[] {
 // Components
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Blinking cursor component */
-const Cursor = memo(function Cursor({ visible }: { visible: boolean }) {
-  return (
-    <span 
-      className={clsx(
-        'inline-block w-2 h-5 bg-accent-primary ml-0.5 align-middle',
-        visible ? 'opacity-100' : 'opacity-0'
-      )}
-      aria-hidden="true"
-    />
-  );
-});
-
 /** Get color class for output type */
 function getOutputColor(type: OutputType): string {
   switch (type) {
@@ -401,7 +388,6 @@ export default function Terminal() {
   // Terminal state
   const [commandHistory, setCommandHistory] = useState<CommandEntry[]>([]);
   const [currentInput, setCurrentInput] = useState('');
-  const [cursorVisible, setCursorVisible] = useState(true);
   const [historyIndex, setHistoryIndex] = useState(-1);
   
   // Autocomplete state
@@ -413,7 +399,6 @@ export default function Terminal() {
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const autocompleteRef = useRef<HTMLDivElement>(null);
-  const cursorIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // ─────────────────────────────────────────────────────────────────────────────
   // Loading sequence (runs once on mount)
@@ -443,22 +428,6 @@ export default function Terminal() {
     };
     
     runLoadingSequence();
-  }, []);
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Cursor blinking
-  // ─────────────────────────────────────────────────────────────────────────────
-  
-  useEffect(() => {
-    cursorIntervalRef.current = setInterval(() => {
-      setCursorVisible(v => !v);
-    }, 530);
-    
-    return () => {
-      if (cursorIntervalRef.current) {
-        clearInterval(cursorIntervalRef.current);
-      }
-    };
   }, []);
   
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1111,56 +1080,53 @@ export default function Terminal() {
         style={{ height: 'calc(100vh - 180px)', minHeight: '400px' }}
         onClick={focusInput}
       >
-        {/* Terminal History - scrolls up (flex-col-reverse), newest at bottom */}
+        {/* Terminal History - flex-col-reverse keeps content bottom-aligned */}
         <div 
           ref={logRef}
           className="flex-1 flex flex-col-reverse overflow-y-auto font-mono text-sm bg-black/40"
         >
           {/* Scrollable content wrapper */}
           <div className="p-4 sm:p-5">
-            {/* Loading Sequence */}
-            {connectionState !== 'connected' && (
-              <div className="mb-6">
-                <pre className="text-accent-primary text-[0.5rem] sm:text-[0.6rem] lg:text-xs leading-none mb-6 overflow-x-auto">
-                  {ASCII_HEADER}
-                </pre>
-                <LoadingLine 
-                  text="Initializing terminal..." 
-                  status={loadingStep >= 1 ? (loadingStep === 1 ? 'active' : 'done') : 'pending'} 
-                />
-                <LoadingLine 
-                  text="Checking repeater connection..." 
-                  status={loadingStep >= 2 ? (loadingStep === 2 ? 'active' : 'done') : 'pending'} 
-                />
-                <LoadingLine 
-                  text={connectionState === 'error' ? 'Connection failed' : 'Connection established'} 
-                  status={loadingStep >= 3 ? (connectionState === 'error' ? 'error' : 'done') : 'pending'} 
-                />
-              </div>
-            )}
-            
-            {/* Welcome message after connected, only when no history */}
-            {connectionState === 'connected' && commandHistory.length === 0 && (
-              <div className="text-center py-8">
-                <pre className="text-accent-primary/60 text-[0.45rem] sm:text-[0.5rem] lg:text-[0.55rem] leading-none mb-4 overflow-x-auto inline-block">
-                  {ASCII_HEADER}
-                </pre>
-                <p className="text-text-muted text-sm">
-                  Type a command below or 'help' for available commands
-                </p>
-              </div>
-            )}
-            
-            {/* Command History - rendered in normal order, container reverses */}
+            {/* Command History */}
             {commandHistory.map(entry => (
               <CommandRow key={entry.id} entry={entry} nodeName={nodeName} />
             ))}
           </div>
         </div>
         
-        {/* Bottom Input Bar */}
-        {connectionState === 'connected' && (
-          <div className="relative border-t border-white/10 bg-black/50">
+        {/* Bottom Input Bar - always visible */}
+        <div className="relative border-t border-white/10 bg-black/50">
+          {/* Loading state - shows above input during initialization */}
+          {connectionState !== 'connected' && (
+            <div className="px-4 pt-3 pb-2 border-b border-white/5">
+              <div className="flex items-center gap-3 mb-2">
+                <pre className="text-accent-primary/50 text-[0.35rem] sm:text-[0.4rem] leading-none overflow-hidden flex-shrink-0">
+                  {ASCII_HEADER.split('\n')[0]}
+                </pre>
+              </div>
+              <div className="space-y-1">
+                <LoadingLine 
+                  text="Initializing terminal..." 
+                  status={loadingStep >= 1 ? (loadingStep === 1 ? 'active' : 'done') : 'pending'} 
+                />
+                <LoadingLine 
+                  text="Checking repeater..." 
+                  status={loadingStep >= 2 ? (loadingStep === 2 ? 'active' : 'done') : 'pending'} 
+                />
+                <LoadingLine 
+                  text={connectionState === 'error' ? 'Connection failed' : 'Connected'} 
+                  status={loadingStep >= 3 ? (connectionState === 'error' ? 'error' : 'done') : 'pending'} 
+                />
+              </div>
+            </div>
+          )}
+          
+          {/* Welcome hint when empty */}
+          {connectionState === 'connected' && commandHistory.length === 0 && (
+            <div className="px-4 py-2 border-b border-white/5 text-center">
+              <span className="text-text-muted text-xs">Type a command or 'help' to get started</span>
+            </div>
+          )}
             {/* Autocomplete Shelf - pops UP from input */}
             {showAutocomplete && autocompleteOptions.length > 0 && (
               <div ref={autocompleteRef} className="absolute left-0 right-0 bottom-full bg-bg-elevated border-t border-x border-border-subtle rounded-t-lg shadow-2xl overflow-hidden z-10 mx-2 mb-0">
@@ -1202,41 +1168,33 @@ export default function Terminal() {
               </div>
             )}
             
-            {/* Input Field */}
-            <div className="flex items-center gap-3 px-4 py-3">
-              <span className="text-text-muted font-mono font-bold select-none">$</span>
-              <input
-                ref={inputRef}
-                type="text"
-                value={currentInput}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter command..."
-                className="flex-1 bg-transparent text-text-primary font-mono text-sm outline-none placeholder:text-text-muted/50"
-                aria-label="Terminal input"
-                autoFocus
-              />
-              <Cursor visible={cursorVisible} />
-            </div>
-            
-            {/* Hints bar */}
-            <div className="px-4 py-1.5 border-t border-white/5 bg-black/30">
-              <div className="flex items-center justify-between text-[10px] text-text-muted">
-                <span>↑↓ History</span>
-                {stats?.version && (
-                  <span className="text-text-muted/60">pyMC v{stats.version}</span>
-                )}
-              </div>
+          {/* Input Field */}
+          <div className="flex items-center gap-3 px-4 py-3">
+            <span className="text-text-muted font-mono font-bold select-none">$</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={currentInput}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={connectionState === 'connected' ? 'Enter command...' : 'Connecting...'}
+              disabled={connectionState !== 'connected'}
+              className="flex-1 bg-transparent text-text-primary font-mono text-sm outline-none placeholder:text-text-muted/50 disabled:opacity-50"
+              aria-label="Terminal input"
+              autoFocus
+            />
+          </div>
+          
+          {/* Hints bar */}
+          <div className="px-4 py-1.5 border-t border-white/5 bg-black/30">
+            <div className="flex items-center justify-between text-[10px] text-text-muted">
+              <span>↑↓ History</span>
+              {stats?.version && (
+                <span className="text-text-muted/60">pyMC v{stats.version}</span>
+              )}
             </div>
           </div>
-        )}
-        
-        {/* Connecting state bottom bar */}
-        {connectionState !== 'connected' && (
-          <div className="px-4 py-3 border-t border-white/5 bg-black/30">
-            <span className="text-xs text-text-muted">Connecting...</span>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
