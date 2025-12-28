@@ -945,6 +945,30 @@ export default function Terminal() {
         return;
       }
       
+      // set txdelay / set af (they're the same thing - tx_delay_factor)
+      if (lowerCmd.startsWith('set txdelay ') || lowerCmd.startsWith('set af ')) {
+        const val = parseFloat(lowerCmd.split(' ')[2]);
+        if (isNaN(val) || val < 0 || val > 5) {
+          setResult('Error: TX delay factor must be 0.0-5.0', 'error');
+          return;
+        }
+        const response = await updateRadioConfig({ tx_delay_factor: val });
+        setResult(response.success ? `OK - TX delay set to ${val}. Restart service to apply.` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
+        return;
+      }
+      
+      // set direct.txdelay
+      if (lowerCmd.startsWith('set direct.txdelay ')) {
+        const val = parseFloat(lowerCmd.split(' ')[2]);
+        if (isNaN(val) || val < 0 || val > 5) {
+          setResult('Error: Direct TX delay factor must be 0.0-5.0', 'error');
+          return;
+        }
+        const response = await updateRadioConfig({ direct_tx_delay_factor: val });
+        setResult(response.success ? `OK - Direct TX delay set to ${val}. Restart service to apply.` : `Error: ${response.error || 'Failed'}`, response.success ? 'success' : 'error');
+        return;
+      }
+      
       // ═══════════════════════════════════════════════════════════════════════
       // UNKNOWN COMMAND
       // ═══════════════════════════════════════════════════════════════════════

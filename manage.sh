@@ -2418,6 +2418,26 @@ update_radio_config_code = '''
                 self.config["radio"]["tx_power"] = power
                 applied.append(f"power={power}dBm")
             
+            # Ensure delays config section exists
+            if "delays" not in self.config:
+                self.config["delays"] = {}
+            
+            # Update TX delay factor (af/txdelay)
+            if "tx_delay_factor" in data:
+                tdf = float(data["tx_delay_factor"])
+                if tdf < 0.0 or tdf > 5.0:
+                    return self._error("TX delay factor must be 0.0-5.0")
+                self.config["delays"]["tx_delay_factor"] = tdf
+                applied.append(f"txdelay={tdf}")
+            
+            # Update direct TX delay factor
+            if "direct_tx_delay_factor" in data:
+                dtdf = float(data["direct_tx_delay_factor"])
+                if dtdf < 0.0 or dtdf > 5.0:
+                    return self._error("Direct TX delay factor must be 0.0-5.0")
+                self.config["delays"]["direct_tx_delay_factor"] = dtdf
+                applied.append(f"direct.txdelay={dtdf}")
+            
             if not applied:
                 return self._error("No valid settings provided")
             

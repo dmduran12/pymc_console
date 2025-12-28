@@ -556,6 +556,9 @@ export interface RadioConfigUpdate {
   coding_rate?: number;
   tx_power?: number;
   node_name?: string;
+  // Delay settings
+  tx_delay_factor?: number;        // af/txdelay (0.0-5.0)
+  direct_tx_delay_factor?: number; // direct.txdelay (0.0-5.0)
 }
 
 export interface RadioConfigResult {
