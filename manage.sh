@@ -2334,10 +2334,27 @@ patch_api_endpoints() {
         return 0
     fi
     
-    # Check if already patched
-    if grep -q 'def update_radio_config' "$api_file" 2>/dev/null; then
-        print_info "API endpoints already patched"
+    # Check if already patched with CURRENT version (includes delay settings)
+    if grep -q 'tx_delay_factor' "$api_file" 2>/dev/null; then
+        print_info "API endpoints already patched (current version)"
         return 0
+    fi
+    
+    # If old patch exists (without delay settings), remove it first
+    if grep -q 'def update_radio_config' "$api_file" 2>/dev/null; then
+        print_info "Upgrading API patch to include delay settings..."
+        # Remove old update_radio_config method so we can re-add the new one
+        python3 << REMOVEPATCH
+import re
+with open("$api_file", 'r') as f:
+    content = f.read()
+# Remove old update_radio_config method (from @cherrypy.expose to the next @cherrypy.expose or end of class)
+pattern = r'\n    @cherrypy\.expose\n    @cherrypy\.tools\.json_out\(\)\n    @cherrypy\.tools\.json_in\(\)\n    def update_radio_config\(self\):.*?(?=\n    @cherrypy\.expose|\nclass |\Z)'
+content = re.sub(pattern, '', content, flags=re.DOTALL)
+with open("$api_file", 'w') as f:
+    f.write(content)
+print("Removed old update_radio_config patch")
+REMOVEPATCH
     fi
     
     # Use Python to add the endpoint (note: no quotes around PATCHEOF to allow variable expansion)
